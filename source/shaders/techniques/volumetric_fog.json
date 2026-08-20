@@ -1,0 +1,137 @@
+{
+	"name" : "volumetric_fog",
+	"pipelines" : [
+		{
+			"name" : "inject_data",
+			"render_pass" : "volumetric_fog_pass",
+			"shaders" : [
+				{
+					"stage" : "compute",
+					"shader" : "volumetric_fog.glsl",
+					"includes" : ["platform.h", "scene.h"]
+				}
+			]
+		},
+		{
+			"name" : "inject_data_slang",
+			"render_pass" : "volumetric_fog_pass",
+			"language" : "slang",
+			"shaders" : [
+				{
+					"stage" : "compute",
+					"shader" : "slang/volumetric_fog.slang"
+				}
+			]
+		},
+		{
+			"name" : "light_scattering",
+			"render_pass" : "volumetric_fog_pass",
+			"shaders" : [
+				{
+					"stage" : "compute",
+					"shader" : "volumetric_fog.glsl",
+					"includes" : ["platform.h", "scene.h", "lighting.h"]
+				}
+			]
+		},
+		{
+			"name" : "light_scattering_slang",
+			"render_pass" : "volumetric_fog_pass",
+			"language" : "slang",
+			"shaders" : [
+				{
+					"stage" : "compute",
+					"shader" : "slang/volumetric_fog.slang"
+				}
+			]
+		},
+		{
+			"name" : "light_integration",
+			"render_pass" : "volumetric_fog_pass",
+			"shaders" : [
+				{
+					"stage" : "compute",
+					"shader" : "volumetric_fog.glsl",
+					"includes" : ["platform.h", "scene.h"]
+				}
+			]
+		},
+		{
+			"name" : "light_integration_slang",
+			"render_pass" : "volumetric_fog_pass",
+			"language" : "slang",
+			"shaders" : [
+				{
+					"stage" : "compute",
+					"shader" : "slang/volumetric_fog.slang"
+				}
+			]
+		},
+		{
+			"name" : "spatial_filtering",
+			"render_pass" : "volumetric_fog_pass",
+			"shaders" : [
+				{
+					"stage" : "compute",
+					"shader" : "volumetric_fog.glsl",
+					"includes" : ["platform.h", "scene.h"]
+				}
+			]
+		},
+		{
+			"name" : "spatial_filtering_slang",
+			"render_pass" : "volumetric_fog_pass",
+			"language" : "slang",
+			"shaders" : [
+				{
+					"stage" : "compute",
+					"shader" : "slang/volumetric_fog.slang"
+				}
+			]
+		},
+		{
+			"name" : "temporal_filtering",
+			"render_pass" : "volumetric_fog_pass",
+			"shaders" : [
+				{
+					"stage" : "compute",
+					"shader" : "volumetric_fog.glsl",
+					"includes" : ["platform.h", "scene.h"]
+				}
+			]
+		},
+		{
+			"name" : "temporal_filtering_slang",
+			"render_pass" : "volumetric_fog_pass",
+			"language" : "slang",
+			"shaders" : [
+				{
+					"stage" : "compute",
+					"shader" : "slang/volumetric_fog.slang"
+				}
+			]
+		},
+		{
+			"name" : "volumetric_noise_baking",
+			"render_pass" : "volumetric_fog_pass",
+			"shaders" : [
+				{
+					"stage" : "compute",
+					"shader" : "volumetric_fog.glsl",
+					"includes" : ["platform.h", "scene.h"]
+				}
+			]
+		},
+		{
+            "name" : "volumetric_noise_baking_slang",
+            "render_pass" : "volumetric_fog_pass",
+            "language" : "slang",
+            "shaders" : [
+                {
+                    "stage" : "compute",
+                    "shader" : "slang/volumetric_fog.slang"
+                }
+            ]
+        }
+	]
+}

@@ -1,0 +1,415 @@
+
+#if !defined(__PLATFORM_H__)
+#define __PLATFORM_H__
+
+// Constants /////////////////////////////////////////////////////////////
+static const float PI       = 3.1415926535897932f;
+static const float TWO_PI   = 6.2831853071795864f;
+static const uint INVALID_TEXTURE_INDEX = 65535;
+
+static const uint k_invalid_index = 0xffffffff;
+
+// Mirrors GlobalSamplers enum in gpu_device.hpp
+static const uint linear_clamp_index    = 0;
+static const uint linear_repeat_index   = 1;
+static const uint nearest_clamp_index   = 2;
+static const uint nearest_repeat_index  = 3;
+
+#define GLOBAL_SET space0
+#define MATERIAL_SET space1
+#define SHADER_SET space2
+#define DYNAMIC_SET space3
+
+// Lighting defines //////////////////////////////////////////////////////
+
+// NOTE(marco): needs to be kept in sync with k_light_z_bins
+// TODO(marco): use push constant
+#define NUM_BINS 16.0
+#define BIN_WIDTH ( 1.0 / NUM_BINS )
+#define TILE_SIZE 8
+#define NUM_LIGHTS 256
+#define NUM_WORDS ( ( NUM_LIGHTS + 31 ) / 32 )
+
+// Global bindings ///////////////////////////////////////////////////////
+Texture2D<float4>   global_textures[]   : register(t10, space0);
+Texture3D<float4>   global_textures_3d[]: register(t10, space0);
+TextureCubeArray    global_textures_cubemaps_array[] : register(t10, space0);
+
+RWTexture2D<float4> global_images_2d[]  : register(u11, space0);
+RWTexture3D<float4> global_images_3d[]  : register(u11, space0);
+
+SamplerState        global_samplers[]   : register(s12, space0);
+
+ByteAddressBuffer   global_buffers[]    : register(t13, space0);
+
+
+// Bindless utilities ////////////////////////////////////////////////////
+Texture2D texture_2d(uint index) {
+    return global_textures[NonUniformResourceIndex(index)];
+}
+
+Texture3D texture_3d(uint index) {
+    return global_textures_3d[NonUniformResourceIndex(index)];
+}
+
+SamplerState g_linear_clamp() {
+    return global_samplers[linear_clamp_index];
+}
+
+SamplerState g_linear_repeat() {
+    return global_samplers[linear_repeat_index];
+}
+
+SamplerState g_nearest_clamp() {
+    return global_samplers[nearest_clamp_index];
+}
+
+SamplerState g_nearest_repeat() {
+    return global_samplers[nearest_repeat_index];
+}
+
+ByteAddressBuffer buffer_get(uint index) {
+    return global_buffers[NonUniformResourceIndex(index)];
+}
+
+//[SpecializationConstant] const uint SUBGROUP_SIZE = 32;
+[vk::constant_id(0)] const uint SUBGROUP_SIZE = 32;
+
+// SRGB-Linear ///////////////////////////////////////////////////////////
+
+float3 remove_srgb(float3 x) {
+    return select(x < 0.04045, x / 12.92, pow((x + 0.055) / 1.055, 2.4));
+}
+
+float3 apply_srgb(float3 x) {
+    return select(x < 0.0031308, 12.92 * x, 1.055 * pow(abs(x), 1.0 / 2.4) - 0.055);
+}
+
+float2 remove_srg(float2 x) {
+    return select(x < 0.04045, x / 12.92, pow((x + 0.055) / 1.055, 2.4));
+}
+
+float2 apply_srg(float2 x) {
+    return select(x < 0.0031308, 12.92 * x, 1.055 * pow(abs(x), 1.0 / 2.4) - 0.055);
+}
+
+// Utility functions /////////////////////////////////////////////////////
+
+float luminance(float3 color) {
+    return dot(color, float3(0.2126, 0.7152, 0.0722));
+}
+
+// Manually convert any UV to simulate nearest/point filtering
+float2 uv_nearest( float2 uv, uint2 texture_size ) {
+    float2 pixel = uv * texture_size;
+    pixel = floor(pixel) + .5;
+
+    return pixel / texture_size;
+}
+
+
+uint float4_to_rgba( float4 color ) {
+    return (uint(color.r * 255.f) | (uint(color.g * 255.f) << 8) |
+           (uint(color.b * 255.f) << 16) | ((uint(color.a * 255.f) << 24)));
+}
+
+float4 unpack_color_rgba( uint color ) {
+    return float4( ( color & 0xffu ) / 255.f,
+                 ( ( color >> 8u ) & 0xffu ) / 255.f,
+                 ( ( color >> 16u ) & 0xffu ) / 255.f,
+                 ( ( color >> 24u ) & 0xffu ) / 255.f );
+}
+
+float4 unpack_color_abgr( uint color ) {
+    return float4( ( ( color >> 24u ) & 0xffu ) / 255.f,
+                 ( ( color >> 16u ) & 0xffu ) / 255.f,
+                 ( ( color >> 8u ) & 0xffu ) / 255.f,
+                 ( color & 0xffu ) / 255.f );
+}
+
+
+// Convert raw_depth (0..1) to linear depth (near...far)
+float raw_depth_to_linear_depth( float raw_depth, float near, float far ) {
+    // NOTE(marco): Vulkan depth is [0, 1]
+    return near * far / (far + raw_depth * (near - far));
+}
+
+// Convert linear depth (near...far) to raw_depth (0..1)
+float linear_depth_to_raw_depth( float linear_depth, float near, float far ) {
+    return ( near * far ) / ( linear_depth * ( near - far ) ) - far / ( near - far );
+}
+// Exponential distribution as in https://advances.realtimerendering.com/s2016/Siggraph2016_idTech6.pdf
+// Convert slice index to (near...far) value distributed with exponential function.
+
+float slice_to_exponential_depth( float near, float far, int slice, int num_slices ) {
+    return near * pow( far / near, (float(slice) + 0.5f) / float(num_slices) );
+}
+
+float slice_to_exponential_depth_jittered( float near, float far, float jitter, int slice, int num_slices ) {
+    return near * pow( far / near, (float(slice) + 0.5f + jitter) / float(num_slices) );
+}
+// http://www.aortiz.me/2018/12/21/CG.html
+// Convert linear depth (near...far) to (0...1) value distributed with exponential functions
+// like slice_to_exponential_depth.
+// This function is performing all calculations, a more optimized one precalculates factors on CPU.
+float linear_depth_to_uv( float near, float far, float linear_depth, int num_slices ) {
+    const float one_over_log_f_over_n = 1.0f / log2( far / near );
+    const float scale = num_slices * one_over_log_f_over_n;
+    const float bias = - ( num_slices * log2(near) * one_over_log_f_over_n );
+
+    return max(log2(linear_depth) * scale + bias, 0.0f) / float(num_slices);
+}
+
+// Convert linear depth (near...far) to (0...1) value distributed with exponential functions.
+// Uses CPU cached values of scale and bias.
+float linear_depth_to_uv_optimized( float scale, float bias, float linear_depth, int num_slices ) {
+    return max(log2(linear_depth) * scale + bias, 0.0f) / float(num_slices);
+}
+
+float2 uv_from_compute_dispatch( uint2 global_invocation_id, uint2 size ) {
+    return float2( (global_invocation_id + float2(.5f, .5f) ) / (size * 1.f));
+}
+
+float3 ndc_from_uv_raw_depth( float2 uv, float raw_depth ) {
+    return float3( uv.x * 2 - 1, (1 - uv.y) * 2 - 1, raw_depth );
+}
+
+float3 world_position_from_depth( float2 uv, float raw_depth, float4x4 inverse_view_projection ) {
+
+    float4 H = float4( ndc_from_uv_raw_depth(uv, raw_depth), 1.0 );
+    float4 D = mul( inverse_view_projection, H);
+
+    return D.xyz / D.w;
+}
+
+float3 uv_from_world_position( float4 world_position, float4x4 view_projection ) {
+    float4 position_clipspace = mul(view_projection, world_position);
+    float2 uv = position_clipspace.xy / position_clipspace.w;
+    uv = uv * 0.5 + 0.5;
+    uv.y = 1 - uv.y;
+
+    return float3(uv, position_clipspace.z);
+}
+
+// NOTE(marco): adapted from https://www.scratchapixel.com/lessons/3d-basic-rendering/ray-tracing-generating-camera-rays/generating-camera-rays
+float3 compute_ray_dir( uint3 launchID, uint3 launchSize, float4x4 inverse_view_projection ) {
+    float x = ( 2 * ( float( launchID.x ) + 0.5 ) / float( launchSize.x ) - 1.0 );
+    float y = ( 1.0 - 2 * ( float( launchID.y ) + 0.5 ) / float( launchSize.y ) );
+
+    float4 dir = mul( inverse_view_projection, float4( x, y, 1, 1 ) );
+
+    dir = normalize( dir );
+
+    return dir.xyz;
+}
+
+// From https://gist.github.com/Piratkopia13/46c5dda51ed59cfe69b242deb0cf40ce
+// Utility function to get a vector perpendicular to an input vector
+//    (from "Efficient Construction of Perpendicular Vectors Without Branching")
+float3 compute_perpendicular_vector(float3 u) {
+    float3 a = abs(u);
+    uint xm = ((a.x - a.y)<0 && (a.x - a.z)<0) ? 1 : 0;
+    uint ym = (a.y - a.z)<0 ? (1 ^ xm) : 0;
+    uint zm = 1 ^ (xm | ym);
+    return cross(u, float3(xm, ym, zm));
+}
+
+// Compute tangent and bitangent starting from a normal
+void compute_default_basis(const float3 normal, out float3 tangent, out float3 bitangent) {
+    // ZAP's default coordinate system for compatibility
+    float3        z  = normal;
+    const float yz = -z.y * z.z;
+    bitangent = normalize(((abs(z.z) > 0.99999f) ? float3(-z.x * z.y, 1.0f - z.y * z.y, yz) : float3(-z.x * z.z, yz, 1.0f - z.z * z.z)));
+
+    tangent = cross(bitangent, z);
+}
+
+// Given radius and angle compute a 3D hemisphere ray
+float3 compute_cos_weighted_hemisphere_ray(float2 uv) {
+    float r = sqrt(uv.x);
+    float theta = TWO_PI * uv.y;
+
+    float x = r * cos(theta);
+    float y = r * sin(theta);
+
+    return float3(x, y, sqrt(max(0, 1 - uv.x)));
+}
+
+// Given the forward vector, compute a TBN matrix
+float3x3 compute_tangent_to_world_matrix(float3 tangentZ) {
+    float3 up = abs(tangentZ.z) < 0.999 ? float3(0,0,1) : float3(1,0,0);
+    float3 tangentX = normalize(cross(up, tangentZ));
+    float3 tangentY = cross(tangentZ, tangentX);
+    return transpose(float3x3(tangentX, tangentY, tangentZ));
+}
+
+//
+float3 tangent_to_world(float3 v, float3 tangentZ) {
+    return mul(compute_tangent_to_world_matrix(tangentZ), v);
+}
+
+float3 compute_hemisphere_ray(float2 random_vaules, float3 normal) {
+    float3 tangent_direction = compute_cos_weighted_hemisphere_ray(random_vaules);
+    return tangent_to_world(tangent_direction, normal);
+}
+
+// Encoding/decoding /////////////////////////////////////////////////////
+
+// Normals Encoding/Decoding /////////////////////////////////////////////
+// https://jcgt.org/published/0003/02/01/
+float2 sign_not_zero(float2 v) {
+    return float2((v.x >= 0.0) ? 1.0 : -1.0, (v.y >= 0.0) ? 1.0 : -1.0);
+}
+
+// Taken from https://johnwhite3d.blogspot.com/2017/10/signed-octahedron-normal-encoding.html
+float3 octahedral_decode_old(float2 f) {
+    float3 n = float3( f.x, f.y, 1.0 - abs( f.x ) - abs( f.y ) );
+    n.xy = n.z >= 0.0 ? n.xy : ( 1.0 - abs( n.xy ) ) * sign_not_zero( n.xy );
+
+    return normalize(n);
+}
+
+// This version proposed in a tweet: https://twitter.com/Stubbesaurus/status/937994790553227264?s=20&t=U36PKMj7v2BFeQwDX6gEGQ
+float3 octahedral_decode(float2 f) {
+    float3 n = float3(f.x, f.y, 1.0 - abs(f.x) - abs(f.y));
+    float t = max(-n.z, 0.0); // Also saturate
+    n.x += n.x >= 0.0 ? -t : t;
+    n.y += n.y >= 0.0 ? -t : t;
+
+    return normalize(n);
+}
+
+// float32x3_to_oct
+float2 octahedral_encode(float3 n) {
+    // Project the sphere onto the octahedron, and then onto the xy plane
+    float2 p = n.xy * (1.0f / (abs(n.x) + abs(n.y) + abs(n.z)));
+    // Reflect the folds of the lower hemisphere over the diagonals
+    return (n.z < 0.0f) ? ((1.0 - abs(p.yx)) * sign_not_zero(p)) : p;
+}
+
+// Noise functions ///////////////////////////////////////////////////////
+// Noise helper functions ////////////////////////////////////////////////
+float remap_noise_tri( float v ) {
+    v = v * 2.0 - 1.0;
+    return sign(v) * (1.0 - sqrt(1.0 - abs(v)));
+}
+
+// Takes 2 noises in space [0..1] and remaps them in [-1..1]
+float triangular_noise( float noise0, float noise1 ) {
+    return noise0 + noise1 - 1.0f;
+}
+
+// https://gamedev.net/tutorials/programming/graphics/contact-hardening-soft-shadows-made-fast-r4906/
+float2 vogel_disk_sample(int sampleIndex, int samplesCount, float phi) {
+    const float GoldenAngle = 2.4f;
+
+    float r = sqrt(sampleIndex + 0.5f) / sqrt(samplesCount);
+    float theta = sampleIndex * GoldenAngle + phi;
+
+    float sine, cosine;
+    sincos(theta, sine, cosine);
+
+    return float2(r * cosine, r * sine);
+}
+
+// Given a pixel position returns a random value in [0..1]
+float interleaved_gradient_noise(float2 pixel, uint frame) {
+    pixel += (float(frame) * 5.588238f);
+    return frac(52.9829189f * frac(0.06711056f*float(pixel.x) + 0.00583715f*float(pixel.y)));
+}
+
+// Given a pixel position returns two random values in [0..1]
+float2 interleaved_gradient_noise2(float2 pixel, uint frame) {
+    float noise_x = interleaved_gradient_noise( pixel, frame );
+    float noise_y = interleaved_gradient_noise( pixel, frame );
+
+    return float2( noise_x, noise_y );
+}
+
+// https://gamedev.net/tutorials/programming/graphics/contact-hardening-soft-shadows-made-fast-r4906/
+float interleaved_gradient_noise2_2(float2 pixel, uint frame) {
+
+    pixel.x += (float(frame) * 5.588238f);
+    pixel.y += (float(frame) * 5.588238f);
+
+    float3 magic = float3(0.06711056f, 0.00583715f, 52.9829189f);
+    return frac(magic.z * frac(dot(pixel, magic.xy)));
+}
+
+// Generates a seed for a random number generator from 2 inputs plus a backoff
+uint rand_init(uint val0, uint val1, uint backoff = 16) {
+    uint v0 = val0, v1 = val1, s0 = 0;
+
+    [unroll]
+    for (uint n = 0; n < backoff; n++)
+    {
+        s0 += 0x9e3779b9;
+        v0 += ((v1 << 4) + 0xa341316c) ^ (v1 + s0) ^ ((v1 >> 5) + 0xc8013ea4);
+        v1 += ((v0 << 4) + 0xad90777d) ^ (v0 + s0) ^ ((v0 >> 5) + 0x7e95761e);
+    }
+    return v0;
+}
+
+// Takes our seed, updates it, and returns a pseudorandom float in [0..1]
+float rand_next(inout uint s) {
+    s = (1664525u * s + 1013904223u);
+    return float(s & 0x00FFFFFF) / float(0x01000000);
+}
+
+// Blue noise functions
+// Texture is 128x128
+//
+// This function uses a single texture and golden ratio to animate the noise.
+// The texture MUST be read with nearest/point filtering.
+// Inputs are pixel coordinates (not UV), frame and texture index.
+// Output are two [0..1] values
+float2 animated_blue_noise_golden_ratio(uint2 pixel, uint frame, uint blue_noise_texture_index) {
+    // Blue noise texture size is 128x128
+    pixel = (pixel % 128);
+    // Read blue noise from texture
+    float2 blue_noise = texture_2d(blue_noise_texture_index)[pixel].rg;
+    const float k_golden_ratio_conjugate = 0.61803398875;
+
+    frame = (frame % 64);
+    float blue_noise0 = frac((blue_noise.r) + float(frame) * k_golden_ratio_conjugate);
+    float blue_noise1 = frac((blue_noise.g) + float(frame) * k_golden_ratio_conjugate);
+
+    return float2(blue_noise0, blue_noise1);
+}
+
+// This function uses multiple textures to animated the noise.
+// The texture MUST be read with nearest/point filtering.
+// Inputs are pixel coordinates (not UV), frame and texture index.
+// Output are two [0..1] values
+float2 animated_blue_noise(uint2 pixel, uint frame, uint blue_noise_texture_index) {
+    uint2 scramble = uint2(frame * 17u, frame * 29u);
+    uint2 p = (pixel + scramble) & 127u;
+
+    // Read texture without filtering (point sampling required)
+    float2 bn = texture_2d(blue_noise_texture_index)[p].rg;
+
+    // Two distinct steps to avoid correlating channels over time
+    const float k0 = 0.61803398875;
+    const float k1 = 0.75487766625;
+
+    float f = (float)frame;
+
+    return float2(frac(bn.r + f * k0),
+                  frac(bn.g + f * k1));
+}
+
+// Computes a low discrepancy spherically distributed direction on the unit sphere,
+// for the given index in a set of samples. Each direction is unique in
+// the set, but the set of directions is always the same.
+float3 compute_spherical_fibonacci_direction(float index, float numSamples)
+{
+    const float b = (sqrt(5.f) * 0.5f + 0.5f) - 1.f;
+    float phi = 2.0f * 3.14159265f * frac(index * b);
+    float cosTheta = 1.f - (2.f * index + 1.f) * (1.f / numSamples);
+    float sinTheta = sqrt(saturate(1.f - (cosTheta * cosTheta)));
+
+    return float3((cos(phi) * sinTheta), (sin(phi) * sinTheta), cosTheta);
+}
+
+
+#endif // __PLATFORM_H__

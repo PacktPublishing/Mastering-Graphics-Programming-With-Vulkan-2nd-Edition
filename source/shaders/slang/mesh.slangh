@@ -1,0 +1,128 @@
+#pragma once
+
+
+static const uint DrawFlags_AlphaMask    = 1 << 0;
+static const uint DrawFlags_DoubleSided  = 1 << 1;
+static const uint DrawFlags_Transparent  = 1 << 2;
+static const uint DrawFlags_Phong        = 1 << 3;
+static const uint DrawFlags_HasNormals   = 1 << 4;
+static const uint DrawFlags_TexCoords    = 1 << 5;
+static const uint DrawFlags_HasTangents  = 1 << 6;
+static const uint DrawFlags_HasJoints    = 1 << 7;
+static const uint DrawFlags_HasWeights   = 1 << 8;
+static const uint DrawFlags_AlphaDither  = 1 << 9;
+
+// layout(buffer_reference, std430, buffer_reference_align = 4) buffer float_array_type {
+//     float v;
+// };
+
+// layout(buffer_reference, std430, buffer_reference_align = 4) buffer vec2_array_type {
+//     vec2 v;
+// };
+
+// layout(buffer_reference, std430, buffer_reference_align = 2) buffer int_array_type {
+//     uint16_t v;
+// };
+
+struct MeshDraw {
+
+    // x = diffuse index, y = roughness index, z = normal index, w = occlusion index.
+    // Occlusion and roughness are encoded in the same texture
+    uint4       textures;
+    float4      emissive;
+    float4      base_color_factor;
+    float4      metallic_roughness_occlusion_factor;
+
+    uint        flags;
+    float       alpha_cutoff;
+    uint        vertexOffset; // == meshes[meshIndex].vertexOffset, helps data locality in mesh shader
+    uint        meshIndex;
+
+    uint        meshlet_offset;
+    uint        meshlet_count;
+    uint        meshlet_index_count;
+    uint        alpha_texture_index;
+
+    uint64_t    position_buffer;
+    uint64_t    uv_buffer;
+    uint64_t    index_buffer;
+    uint64_t    normals_buffer;
+
+    uint        position_buffer_index;
+    uint        normal_buffer_index;
+    uint        uv0_buffer_index;
+    uint        index_buffer_index;
+
+    uint        position_buffer_offset;
+    uint        normal_buffer_offset;
+    uint        uv0_buffer_offset;
+    uint        index_buffer_offset;
+};
+
+struct MeshInstanceDraw {
+    float4x4    model;
+    float4x4    model_inverse;
+
+    uint        mesh_draw_index;
+    uint        pad000;
+    uint        pad001;
+    uint        pad002;
+};
+
+struct MeshDrawCommand
+{
+    uint        drawId;
+    uint        taskOffset;
+    // VkDrawIndexedIndirectCommand
+    uint        indexCount;
+    uint        instanceCount;
+
+    uint        firstIndex;
+    uint        vertexOffset;
+    uint        firstInstance;
+    // VkDrawMeshTasksIndirectCommandEXT
+    uint        groupCountX;
+
+    uint        groupCountY;
+    uint        groupCountZ;
+    uint        pad[2];
+};
+
+
+// Taken from https://github.com/microsoft/DirectX-Graphics-Samples/blob/master/Samples/Desktop/D3D12Raytracing/src/D3D12RaytracingRealTimeDenoisedAmbientOcclusion/RTAO/Shaders/RaytracingShaderHelper.hlsli
+// Load three 16 bit indices from a byte addressed buffer.
+uint3 Load3x16BitIndices(ByteAddressBuffer Indices, uint offsetBytes)
+{
+    uint3 indices;
+
+    // ByteAdressBuffer loads must be aligned at a 4 byte boundary.
+    // Since we need to read three 16 bit indices: { 0, 1, 2 }
+    // aligned at a 4 byte boundary as: { 0 1 } { 2 0 } { 1 2 } { 0 1 } ...
+    // we will load 8 bytes (~ 4 indices { a b | c d }) to handle two possible index triplet layouts,
+    // based on first index's offsetBytes being aligned at the 4 byte boundary or not:
+    //  Aligned:     { 0 1 | 2 - }
+    //  Not aligned: { - 0 | 1 2 }
+    const uint dwordAlignedOffset = offsetBytes & ~3;
+    const uint2 four16BitIndices = Indices.Load2(dwordAlignedOffset);
+
+    // Aligned: { 0 1 | 2 - } => retrieve first three 16bit indices
+    if (dwordAlignedOffset == offsetBytes)
+    {
+        indices.x = four16BitIndices.x & 0xffff;
+        indices.y = (four16BitIndices.x >> 16) & 0xffff;
+        indices.z = four16BitIndices.y & 0xffff;
+    }
+    else // Not aligned: { - 0 | 1 2 } => retrieve last three 16bit indices
+    {
+        indices.x = (four16BitIndices.x >> 16) & 0xffff;
+        indices.y = four16BitIndices.y & 0xffff;
+        indices.z = (four16BitIndices.y >> 16) & 0xffff;
+    }
+
+    return indices;
+}
+
+
+StructuredBuffer<MeshDraw>          mesh_draws          : register(t2, space1);
+StructuredBuffer<MeshInstanceDraw>  mesh_instance_draws : register(t10, space1);
+StructuredBuffer<float4>            mesh_bounds         : register(t12, space1);

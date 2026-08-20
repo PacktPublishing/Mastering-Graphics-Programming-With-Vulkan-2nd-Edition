@@ -1,0 +1,66 @@
+<?xml version="1.0" encoding="utf-8"?>
+<AutoVisualizer xmlns="http://schemas.microsoft.com/vstudio/debugger/natvis/2010">
+
+  <!-- raptor::Array<T> -->
+  <Type Name="raptor::Array&lt;*&gt;">
+    <DisplayString>{{ size={size} capacity={capacity} }}</DisplayString>
+    <Expand>
+      <Item Name="[size]">size</Item>
+      <Item Name="[capacity]">capacity</Item>
+      <Item Name="[allocator]">allocator</Item>
+      <ArrayItems>
+        <Size>size</Size>
+        <ValuePointer>data</ValuePointer>
+      </ArrayItems>
+    </Expand>
+  </Type>
+
+  <!-- raptor::Span<T> -->
+  <Type Name="raptor::Span&lt;*&gt;">
+    <DisplayString>{{ size={size} }}</DisplayString>
+    <Expand>
+      <Item Name="[size]">size</Item>
+      <ArrayItems>
+        <Size>size</Size>
+        <ValuePointer>data</ValuePointer>
+      </ArrayItems>
+    </Expand>
+  </Type>
+
+  <!-- raptor::StringView -->
+  <Type Name="raptor::StringView">
+    <DisplayString>{data,[size]s}</DisplayString>
+    <StringView>data,[size]</StringView>
+    <Expand>
+      <Item Name="[size]">size</Item>
+      <Item Name="[data]">data</Item>
+      <ArrayItems>
+        <Size>size</Size>
+        <ValuePointer>data</ValuePointer>
+      </ArrayItems>
+    </Expand>
+  </Type>
+
+  <!-- raptor::FlatHashMap<K,V> -->
+  <Type Name="raptor::FlatHashMap&lt;*,*&gt;">
+    <DisplayString>{{ size={size} capacity={capacity} }}</DisplayString>
+    <Expand>
+      <Item Name="[size]">size</Item>
+      <Item Name="[capacity]">capacity</Item>
+      <Item Name="[growth_left]">growth_left</Item>
+      <Item Name="[allocator]">allocator</Item>
+      <CustomListItems>
+        <Variable Name="i" InitialValue="0" />
+        <Size>size</Size>
+        <Loop>
+          <Break Condition="i &gt;= capacity" />
+          <If Condition="control_bytes[i] &gt;= 0">
+            <Item Name="[{slots_[i].key}]">slots_[i].value</Item>
+          </If>
+          <Exec>i++</Exec>
+        </Loop>
+      </CustomListItems>
+    </Expand>
+  </Type>
+
+</AutoVisualizer>

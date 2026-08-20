@@ -1,0 +1,2 @@
+raptor_add_chapter(Chapter01 main.cpp)
+raptor_link_chapter_deps(Chapter01)

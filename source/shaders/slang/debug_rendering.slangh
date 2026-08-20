@@ -1,0 +1,36 @@
+#pragma once
+
+
+struct DebugLineVertex {
+    vec3            position;
+    uint            color;
+};
+
+struct DrawCommand {
+    uint            vertex_count;
+    uint            instance_count;
+    uint            first_vertex;
+    uint            first_instance;
+};
+
+layout(set = MATERIAL_SET, binding = 50) buffer DebugLines
+{
+    DebugLineVertex debug_line_vertices[];
+};
+
+layout(set = MATERIAL_SET, binding = 51) buffer DebugLinesCount
+{
+    uint            debug_line_3d_count;
+    uint            debug_line_2d_count;
+    uint            frame_index;
+    uint            pad002;
+};
+
+layout(set = MATERIAL_SET, binding = 52) buffer DebugLineCommands
+{
+    DrawCommand     debug_draw_commands;
+    DrawCommand     debug_draw_commands_2d;
+};
+
+const uint line_2d_offset = 1000;
+const uint k_max_lines = 640000;

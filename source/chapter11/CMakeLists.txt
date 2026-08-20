@@ -1,0 +1,33 @@
+raptor_add_chapter(
+	Chapter11
+	../raptor/graphics/render_passes/meshlet_animation_pass.hpp
+	../raptor/graphics/render_passes/meshlet_animation_pass.cpp
+	../raptor/graphics/render_passes/bloom_pass.hpp
+	../raptor/graphics/render_passes/bloom_pass.cpp
+	../raptor/graphics/render_passes/culling_pass.hpp
+	../raptor/graphics/render_passes/culling_pass.cpp
+	../raptor/graphics/render_passes/debug_pass.hpp
+	../raptor/graphics/render_passes/debug_pass.cpp
+	../raptor/graphics/render_passes/depth_pyramid_pass.hpp
+	../raptor/graphics/render_passes/depth_pyramid_pass.cpp
+	../raptor/graphics/render_passes/gbuffer_pass.hpp
+	../raptor/graphics/render_passes/gbuffer_pass.cpp
+	../raptor/graphics/render_passes/hdr_color_pass.hpp
+	../raptor/graphics/render_passes/hdr_color_pass.cpp
+	../raptor/graphics/render_passes/lighting_pass.hpp
+	../raptor/graphics/render_passes/lighting_pass.cpp
+	../raptor/graphics/render_passes/motion_vector_pass.hpp
+	../raptor/graphics/render_passes/motion_vector_pass.cpp
+	../raptor/graphics/render_passes/pointlight_shadow_pass.hpp
+	../raptor/graphics/render_passes/pointlight_shadow_pass.cpp
+	../raptor/graphics/render_passes/raytracing_test_pass.hpp
+	../raptor/graphics/render_passes/raytracing_test_pass.cpp
+	../raptor/graphics/render_passes/temporal_anti_aliasing_pass.hpp
+	../raptor/graphics/render_passes/temporal_anti_aliasing_pass.cpp
+	../raptor/graphics/render_passes/transparent_pass.hpp
+	../raptor/graphics/render_passes/transparent_pass.cpp
+	../raptor/graphics/render_passes/volumetric_fog_pass.hpp
+	../raptor/graphics/render_passes/volumetric_fog_pass.cpp
+	main.cpp
+)
+raptor_link_chapter_deps(Chapter11)

@@ -1,0 +1,109 @@
+#pragma once
+
+
+struct GpuLight {
+    float3          world_position;
+    float           radius;
+
+    float3          color;
+    float           intensity;
+
+    float           shadow_map_resolution;
+    float           rcp_n_minus_f; // Calculation of 1 / (n - f) used to retrieve cubemap shadows depth value.
+    float           padding_l_001;
+    float           padding_l_002;
+};
+
+struct GpuLightingConstants {
+
+    uint        cubemap_shadows_index;
+    uint        debug_show_light_tiles;
+    uint        debug_show_tiles;
+    uint        debug_show_bins;
+
+    uint        disable_shadows;
+    uint        debug_modes;
+    uint        debug_texture_index;
+    uint        shadow_visibility_texture_index;
+
+    uint        volumetric_fog_texture_index;
+    int         volumetric_fog_num_slices;
+    float       volumetric_fog_near;
+    float       volumetric_fog_far;
+
+    float       volumetric_fog_distribution_scale;
+    float       volumetric_fog_distribution_bias;
+    float       gi_intensity;
+    uint        indirect_lighting_texture_index;
+
+    uint        bilateral_weights_texture_index;
+    uint        reflections_texture_index;
+    uint        raytraced_shadow_light_color_type;
+    float       raytraced_shadow_light_radius;
+
+    float3      raytraced_shadow_light_position;
+    float       raytraced_shadow_light_intensity;
+
+    uint        brdf_lut_texture_index;
+    uint        pad001_lc;
+    uint        pad002_lc;
+    uint        pad003_lc;
+};
+
+StructuredBuffer<uint> z_bins           : register(t20, space1);
+StructuredBuffer<GpuLight> lights       : register(t21, space1);
+StructuredBuffer<uint> tiles            : register(t22, space1);
+
+ConstantBuffer<GpuLightingConstants> light_consts : register(b23, space1);
+
+StructuredBuffer<uint> light_indices    : register(t25, space1);
+
+//#if RAYTRACED_SHADOWS
+//layout( set = MATERIAL_SET, binding = 26 ) uniform accelerationStructureEXT as;
+//#endif
+//RaytracingAccelerationStructure as    : register(t26, space1);
+
+uint get_tile_address( uint2 pixel_position ) {
+
+    uint2 tile = pixel_position / uint( TILE_SIZE );
+
+    // Ceil to fix resolutions that are not multiple of tile size
+    uint tile_x_count = (uint(frame.resolution.x) + uint(TILE_SIZE) - 1u) / uint(TILE_SIZE);
+    uint stride = uint(NUM_WORDS) * tile_x_count;
+    uint address = tile.y * stride + tile.x;
+
+    return address;
+}
+
+float attenuation_square_falloff(float3 position_to_light, float light_inverse_radius) {
+    const float distance_square = dot(position_to_light, position_to_light);
+    const float factor = distance_square * light_inverse_radius * light_inverse_radius;
+    const float smoothFactor = max(1.0 - factor * factor, 0.0);
+    return (smoothFactor * smoothFactor) / max(distance_square, 1e-4);
+}
+
+float vector_to_depth_value( float3 direction, float radius, float rcp_n_minus_f ) {
+    const float3 absolute_vec = abs(direction);
+    const float local_z_component = max(absolute_vec.x, max(absolute_vec.y, absolute_vec.z));
+
+    const float f = radius;
+    const float n = 0.01f;
+    // Original value, left for reference.
+    //const float normalized_z_component = -(f / (n - f) - (n * f) / (n - f) / local_z_component);
+    const float normalized_z_component = ( n * f * rcp_n_minus_f ) / local_z_component - f * rcp_n_minus_f;
+    return normalized_z_component;
+}
+
+// https://www.gamedev.net/articles/programming/graphics/contact-hardening-soft-shadows-made-fast-r4906/
+float2 vogel_disk_offset(uint sample_index, uint samples_count, float phi) {
+    const float GoldenAngle = 2.4;
+
+    float r = sqrt(float(sample_index) + 0.5f) / sqrt(float(samples_count));
+    float theta = (sample_index * GoldenAngle) + phi;
+
+    float sine, cosine;
+    sine = sin(theta);
+    cosine = cos(theta);
+
+    return float2(r * cosine, r * sine);
+}
