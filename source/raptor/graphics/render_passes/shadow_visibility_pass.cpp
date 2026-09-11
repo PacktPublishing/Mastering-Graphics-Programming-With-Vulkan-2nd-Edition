@@ -392,21 +392,21 @@ void ShadowVisibilityPass::on_resize( FrameGraphResourceContext& context, u32 ne
     const u32 adjusted_height = ceilu32( new_height * texture_scale );
 
     for ( u32 i = 0; i < 2; ++i ) {
-        gpu.resize_image_3d( visibility_cache_image[ i ], adjusted_width, adjusted_height, last_active_lights_count );
+        gpu.resize_image_3d( visibility_cache_image[ i ], adjusted_width, adjusted_height, 1 );
         gpu.recreate_image_view( visibility_cache_image_view[ i ] );
-        gpu.resize_image_3d( variation_cache_image[ i ], adjusted_width, adjusted_height, last_active_lights_count );
+        gpu.resize_image_3d( variation_cache_image[ i ], adjusted_width, adjusted_height, 1 );
         gpu.recreate_image_view( variation_cache_image_view[ i ] );
-        gpu.resize_image_3d( samples_count_cache_image[ i ], adjusted_width, adjusted_height, last_active_lights_count );
+        gpu.resize_image_3d( samples_count_cache_image[ i ], adjusted_width, adjusted_height, 1 );
         gpu.recreate_image_view( samples_count_cache_image_view[ i ] );
 
         gpu.link_image_sampler( samples_count_cache_image[ i ], gpu.global_samplers[ GlobalSamplers::NearestClamp ] );
     }
 
-    gpu.resize_image_3d( variation_image, adjusted_width, adjusted_height, last_active_lights_count );
+    gpu.resize_image_3d( variation_image, adjusted_width, adjusted_height, 1 );
     gpu.recreate_image_view( variation_image_view );
-    gpu.resize_image_3d( filtered_visibility_image, adjusted_width, adjusted_height, last_active_lights_count );
+    gpu.resize_image_3d( filtered_visibility_image, adjusted_width, adjusted_height, 1 );
     gpu.recreate_image_view( filtered_visibility_image_view );
-    gpu.resize_image_3d( filtered_variation_image, adjusted_width, adjusted_height, last_active_lights_count );
+    gpu.resize_image_3d( filtered_variation_image, adjusted_width, adjusted_height, 1 );
     gpu.recreate_image_view( filtered_variation_image_view );
 
     gpu.add_image_view_to_bindless( variation_image_view );
@@ -627,6 +627,14 @@ void ShadowVisibilityPass::destroy_gpu_resources( FrameGraphResourceContext& con
     gpu.destroy_image_view( variation_image_view );
     gpu.destroy_image_view( filtered_visibility_image_view );
     gpu.destroy_image_view( filtered_variation_image_view );
+}
+
+void ShadowVisibilityPass::update_dependent_resources( FrameGraphResourceContext& context ) {
+
+    if ( !enabled )
+        return;
+
+    create_descriptors( context.renderer, context.render_blackboard );
 }
 
 void ShadowVisibilityPass::create_descriptors( Renderer* renderer, RenderBlackboard* render_blackboard ) {

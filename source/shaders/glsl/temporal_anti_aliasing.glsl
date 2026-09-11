@@ -433,7 +433,12 @@ vec3 taa_raptor( ivec2 swapchain_pos ) {
     float adaptive_sharpness = taa.current_sample_sharpness;
     adaptive_sharpness = mix( 0.4f * taa.current_sample_sharpness, taa.current_sample_sharpness, motion_sharpness * neighborhood_sharpness );
 
-    vec3 current_sample = mix( current_filtered_sample, current_center_sample, adaptive_sharpness );
+    //vec3 current_sample = mix( current_filtered_sample, current_center_sample, adaptive_sharpness );
+    vec3 current_sample = current_center_sample;
+
+    if (taa.current_color_filter != CurrentColorFilterNone) {
+        current_sample = mix( current_filtered_sample, current_center_sample, adaptive_sharpness );
+    }
 
     // Guard for outside sampling
     if (any(lessThan(reprojected_uv, vec2(0.0f))) || any(greaterThan(reprojected_uv, vec2(1.0f)))) {
@@ -457,18 +462,25 @@ vec3 taa_raptor( ivec2 swapchain_pos ) {
                       max( max( current_luma, history_luma ), 0.05f );
 
     // Soften similarity with smoothstep
-    float luma_similarity = 1.0f - smoothstep( 0.05f, 0.5f, luma_diff );
+    float luma_similarity = 1.0f - smoothstep( 0.0f, 0.5f, luma_diff );
     
     // 2) Disocclusion validity
-    float history_validity = disocclusion_factor * luma_similarity;
+    float history_validity = disocclusion_factor;
 
     // 3) Motion validity
-    float motion_validity = 1.0f - smoothstep( 0.002f, 0.05f, motion_len );
+    float motion_validity = 1.0f - smoothstep( 0.00f, 0.05f, motion_len );
 
     // 4) Neighborhood validity
-    float neighborhood_validity = 1.0f - smoothstep( 0.05f, 0.6f, neighborhood_max_extent );
+    float neighborhood_validity = 1.0f - smoothstep( 0.0f, 0.6f, neighborhood_max_extent );
 
-    history_validity *= motion_validity * neighborhood_validity;
+    //history_validity *= motion_validity * neighborhood_validity;
+    float shading_confidence = clamp( luma_similarity * motion_validity * neighborhood_validity, 0.0f, 1.0f );
+    // Shading changes reduce confidence moderately: they can also
+    // originate from projection jitter or stochastic lighting.
+    float shading_history_factor = mix(0.9f, 1.0f, shading_confidence);
+    // Geometric rejection can still discard history completely.
+    history_validity *= shading_history_factor;
+    // Final safe clamp
     history_validity = clamp( history_validity, 0.0f, 1.0f );
 
     // History constraint
@@ -521,7 +533,7 @@ vec3 taa_raptor( ivec2 swapchain_pos ) {
         vec3 temporal_extent = abs( neighborhood_max - neighborhood_min );
         vec3 temporal_weight = clamp( temporal_extent / max( current_sample, vec3( 0.001f ) ), vec3( 0.0f ), vec3( 1.0f ) );
 
-        history_weight = clamp( mix( vec3( 0.25f ), vec3( 0.85f ), temporal_weight ), vec3( 0.0f ), vec3( 1.0f ) );
+        history_weight = clamp( mix( vec3( 0.85f ), vec3( 0.95f ), temporal_weight ), vec3( 0.0f ), vec3( 1.0f ) );
         current_weight = vec3( 1.0f ) - history_weight;
     }
 
@@ -540,11 +552,17 @@ vec3 taa_raptor( ivec2 swapchain_pos ) {
             float unbiased_weight = 1.0 - unbiased_diff;
             float unbiased_weight_sqr = unbiased_weight * unbiased_weight;
             
-            float k_feedback = mix(0.05f, 0.95f, unbiased_weight_sqr);
+            float k_feedback = mix(0.90f, 0.95f, unbiased_weight_sqr);
 
-            // If current and history are similar, trust history more.
-            history_weight = vec3( k_feedback );
-            current_weight = vec3( 1.0f - k_feedback );
+            // Respect both adaptive limits.
+            if (use_temporal_filtering()) {
+                history_weight = min(history_weight, vec3(k_feedback));
+            }
+            else {
+                history_weight = vec3(k_feedback);
+            }
+
+            current_weight = vec3(1.0f) - history_weight;
         }
 
         if ( use_inverse_luminance_filtering() ) {
@@ -558,6 +576,8 @@ vec3 taa_raptor( ivec2 swapchain_pos ) {
 
     vec3 weight_sum = max( current_weight + history_weight, vec3( 0.00001f ) );
     vec3 result = ( current_sample * current_weight + history_color * history_weight ) / weight_sum;
+
+    //result = mix(current_sample, history_color, 0.9f);
     
     return result;
 }

@@ -20,6 +20,8 @@ namespace raptor {
         void                    create_gpu_resources( FrameGraphResourceContext& context ) override;
         void                    upload_gpu_data( FrameGraphResourceContext& context ) override;
         void                    destroy_gpu_resources( FrameGraphResourceContext& context ) override;
+
+        void                    update_dependent_resources( FrameGraphResourceContext& context ) override;
         void                    create_descriptors( Renderer* renderer, RenderBlackboard* render_blackboard );
 
         void                    recreate_textures( GpuDevice& gpu, u32 lights_count, u32 width, u32 height );

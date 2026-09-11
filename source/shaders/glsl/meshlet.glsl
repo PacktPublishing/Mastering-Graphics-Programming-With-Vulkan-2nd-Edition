@@ -115,25 +115,29 @@ void main()
 
     accept = accept && frustum_visible && occlusion_visible;
 
-    uvec4 ballot = subgroupBallot(accept);
+    uvec4 visibility_mask = subgroupBallot(accept);
 
-    uint index = subgroupBallotExclusiveBitCount(ballot);
+    uint index = subgroupBallotExclusiveBitCount(visibility_mask);
 
-    if (accept)
+    if (accept) {
         payload.meshlet_indices[index] = global_meshlet_index;
+    }
 
-    if (task_index == 0)
+    if (task_index == 0) {
         payload.draw_index = draw_index;
+    }
 
-    uint count = subgroupBallotBitCount(ballot);
+    uint visible_count = subgroupBallotBitCount(visibility_mask);
 
-    if (subgroupElect())
-        EmitMeshTasksEXT( count, 1, 1 );
+    if (subgroupElect()) {
+        EmitMeshTasksEXT( visible_count, 1, 1 );
+    }
 #else
     payload.meshlet_indices[task_index] = global_meshlet_index;
 
-    if (subgroupElect())
+    if (subgroupElect()) {
         EmitMeshTasksEXT( 32, 1, 1 );
+    }
 #endif // CULL
 
 }

@@ -135,6 +135,8 @@ void main() {
              color = texture(global_textures[nonuniformEXT(texture_id)], (vTexCoord.xy + post.mouse_uv) / post.zoom_scale );
     }
 
+    color.rgb = encode_srgb(color.rgb);
+
     out_color = color;
 }
 

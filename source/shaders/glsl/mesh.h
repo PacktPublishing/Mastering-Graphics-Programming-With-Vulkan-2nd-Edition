@@ -70,12 +70,13 @@ struct MeshDraw {
 
 struct MeshInstanceDraw {
     mat4        model;
-   // mat4        model_inverse;
 
     uint        mesh_draw_index;
     uint        pad000;
     uint        pad001;
     uint        pad002;
+
+    mat4        model_inverse;
 };
 
 struct MeshDrawCommand

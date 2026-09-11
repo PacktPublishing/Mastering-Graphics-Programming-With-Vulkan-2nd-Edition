@@ -1,0 +1,153 @@
+#ifndef NEURAL_MATERIAL_LAYERS_SLANG
+#define NEURAL_MATERIAL_LAYERS_SLANG
+
+#include "neural_material_structs.h"
+#include "neural_material_common.slangh"
+
+[Differentiable]
+void encoder_eval( NeuralEncoder encoder, const float input_values[11], out float latent_values[8] ) {
+#if defined(RAPTOR_USE_COOPVEC)
+    let input_vec = NeuralMaterialCoopVec<11>.from_array(input_values);
+    let hidden0 = neural_material_relu(encoder.l0.eval_coop<11, 32>(input_vec));
+    let hidden1 = neural_material_relu(encoder.l1.eval_coop<32, 32>(hidden0));
+    let latent = neural_material_relu(encoder.l2.eval_coop<32, 8>(hidden1));
+    latent_values = latent.to_array();
+#else
+    float hidden0[32];
+    float hidden1[32];
+
+    for (uint i = 0; i < 32; ++i) {
+        hidden0[i] = relu(encoder.l0.eval(i, input_values, 11));
+    }
+
+    for (uint i = 0; i < 32; ++i) {
+        hidden1[i] = relu(encoder.l1.eval(i, hidden0, 32));
+    }
+
+    for (uint i = 0; i < 8; ++i) {
+        latent_values[i] = relu(encoder.l2.eval(i, hidden1, 32));
+    }
+#endif
+}
+
+[Differentiable]
+void frame_decoder_eval( NeuralFrameDecoder decoder, const float latent_values[8],
+                         out float frame_values[12] ) {
+#if defined(RAPTOR_USE_COOPVEC)
+    let latent_vec = NeuralMaterialCoopVec<8>.from_array(latent_values);
+    let frame_vec = decoder.l0.eval_coop<8, 12>(latent_vec);
+    frame_values = frame_vec.to_array();
+#else
+
+    for (uint i = 0; i < 12; ++i) {
+        frame_values[i] = decoder.l0.eval(i, latent_values, 8);
+    }
+#endif
+}
+
+[Differentiable]
+void brdf_decoder_eval( NeuralBrdfDecoder decoder, const float input_values[20],
+                        out float output_values[3] ) {
+#if defined(RAPTOR_USE_COOPVEC)
+    let input_vec = NeuralMaterialCoopVec<20>.from_array(input_values);
+    let hidden0 = neural_material_relu(decoder.l0.eval_coop<20, 32>(input_vec));
+    let hidden1 = neural_material_relu(decoder.l1.eval_coop<32, 32>(hidden0));
+    let output_vec = neural_material_exp_offset(decoder.l2.eval_coop<32, 3>(hidden1), -3.0f);
+    output_values = output_vec.to_array();
+#else
+    float hidden0[32];
+    float hidden1[32];
+
+    for (uint i = 0; i < 32; ++i) {
+        hidden0[i] = relu(decoder.l0.eval(i, input_values, 20));
+    }
+
+    for (uint i = 0; i < 32; ++i) {
+        hidden1[i] = relu(decoder.l1.eval(i, hidden0, 32));
+    }
+
+    for (uint i = 0; i < 3; ++i) {
+        output_values[i] = exp( decoder.l2.eval(i, hidden1, 32) - 3.0 );
+    }
+#endif
+}
+
+[Differentiable]
+void sampler_decoder_eval( NeuralImportanceSamplingDecoder decoder,
+                           const float input_values[11], out float output_values[9]) {
+#if defined(RAPTOR_USE_COOPVEC)
+    let input_vec = NeuralMaterialCoopVec<11>.from_array(input_values);
+    let hidden0 = neural_material_relu(decoder.l0.eval_coop<11, 32>(input_vec));
+    let hidden1 = neural_material_relu(decoder.l1.eval_coop<32, 32>(hidden0));
+    let hidden2 = neural_material_relu(decoder.l2.eval_coop<32, 32>(hidden1));
+    let output_vec = decoder.l3.eval_coop<32, 9>(hidden2);
+    output_values = output_vec.to_array();
+#else
+    float hidden0[32];
+    float hidden1[32];
+    float hidden2[32];
+
+    for (uint i = 0; i < 32; ++i) {
+        hidden0[i] = relu(decoder.l0.eval(i, input_values, 11));
+    }
+
+    for (uint i = 0; i < 32; ++i) {
+        hidden1[i] = relu(decoder.l1.eval(i, hidden0, 32));
+    }
+
+    for (uint i = 0; i < 32; ++i) {
+        hidden2[i] = relu(decoder.l2.eval(i, hidden1, 32));
+    }
+
+    for (uint i = 0; i < 9; ++i) {
+        output_values[i] = decoder.l3.eval(i, hidden2, 32);
+    }
+#endif
+}
+
+[Differentiable]
+void latent_eval( LatentTexturePyramid pyramid,
+                  no_diff float2 uv, no_diff uint lod,
+                  out float latent_values[8]) {
+
+    latent_values = pyramid.sample(uv, lod);
+}
+
+[Differentiable]
+float3 eval_neural_brdf( const float latent_values[8],
+                         no_diff float3 wi , no_diff float3 wo,
+                         NeuralFrameDecoder frame_decoder, NeuralBrdfDecoder brdf_decoder) {
+    float frame_values[12];
+    float decoder_input[20];
+    float decoder_output[3];
+
+    frame_decoder_eval(frame_decoder, latent_values, frame_values);
+
+    [unroll]
+    for (uint i = 0; i < 8; ++i) {
+        decoder_input[12 + i] = latent_values[i];
+    }
+
+    [unroll]
+    for (int i = 0; i < 12; i += 6)
+    {
+        float3 N = normalize(float3(frame_values[i + 0], frame_values[i + 1], frame_values[i + 2] + 1.0));
+        float3 T = normalize(float3(frame_values[i + 3] + 1.0, frame_values[i + 4], frame_values[i + 5]));
+        float3 B = cross(N, T); // Note (T ,B ,N) is not orthogonalized
+        float3 wi_pred = float3(dot(wi, T), dot(wi, B), dot(wi, N));
+        float3 wo_pred = float3(dot(wo, T), dot(wo, B), dot(wo, N));
+        // Copy wi_pred , wo_pred into input [i], input [i +1] , ...
+        decoder_input[i + 0] = wi_pred.x;
+        decoder_input[i + 1] = wi_pred.y;
+        decoder_input[i + 2] = wi_pred.z;
+        decoder_input[i + 3] = wo_pred.x;
+        decoder_input[i + 4] = wo_pred.y;
+        decoder_input[i + 5] = wo_pred.z;
+    }
+
+    brdf_decoder_eval(brdf_decoder, decoder_input, decoder_output);
+
+    return max(float3(decoder_output[0], decoder_output[1], decoder_output[2]), 0.0f.xxx);
+}
+
+#endif // NEURAL_MATERIAL_LAYERS_SLANG

@@ -5,7 +5,7 @@
 #include "platform.glslh"
 #include "frame.h"
 #include "lighting.h"
-
+#include "sampling.h"
 
 #if defined(VERTEX_DEFERRED_LIGHTING_PIXEL)
 
@@ -104,11 +104,6 @@ layout ( std140, set = MATERIAL_SET, binding = 1 ) uniform LightingConstants {
     uint        output_width;
     uint        output_height;
     uint        emissive_index;
-
-    uint        gi_index;
-    uint        reflection_index;
-    uint        pad000;
-    uint        pad001;
 };
 
 layout (local_size_x = 8, local_size_y = 8, local_size_z = 1) in;
@@ -121,64 +116,61 @@ void main() {
     vec3 normal = octahedral_decode(encoded_normal);
     vec3 emissive = texelFetch(global_textures[nonuniformEXT(emissive_index)], pos.xy, 0).rgb;
 
-    vec3 gi = gi_index != INVALID_TEXTURE_INDEX ? texelFetch(global_textures[gi_index], ivec2(pos.xy) / 2, 0).rgb : vec3(1,1,1);
-
     vec4 color = vec4(0);
 
     const vec2 screen_uv = uv_nearest(pos.xy, frame.resolution);
     const float raw_depth = texelFetch(global_textures[nonuniformEXT(textures.w)], pos.xy, 0).r;
+    const vec3 pixel_world_position = world_position_from_depth(screen_uv, raw_depth, frame.inverse_view_projection);
+
     if ( raw_depth == 1.0f ) {
         color = vec4(base_colour.rgb, 1);
+
+        vec3 ray_far = world_position_from_depth( screen_uv, 1.0f, frame.inverse_view_projection );
+
+        vec3 view_ray = normalize(ray_far - frame.camera_position.xyz);
+        // Apply sky color
+        vec3 sun_direction = normalize( light_cb.raytraced_shadow_light_position );
+        vec3 sky_color = sample_procedural_sky( view_ray, sun_direction  );
+
+        color.rgb = sky_color;
     }
     else {
-        const vec3 pixel_world_position = world_position_from_depth(screen_uv, raw_depth, frame.inverse_view_projection);
-
         uvec2 position = gl_GlobalInvocationID.xy;
         color = calculate_lighting( base_colour, orm, normal, emissive, pixel_world_position, position, screen_uv, false );
     }
 
-    color.rgb *= gi;
     color.rgb = apply_volumetric_fog( screen_uv, raw_depth, color.rgb );
-    color.rgb = encode_srgb( color.rgb );
 
     // DEBUG:
-    if ( debug_modes > 0 ) {
+    if ( light_cb.debug_modes > 0 ) {
 
-        if ( debug_modes == 1 ) {
-            const vec3 pixel_world_position = world_position_from_depth(screen_uv, raw_depth, frame.inverse_view_projection);
-
-            imageStore(global_images_2d[debug_texture_index], pos.xy, vec4(pixel_world_position, 1));
+        if ( light_cb.debug_modes == 1 ) {
+            imageStore(global_images_2d[light_cb.debug_texture_index], pos.xy, vec4(pixel_world_position, 1));
         }
-        else if (debug_modes == 2) {
-
-            const vec3 pixel_world_position = world_position_from_depth(screen_uv, raw_depth, frame.inverse_view_projection);
+        else if (light_cb.debug_modes == 2) {
 
             Light light = lights[ 0 ];
             vec3 position_to_light = light.world_position - pixel_world_position;
             const float current_depth = length(position_to_light) / light.radius;
-            const float closest_depth = texture(global_textures_cubemaps[nonuniformEXT(cubemap_shadows_index)], vec3(position_to_light)).r;
+            const float closest_depth = texture(global_textures_cubemaps[nonuniformEXT(light_cb.cubemap_shadows_index)], vec3(position_to_light)).r;
 
-            imageStore(global_images_2d[debug_texture_index], pos.xy, vec4(current_depth, closest_depth, vector_to_depth_value(position_to_light, light.radius, light.rcp_n_minus_f), 1));
+            imageStore(global_images_2d[light_cb.debug_texture_index], pos.xy, vec4(current_depth, closest_depth, vector_to_depth_value(position_to_light, light.radius, light.rcp_n_minus_f), 1));
         }
-        else if (debug_modes == 3) {
-
-            const vec3 pixel_world_position = world_position_from_depth(screen_uv, raw_depth, frame.inverse_view_projection);
+        else if (light_cb.debug_modes == 3) {
 
             Light light = lights[ 0 ];
             const vec3 position_to_light = light.world_position - pixel_world_position;
 
-            imageStore(global_images_2d[debug_texture_index], pos.xy, vec4(normalize(position_to_light), 1));
+            imageStore(global_images_2d[light_cb.debug_texture_index], pos.xy, vec4(normalize(position_to_light), 1));
         }
-        else if (debug_modes == 4) {
-
-            const vec3 pixel_world_position = world_position_from_depth(screen_uv, raw_depth, frame.inverse_view_projection);
+        else if (light_cb.debug_modes == 4) {
 
             Light light = lights[ 0 ];
             const vec3 position_to_light = pixel_world_position - light.world_position;
 
-            imageStore(global_images_2d[debug_texture_index], pos.xy, vec4(normalize(position_to_light), 1));
+            imageStore(global_images_2d[light_cb.debug_texture_index], pos.xy, vec4(normalize(position_to_light), 1));
         }
-        else if (debug_modes == 5) {
+        else if (light_cb.debug_modes == 5) {
 
             const vec3 pixel_world_position = world_position_from_depth(screen_uv, raw_depth, frame.inverse_view_projection);
 
@@ -186,27 +178,24 @@ void main() {
             vec3 position_to_light = pixel_world_position - light.world_position;
             const float current_depth = length(position_to_light) / light.radius;
             float current_depth2 = vector_to_depth_value(position_to_light, light.radius, light.rcp_n_minus_f);
-            const float closest_depth = texture(global_textures_cubemaps[nonuniformEXT(cubemap_shadows_index)], vec3(position_to_light)).r;
+            const float closest_depth = texture(global_textures_cubemaps[nonuniformEXT(light_cb.cubemap_shadows_index)], vec3(position_to_light)).r;
 
-            imageStore(global_images_2d[debug_texture_index], pos.xy, vec4(current_depth, current_depth2, closest_depth, 1));
+            imageStore(global_images_2d[light_cb.debug_texture_index], pos.xy, vec4(current_depth, current_depth2, closest_depth, 1));
 
             color.rgb = current_depth2 > closest_depth ? vec3(1) : vec3(0);
         }
-        else if (debug_modes == 6) {
-
-            const vec3 pixel_world_position = world_position_from_depth(screen_uv, raw_depth, frame.inverse_view_projection);
+        else if (light_cb.debug_modes == 6) {
 
             Light light = lights[ 0 ];
             vec3 position_to_light = light.world_position - pixel_world_position;
             const float current_depth = length(position_to_light) / light.radius;
             float current_depth2 = vector_to_depth_value(position_to_light, light.radius, light.rcp_n_minus_f);
-            const float closest_depth = texture(global_textures_cubemaps[nonuniformEXT(cubemap_shadows_index)], vec3(position_to_light)).r;
+            const float closest_depth = texture(global_textures_cubemaps[nonuniformEXT(light_cb.cubemap_shadows_index)], vec3(position_to_light)).r;
 
-            imageStore(global_images_2d[debug_texture_index], pos.xy, vec4(current_depth, current_depth2, closest_depth, 1));
+            imageStore(global_images_2d[light_cb.debug_texture_index], pos.xy, vec4(current_depth, current_depth2, closest_depth, 1));
         }
-        else if ( debug_modes == 7 ) {
-            const vec3 pixel_world_position = world_position_from_depth(screen_uv, raw_depth, frame.inverse_view_projection);
-
+        else if ( light_cb.debug_modes == 7 ) {
+            
             Light light = lights[ 0 ];
             const vec3 position_to_light = pixel_world_position - light.world_position;
 
@@ -224,19 +213,19 @@ void main() {
             float z = projectedDistance * a + b;
             float dbDistance = z / projectedDistance;
 
-            const float closest_depth = texture(global_textures_cubemaps[nonuniformEXT(cubemap_shadows_index)], vec3(position_to_light)).r;
+            const float closest_depth = texture(global_textures_cubemaps[nonuniformEXT(light_cb.cubemap_shadows_index)], vec3(position_to_light)).r;
 
-            imageStore(global_images_2d[debug_texture_index], pos.xy, vec4(dbDistance, closest_depth, 0, 1));
+            imageStore(global_images_2d[light_cb.debug_texture_index], pos.xy, vec4(dbDistance, closest_depth, 0, 1));
 
         }
-        else if (debug_modes == 8) {
+        else if (light_cb.debug_modes == 8) {
 
-            vec3 indirect_irradiance = textureLod(global_textures[nonuniformEXT(indirect_lighting_texture_index)], screen_uv, 0).rgb;
+            vec3 indirect_irradiance = textureLod(global_textures[nonuniformEXT(light_cb.indirect_lighting_texture_index)], screen_uv, 0).rgb;
             color.rgb = indirect_irradiance;
         }
-        else if (debug_modes == 9) {
+        else if (light_cb.debug_modes == 9) {
 
-            vec3 indirect_irradiance = textureLod(global_textures[nonuniformEXT(indirect_lighting_texture_index)], screen_uv, 0).rgb;
+            vec3 indirect_irradiance = textureLod(global_textures[nonuniformEXT(light_cb.indirect_lighting_texture_index)], screen_uv, 0).rgb;
             color.rgb = indirect_irradiance * base_colour.rgb;
         }
     }

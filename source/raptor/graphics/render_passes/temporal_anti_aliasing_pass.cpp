@@ -238,13 +238,6 @@ void TemporalAntiAliasingPass::pre_render( FrameGraphRenderContext& context ) {
     if ( !enabled ) {
         return;
     }
-
-    RenderBlackboard& render_blackboard = *context.render_blackboard;
-
-    previous_history_texture_index = current_history_texture_index;
-    current_history_texture_index = ( current_history_texture_index + 1 ) & 1;
-
-    render_blackboard.taa_output_image_view = history_image_views[ current_history_texture_index ];
 }
 
 void TemporalAntiAliasingPass::render( FrameGraphRenderContext& context ) {
@@ -301,6 +294,11 @@ void TemporalAntiAliasingPass::render( FrameGraphRenderContext& context ) {
         } );
 
     cb->flush_barriers();
+
+    // Prepare history roles for the next frame only after recording
+    // all commands that use this frame's uploaded texture indices.
+    previous_history_texture_index = current_history_texture_index;
+    current_history_texture_index = ( current_history_texture_index + 1 ) & 1;
 }
 
 void TemporalAntiAliasingPass::update_dependent_resources( FrameGraphResourceContext& context ) {}

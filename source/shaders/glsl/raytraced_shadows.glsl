@@ -315,7 +315,7 @@ float get_directional_light_visibility( vec3 light_position, uint sample_count, 
 }
 
 float get_point_light_visibility( uint light_index, uint sample_count, vec3 world_position, vec3 normal, uint frame_index ) {
-    const vec3 position_to_light = raytraced_shadow_light_position - world_position;
+    const vec3 position_to_light = light_cb.raytraced_shadow_light_position - world_position;
     const vec3 l = normalize( position_to_light );
     const float NoL = dot(normal, l);
     float d = sqrt( dot( position_to_light, position_to_light ) );
@@ -325,7 +325,7 @@ float get_point_light_visibility( uint light_index, uint sample_count, vec3 worl
 
     float visiblity = 0.0;
 
-    const float r = raytraced_shadow_light_radius;
+    const float r = light_cb.raytraced_shadow_light_radius;
     float attenuation = attenuation_square_falloff(position_to_light, 1.0f / r);
 
     const float scaled_distance = r / d;
@@ -559,7 +559,7 @@ void main() {
             visibility = get_point_light_visibility( gl_GlobalInvocationID.z, sample_count, pixel_world_position, normal, svc.frame_index );
         }
         else {
-            visibility = get_directional_light_visibility( raytraced_shadow_light_position, sample_count, pixel_world_position, normal, svc.frame_index, blue_noise_value );
+            visibility = get_directional_light_visibility( light_cb.raytraced_shadow_light_position, sample_count, pixel_world_position, normal, svc.frame_index, blue_noise_value );
         }
     }
 

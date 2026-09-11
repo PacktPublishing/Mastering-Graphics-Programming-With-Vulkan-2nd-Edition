@@ -127,8 +127,11 @@ void CommandBuffer::begin_render_pass( Span<const ImageViewHandle> render_target
         Image* image = gpu_device->get_image( image_view->parent_image );
 
         if ( a == 0 ) {
-            frame_buffer_width = image->width;
-            frame_buffer_height = image->height;
+            // Calculate mip-aware width and height
+            const u32 mip_level = image_view->subresource_range.baseMipLevel;
+
+            frame_buffer_width = raptor::max( 1, image->width >> mip_level );
+            frame_buffer_height = raptor::max( 1, image->height >> mip_level );
         } else {
             RASSERT( frame_buffer_width == image->width );
             RASSERT( frame_buffer_height == image->height );
@@ -161,8 +164,11 @@ void CommandBuffer::begin_render_pass( Span<const ImageViewHandle> render_target
 
         // Get width and height for depth-only passes
         if ( render_targets.size == 0 ) {
-            frame_buffer_width = image->width;
-            frame_buffer_height = image->height;
+            // Calculate mip-aware width and height
+            const u32 mip_level = image_view->subresource_range.baseMipLevel;
+
+            frame_buffer_width = raptor::max( 1, image->width >> mip_level );
+            frame_buffer_height = raptor::max( 1, image->height >> mip_level );
         }
         else {
             RASSERT( frame_buffer_width == image->width );

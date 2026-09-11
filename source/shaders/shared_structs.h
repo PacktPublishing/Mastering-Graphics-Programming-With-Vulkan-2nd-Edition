@@ -3,16 +3,13 @@
 
 #if defined (__cplusplus)
 
-#define uint uint32_t
-#define int int32_t
+using uint     = std::uint32_t;
 
-#define float4x4 glm::mat4
-
-#define int3 glm::ivec3
-
-#define float2 glm::vec2
-#define float3 glm::vec3
-#define float4 glm::vec4
+using float4x4 = glm::mat4;
+using int3     = glm::ivec3;
+using float2   = glm::vec2;
+using float3   = glm::vec3;
+using float4   = glm::vec4;
 
 #elif defined(__SLANG__)
 
@@ -84,6 +81,45 @@ struct GpuFrameConstants {
 
     float4      frustum_planes[6];
 }; // struct GpuFrameConstants
+
+
+struct GpuLightConstants {
+
+    uint                    cubemap_shadows_index;
+    uint                    debug_show_light_tiles;
+    uint                    debug_show_tiles;
+    uint                    debug_show_bins;
+
+    uint                    disable_shadows;
+    uint                    debug_modes;
+    uint                    debug_texture_index;
+    uint                    shadow_visibility_texture_index;
+
+    uint                    volumetric_fog_texture_index;
+    int                     volumetric_fog_num_slices;
+    float                   volumetric_fog_near;
+    float                   volumetric_fog_far;
+
+    float                   volumetric_fog_distribution_scale;
+    float                   volumetric_fog_distribution_bias;
+    float                   gi_intensity;
+    uint                    indirect_lighting_texture_index;
+
+    uint                    bilateral_weights_texture_index;
+    uint                    reflections_texture_index;
+
+    uint                    raytraced_shadow_light_color_type;
+    float                   raytraced_shadow_light_radius;
+
+    float3                  raytraced_shadow_light_position;
+    float                   raytraced_shadow_light_intensity;
+
+    uint                    brdf_lut_texture_index;
+    float                   reflections_intensity;
+    
+    uint                    shadow_pcf_samples;
+    float                   shadow_pcf_radius;
+}; // GpuLightConstants
 
 struct GpuDDGIConstants {
     uint        radiance_output_index;
@@ -245,5 +281,52 @@ struct GpuShadowVisibilityConstants {
 
 }; // struct GpuShadowVisibilityConstants
 
+
+struct SVGFConstants {
+    uint motion_vectors_texture_index;
+    uint mesh_id_texture_index;
+    uint normals_texture_index;
+    uint depth_normal_fwidth_texture_index;
+
+    uint current_motion_vectors_texture_index;
+    uint current_mesh_id_texture_index;
+    uint current_normals_texture_index;
+    uint current_depth_normal_fwidth_texture_index;
+
+    uint current_linear_z_dd_texture_index;
+    uint history_mesh_id_texture_index;
+    uint history_normals_texture_index;
+    uint history_linear_depth_texture;
+
+    uint linear_z_dd_texture_index;
+    float output_resolution_scale;
+    float output_resolution_scale_rcp;
+    float temporal_depth_difference;
+
+    float temporal_normal_difference;
+    float input_resolution_scale;
+    float input_resolution_scale_rcp;
+    float pad002;
+};
+
+struct SVGFOutputs {
+    uint output_texture_index;
+    uint history_output_texture_index;
+    uint history_moments_texture_index;
+    uint integrated_color_texture_index;
+
+    uint integrated_moments_texture_index;
+    uint variance_texture_index;
+    uint filtered_color_texture_index;
+    uint updated_variance_texture_index;
+};
+
+
+struct SVGFPushConstants {
+    uint step_size;
+    float sigma_z;
+    float sigma_n;
+    float sigma_l;
+};
 
 #endif // SHARED_STRUCTS_H

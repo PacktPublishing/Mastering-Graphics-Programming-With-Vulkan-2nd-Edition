@@ -471,8 +471,8 @@ void ImGuiService::render( raptor::CommandBuffer& commands, bool use_secondary )
     const VkDeviceSize total_vertex_size = draw_data->TotalVtxCount * sizeof( ImDrawVert );
     const VkDeviceSize total_index_size = draw_data->TotalIdxCount * sizeof( ImDrawIdx );
 
-    gpu->flush_buffer( vertex_buffer_handle, 0, total_vertex_size );
-    gpu->flush_buffer( index_buffer_handle, 0, total_index_size );
+    gpu->flush_buffer( vertex_buffer_handle, 0, ( u32 )total_vertex_size );
+    gpu->flush_buffer( index_buffer_handle, 0, ( u32 )total_index_size );
 
     // TODO_KS: Add the sorting.
     commands.push_marker( "ImGUI" );

@@ -41,38 +41,6 @@ vec3 compute_ray_dir( uvec3 launch_id, uvec3 launch_size ) {
     return normalize( world_far.xyz - frame.camera_position.xyz );
 }
 
-float cross2( vec2 a, vec2 b ) {
-    return a.x * b.y - a.y * b.x;
-}
-
-float compute_projected_triangle_lod( vec4 p0_world, vec4 p1_world, vec4 p2_world,
-                                      vec2 uv0, vec2 uv1, vec2 uv2,
-                                      ivec2 texture_size, vec2 screen_size ) {
-    vec4 p0_clip = frame.view_projection * p0_world;
-    vec4 p1_clip = frame.view_projection * p1_world;
-    vec4 p2_clip = frame.view_projection * p2_world;
-
-    vec2 p0_ndc = p0_clip.xy / p0_clip.w;
-    vec2 p1_ndc = p1_clip.xy / p1_clip.w;
-    vec2 p2_ndc = p2_clip.xy / p2_clip.w;
-
-    vec2 p0_px = ( p0_ndc * 0.5 + 0.5 ) * screen_size;
-    vec2 p1_px = ( p1_ndc * 0.5 + 0.5 ) * screen_size;
-    vec2 p2_px = ( p2_ndc * 0.5 + 0.5 ) * screen_size;
-
-    // Both are parallelogram areas. The 0.5 triangle factor cancels out.
-    float uv_area = abs( cross2( uv1 - uv0, uv2 - uv0 ) );
-    float screen_area = abs( cross2( p1_px - p0_px, p2_px - p0_px ) );
-
-    float texture_texel_count = float( texture_size.x * texture_size.y );
-    float texel_area = texture_texel_count * uv_area;
-
-    float texels_per_pixel = texel_area / max( screen_area, 1.0 );
-
-    float lod = 0.5 * log2( max( texels_per_pixel, 1e-8 ) );
-    return max( lod, 0.0 );
-}
-
 void main()
 {
     traceRayEXT( as, // topLevel
@@ -131,7 +99,7 @@ void main()
 
         // TODO(marco): use ray differentials or ray cones.
         float lod = compute_projected_triangle_lod( p0_world, p1_world, p2_world,
-                                                    uv0, uv1, uv2, texture_size, screen_size );
+                                                    uv0, uv1, uv2, texture_size, screen_size, frame.view_projection );
 
         float b = payload.barycentric_weights.x;
         float c = payload.barycentric_weights.y;

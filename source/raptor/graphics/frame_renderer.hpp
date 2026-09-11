@@ -98,6 +98,8 @@ struct LightingRenderingFeature {
 
     void        upload_gpu_data( UploadGpuDataContext& context );
 
+    void        update_scene( RenderScene& scene, LightingRenderConfig& config );
+
 
     static const u32    k_light_z_bins = 16;
     static const u32    k_tile_size = 8;
@@ -106,16 +108,15 @@ struct LightingRenderingFeature {
 
 }; // struct LightingRenderingFeature
 
-
-//
 struct PointlightShadowsRenderingFeature {
 
-    void        create_gpu_resources( Renderer* renderer, RenderBlackboard* render_blackboard, RenderScene* scene );
+    void        create_gpu_resources( Renderer* renderer, RenderBlackboard* render_blackboard, FrameGraph* frame_graph );
     void        destroy_gpu_resources( Renderer* renderer, RenderBlackboard* render_blackboard );
 
     void        on_resize( Renderer* renderer, RenderBlackboard* render_blackboard, u32 new_width, u32 new_height );
 
     void        upload_gpu_data( UploadGpuDataContext& context );
+
 }; // struct PointlightShadowsRenderingFeature
 
 //

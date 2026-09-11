@@ -897,8 +897,6 @@ int main( int argc, char** argv ) {
                 frame_renderer.render_config.gpu_culling.draw_imgui();
                 frame_renderer.render_config.meshlets.draw_imgui();
                 frame_renderer.render_config.post.draw_imgui();
-                frame_renderer.render_config.volumetric_fog.draw_imgui();
-                frame_renderer.render_config.taa.draw_imgui();
 
                 if ( frame_renderer.render_config.debug_draw.inspect_mesh_instance ) {
                     MeshInstance& mi = render_scene.mesh_instances[ frame_renderer.render_config.debug_draw.mesh_instance_index ];
@@ -1049,12 +1047,6 @@ int main( int argc, char** argv ) {
                                                            gfx_done_value,
                                                            VK_PIPELINE_STAGE_2_TRANSFER_BIT ) );
 
-            if ( wait_for_sparse_semaphore ) {
-                waits.push( GpuDevice::build_semaphore_submit( gpu.vulkan_bind_binary_semaphore,
-                                                               0,
-                                                               VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT_KHR ) );
-            }
-
             // SIGNALS
             // Signal compute, last texture will be written by a compute shader
             signals.clear();
@@ -1079,6 +1071,12 @@ int main( int argc, char** argv ) {
             // Second wait: frame limiter timeline semaphore, waiting on the frame limiter value
             waits.push( GpuDevice::build_semaphore_submit( gpu.vulkan_graphics_timeline_semaphore,
                                                            frame_limiter_value, VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT, 0 ) );
+
+            if ( wait_for_sparse_semaphore ) {
+                waits.push( GpuDevice::build_semaphore_submit( gpu.vulkan_bind_binary_semaphore,
+                                                               0,
+                                                               VK_PIPELINE_STAGE_2_ALL_GRAPHICS_BIT ) );
+            }
 
             cbs.push( frame_graph.get_command_buffer_from_batch( CommandQueueType::Graphics, 0 ) );
 

@@ -5,11 +5,15 @@
 #extension GL_KHR_shader_subgroup_ballot : enable
 #extension GL_KHR_shader_subgroup_arithmetic : enable
 
+#extension GL_EXT_texture_shadow_lod : require
+
+#include "../shared_structs.h"
+
 #define DEBUG_OPTIONS
 #define ENABLE_OPTIMIZATION 1
 
 #define ENABLE_VOLUMETRIC_FOG 1
-//#define ENABLE_INDIRECT_DIFFUSE 1
+#define ENABLE_INDIRECT_DIFFUSE 1
 #define ENABLE_INDIRECT_SPECULAR 1
 //#define RAYTRACED_SHADOWS
 
@@ -20,7 +24,7 @@ struct Light {
     vec3            color;
     float           intensity;
 
-    float           shadow_map_resolution;
+    float           shadow_mip_level;
     float           rcp_n_minus_f; // Calculation of 1 / (n - f) used to retrieve cubemap shadows depth value.
     float           padding_l_001;
     float           padding_l_002;
@@ -39,39 +43,7 @@ layout( set = MATERIAL_SET, binding = 22 ) readonly buffer Tiles {
 };
 
 layout ( std140, set = MATERIAL_SET, binding = 23 ) uniform LightConstants {
-
-    uint        cubemap_shadows_index;
-    uint        debug_show_light_tiles;
-    uint        debug_show_tiles;
-    uint        debug_show_bins;
-
-    uint        disable_shadows;
-    uint        debug_modes;
-    uint        debug_texture_index;
-    uint        shadow_visibility_texture_index;
-
-    uint        volumetric_fog_texture_index;
-    int         volumetric_fog_num_slices;
-    float       volumetric_fog_near;
-    float       volumetric_fog_far;
-
-    float       volumetric_fog_distribution_scale;
-    float       volumetric_fog_distribution_bias;
-    float       gi_intensity;
-    uint        indirect_lighting_texture_index;
-
-    uint        bilateral_weights_texture_index;
-    uint        reflections_texture_index;
-    uint        raytraced_shadow_light_color_type;
-    float       raytraced_shadow_light_radius;
-
-    vec3        raytraced_shadow_light_position;
-    float       raytraced_shadow_light_intensity;
-
-    uint        brdf_lut_texture_index;
-    uint        pad001_lc;
-    uint        pad002_lc;
-    uint        pad003_lc;
+    GpuLightConstants light_cb;
 };
 
 layout( set = MATERIAL_SET, binding = 25 ) readonly buffer LightIndices {
@@ -79,7 +51,7 @@ layout( set = MATERIAL_SET, binding = 25 ) readonly buffer LightIndices {
 };
 
 bool is_raytrace_shadow_point_light() {
-    return ((raytraced_shadow_light_color_type >> 24) & 1) == 1;
+    return ((light_cb.raytraced_shadow_light_color_type >> 24) & 1) == 1;
 }
 
 uint hash(uint a) {
@@ -90,6 +62,17 @@ uint hash(uint a) {
    a = (a+0xfd7046c5) + (a<<3);
    a = (a^0xb55a4f09) ^ (a>>16);
    return a;
+}
+
+vec3 shadow_mip_debug_colour( uint mip_level ) {
+
+    switch ( mip_level ) {
+        case 0: return vec3( 0.00, 0.88, 0.18 );
+        case 1: return vec3( 1.00, 0.65, 0.05 );
+        case 2: return vec3( 0.05, 0.55, 1.00 );
+    }
+
+    return vec3( 1.0, 0.0, 1.0 ); // Invalid mip
 }
 
 // BRDF //////////////////////////////////////////////////////////////////
@@ -186,12 +169,12 @@ vec3 calculate_raytraced_directional_light_contribution(vec4 albedo, float rough
     // TODO(marco): better upsampling
     float shadow = 1.0f;
     // TODO
-    if (disable_shadows == 0) {
-        shadow = texelFetch( global_textures[ nonuniformEXT( shadow_visibility_texture_index ) ], ivec2( pixel_position ), 0 ).r;
+    if (light_cb.disable_shadows == 0) {
+        shadow = texelFetch( global_textures[ nonuniformEXT( light_cb.shadow_visibility_texture_index ) ], ivec2( pixel_position ), 0 ).r;
     }
 
     if ( shadow >= 0.0f && NoL > 0.0001f ) {
-        float light_intensity = NoL * raytraced_shadow_light_intensity * shadow;
+        float light_intensity = NoL * light_cb.raytraced_shadow_light_intensity * shadow;
 
         const vec3 h = normalize(v + l);
         const float NoH = saturate(dot(normal, h));
@@ -207,7 +190,7 @@ vec3 calculate_raytraced_directional_light_contribution(vec4 albedo, float rough
 
         vec3 specular = (D * V) * F;
 
-        pixel_luminance = (diffuse + specular) * light_intensity * unpack_color_rgba(raytraced_shadow_light_color_type).rgb;
+        pixel_luminance = (diffuse + specular) * light_intensity * unpack_color_rgba(light_cb.raytraced_shadow_light_color_type).rgb;
     }
 
     return pixel_luminance;
@@ -215,22 +198,22 @@ vec3 calculate_raytraced_directional_light_contribution(vec4 albedo, float rough
 
 vec3 calculate_raytraced_point_light_contribution(vec4 albedo, float roughness, vec3 normal, vec3 emissive, vec3 world_position, vec3 v, vec3 F0, float NoV, uvec2 pixel_position) {
 
-    const vec3 position_to_light = raytraced_shadow_light_position - world_position;
+    const vec3 position_to_light = light_cb.raytraced_shadow_light_position - world_position;
     const vec3 l = normalize( position_to_light );
     const float NoL = clamp(dot(normal, l), 0.0, 1.0);
 
     vec3 pixel_luminance = vec3(0);
 
     float shadow = 1.0f;
-    if (disable_shadows == 0) {
-        shadow = texelFetch( global_textures[ shadow_visibility_texture_index ], ivec2( pixel_position ), 0 ).r;
+    if (light_cb.disable_shadows == 0) {
+        shadow = texelFetch( global_textures[ light_cb.shadow_visibility_texture_index ], ivec2( pixel_position ), 0 ).r;
     }
 
-    const float light_radius = raytraced_shadow_light_radius;
+    const float light_radius = light_cb.raytraced_shadow_light_radius;
     float attenuation = attenuation_square_falloff(position_to_light, 1.0f / light_radius) * shadow;
     if ( attenuation > 0.0001f && NoL > 0.0001f ) {
 
-        float light_intensity = NoL * raytraced_shadow_light_intensity * attenuation;
+        float light_intensity = NoL * light_cb.raytraced_shadow_light_intensity * attenuation;
 
         const vec3 h = normalize(v + l);
         const float NoH = saturate(dot(normal, h));
@@ -246,11 +229,14 @@ vec3 calculate_raytraced_point_light_contribution(vec4 albedo, float roughness, 
 
         vec3 specular = (D * V) * F;
 
-        pixel_luminance = (diffuse + specular) * light_intensity * unpack_color_rgba(raytraced_shadow_light_color_type).rgb;
+        pixel_luminance = (diffuse + specular) * light_intensity * unpack_color_rgba(light_cb.raytraced_shadow_light_color_type).rgb;
     }
 
     return pixel_luminance;
 }
+
+#define PCF_USE_VOGEL
+#define NEW_PCF
 
 vec3 calculate_point_light_contribution(vec4 albedo, float roughness, vec3 normal, vec3 emissive,
                                         vec3 world_position, vec3 v, vec3 F0, float NoV,
@@ -264,9 +250,78 @@ vec3 calculate_point_light_contribution(vec4 albedo, float roughness, vec3 norma
 
     vec3 pixel_luminance = vec3(0);
 
+#if defined (NEW_PCF)
+    float shadow = 1.0;
+
+    if (light_cb.disable_shadows == 0) {
+
+        const bool pcf_enabled = true;
+        const uint samples = light_cb.shadow_pcf_samples;
+        const float filter_radius = light_cb.shadow_pcf_radius;
+
+        vec3 light_to_position = -position_to_light;
+        float distance_sq = dot(light_to_position, light_to_position);
+
+        float bias = mix(0.00012, 0.00035, 1.0 - NoL);
+
+        if (distance_sq > 0.0000001f) {
+
+            if (!pcf_enabled || filter_radius <= 0.0) {
+
+                float reference_depth = vector_to_depth_value( light_to_position, light.radius, light.rcp_n_minus_f );
+
+                //float stored_depth = textureLod( global_textures_cubemaps_array[ nonuniformEXT(light_cb.cubemap_shadows_index)],
+                //                                 vec4(light_to_position, float(shadow_light_index)), light.shadow_mip_level ).r;
+                //shadow = reference_depth - bias < stored_depth ? 1.0 : 0.0;
+
+                shadow = textureLod( global_textures_cubemaps_array_shadow[ nonuniformEXT( light_cb.cubemap_shadows_index ) ], 
+                                     vec4( light_to_position, float( shadow_light_index ) ), reference_depth - bias, light.shadow_mip_level );
+
+            } else {
+
+                float receiver_distance = sqrt(distance_sq);
+                vec3 direction = light_to_position / receiver_distance;
+
+                vec3 up = abs(direction.z) < 0.999 ? vec3(0.0, 0.0, 1.0) : vec3(0.0, 1.0, 0.0);
+
+                vec3 tangent = normalize(cross(up, direction));
+                vec3 bitangent = cross(direction, tangent);
+
+                uint mip = uint(light.shadow_mip_level);
+                float face_resolution = float(512 >> mip);
+
+                // Approximate angular radius from the selected mip.
+                float angular_radius = 2.0 * filter_radius / face_resolution;
+
+                shadow = 0.0;
+
+                for (uint i = 0; i < samples; ++i) {
+
+                    vec2 offset = vogel_disk_offset(i, samples, 0.1);
+
+                    vec3 sample_direction = normalize( direction + angular_radius * (tangent * offset.x + bitangent * offset.y) );
+
+                    // Approximate the receiver at constant radial distance.
+                    vec3 sample_position = sample_direction * receiver_distance;
+
+                    float reference_depth = vector_to_depth_value( sample_position, light.radius, light.rcp_n_minus_f );
+
+                    //float stored_depth = textureLod( global_textures_cubemaps_array[ nonuniformEXT(light_cb.cubemap_shadows_index)],
+                    //                                 vec4(sample_position, float(shadow_light_index)), light.shadow_mip_level ).r;
+
+                    //shadow += reference_depth - bias < stored_depth ? 1.0 : 0.0;
+                    shadow += textureLod( global_textures_cubemaps_array_shadow[ nonuniformEXT( light_cb.cubemap_shadows_index ) ],
+                                          vec4( sample_position, float( shadow_light_index ) ), reference_depth - bias, light.shadow_mip_level );
+                }
+
+                shadow /= float(samples);
+            }
+        }
+    }
+#else
     float shadow = 1.0f;
 
-    if ( disable_shadows == 0 ) {
+    if ( light_cb.disable_shadows == 0 ) {
         vec3 shadow_light_to_position = -position_to_light;
         const float current_depth = vector_to_depth_value(shadow_light_to_position, light.radius, light.rcp_n_minus_f);
 
@@ -274,14 +329,15 @@ vec3 calculate_point_light_contribution(vec4 albedo, float roughness, vec3 norma
         const float bias = mix( 0.00012, 0.00035, 1.0 - NoL );
 
         // Use Vogel disk offsets
-    #if 1
+    #if PCF_USE_VOGEL
         const uint samples = 4;
         shadow = 0;
         for(uint i = 0; i < samples; ++i) {
 
             vec2 disk_offset = vogel_disk_offset(i, samples, 0.1f);
             vec3 sampling_position = shadow_light_to_position + disk_offset.xyx * 0.0005f;
-            const float closest_depth = textureLod(global_textures_cubemaps_array[nonuniformEXT(cubemap_shadows_index)], vec4(sampling_position, shadow_light_index), 0).r;
+            const float closest_depth = textureLod(global_textures_cubemaps_array[nonuniformEXT(light_cb.cubemap_shadows_index)], 
+                                                   vec4(sampling_position, shadow_light_index), light.shadow_mip_level).r;
             shadow += current_depth - bias < closest_depth ? 1 : 0;
         }
 
@@ -289,10 +345,12 @@ vec3 calculate_point_light_contribution(vec4 albedo, float roughness, vec3 norma
 
     #else
         // Standard shadow mapping
-        const float closest_depth = textureLod(global_textures_cubemaps_array[nonuniformEXT(cubemap_shadows_index)], vec4(shadow_light_to_position, shadow_light_index), 0).r;
-        float shadow = current_depth - bias < closest_depth ? 1 : 0;
+        float closest_depth = textureLod(global_textures_cubemaps_array[nonuniformEXT(light_cb.cubemap_shadows_index)],
+                                               vec4(shadow_light_to_position, shadow_light_index), light.shadow_mip_level).r;
+        shadow = current_depth - bias < closest_depth ? 1 : 0;
     #endif
     }
+#endif // NEW_PCF
 
     float attenuation = attenuation_square_falloff(position_to_light, 1.0f / light.radius) * shadow;
     if ( attenuation > 0.0001f && NoL > 0.0001f ) {
@@ -314,6 +372,9 @@ vec3 calculate_point_light_contribution(vec4 albedo, float roughness, vec3 norma
         const vec3 diffuse = kd * fd_burley(NoV, NoL, LoH, perceptual_roughness) * albedo.rgb;
 
         pixel_luminance = (diffuse + specular) * light_intensity * light.color;
+
+        //vec3 debug_color = shadow_mip_debug_colour( uint(light.shadow_mip_level) );
+        //pixel_luminance = debug_color * light_intensity;
     }
 
     return pixel_luminance;
@@ -324,39 +385,39 @@ vec3 calculate_point_light_contribution(vec4 albedo, float roughness, vec3 norma
 vec3 apply_volumetric_fog( vec2 screen_uv, float raw_depth, vec3 color ) {
 
 #if defined ENABLE_VOLUMETRIC_FOG
-    if ( volumetric_fog_texture_index == INVALID_TEXTURE_INDEX ) {
+    if ( light_cb.volumetric_fog_texture_index == INVALID_TEXTURE_INDEX ) {
         return color;
     }
 
-    float linear_depth = raw_depth_to_linear_depth( raw_depth, volumetric_fog_near, volumetric_fog_far );
-    float depth_uv = linear_depth_to_slice_f( volumetric_fog_near, volumetric_fog_far, linear_depth, volumetric_fog_num_slices );
+    float linear_depth = raw_depth_to_linear_depth( raw_depth, light_cb.volumetric_fog_near, light_cb.volumetric_fog_far );
+    float depth_uv = linear_depth_to_slice_f( light_cb.volumetric_fog_near, light_cb.volumetric_fog_far, linear_depth, light_cb.volumetric_fog_num_slices );
     vec2 noise = animated_blue_noise(uvec2(screen_uv * frame.resolution), uint(frame.current_frame), frame.blue_noise_128_rg_texture_index);
 
     float j = (noise.x - 0.5);
     // 1 slice in UV space:
-    float dz = 1.0 / float(volumetric_fog_num_slices);
+    float dz = 1.0 / float(light_cb.volumetric_fog_num_slices);
     float volumetric_fog_application_depth_jitter_scale = 0.25f;
     depth_uv = clamp(depth_uv + j * dz * volumetric_fog_application_depth_jitter_scale, 0.5 * dz, 1.0 - 0.5 * dz);
 
     vec4 st;
     if ( enable_volumetric_fog_opacity_tricubic_filtering() ) {
-        st = tricubic_filtering( volumetric_fog_texture_index, vec3(screen_uv, depth_uv), vec3(volumetric_fog_num_slices) );
+        st = tricubic_filtering( light_cb.volumetric_fog_texture_index, vec3(screen_uv, depth_uv), vec3(light_cb.volumetric_fog_num_slices) );
     }
     else {
 
-        // depth_uv = clamp(depth_uv + j * volumetric_fog_application_depth_jitter_scale, 0.0, float(volumetric_fog_num_slices - 1));
-        int z0 = int(floor(depth_uv * float(volumetric_fog_num_slices)));
-        int z1 = min(z0 + 1, volumetric_fog_num_slices - 1);
-        float t = (depth_uv * float(volumetric_fog_num_slices)) - float(z0);
+        // depth_uv = clamp(depth_uv + j * volumetric_fog_application_depth_jitter_scale, 0.0, float(light_cb.volumetric_fog_num_slices - 1));
+        int z0 = int(floor(depth_uv * float(light_cb.volumetric_fog_num_slices)));
+        int z1 = min(z0 + 1, light_cb.volumetric_fog_num_slices - 1);
+        float t = (depth_uv * float(light_cb.volumetric_fog_num_slices)) - float(z0);
 
-        float z0_uv = (float(z0) + 0.5) / float(volumetric_fog_num_slices);
-        float z1_uv = (float(z1) + 0.5) / float(volumetric_fog_num_slices);
+        float z0_uv = (float(z0) + 0.5) / float(light_cb.volumetric_fog_num_slices);
+        float z1_uv = (float(z1) + 0.5) / float(light_cb.volumetric_fog_num_slices);
 
-        vec4 a = textureLod(global_textures_3d[nonuniformEXT(volumetric_fog_texture_index)], vec3(screen_uv, z0_uv), 0);
-        vec4 b = textureLod(global_textures_3d[nonuniformEXT(volumetric_fog_texture_index)], vec3(screen_uv, z1_uv), 0);
+        vec4 a = textureLod(global_textures_3d[nonuniformEXT(light_cb.volumetric_fog_texture_index)], vec3(screen_uv, z0_uv), 0);
+        vec4 b = textureLod(global_textures_3d[nonuniformEXT(light_cb.volumetric_fog_texture_index)], vec3(screen_uv, z1_uv), 0);
 
         st = mix(a, b, t);
-        //st = textureLod( global_textures_3d[nonuniformEXT(volumetric_fog_texture_index)], vec3(screen_uv, depth_uv), 0 );
+        //st = textureLod( global_textures_3d[nonuniformEXT(light_cb.volumetric_fog_texture_index)], vec3(screen_uv, depth_uv), 0 );
     }
 
     float T = clamp( st.a, 0.0f, 1.0f );
@@ -400,16 +461,25 @@ uint bit_field_mask( uint mask_width, uint min_bit ) {
     return v;
 }
 
+// uint get_tile_address( uvec2 pixel_position ) {
+
+//     uvec2 tile = pixel_position / uint( TILE_SIZE );
+
+//     // Ceil to fix resolutions that are not multiple of tile size
+//     uint tile_x_count = (uint(frame.resolution.x) + uint(TILE_SIZE) - 1u) / uint(TILE_SIZE);
+//     uint stride = uint(LIGHT_MASK_U32_COUNT) * tile_x_count;
+//     uint address = tile.y * stride + tile.x;
+
+//     return address;
+// }
+
 uint get_tile_address( uvec2 pixel_position ) {
 
     uvec2 tile = pixel_position / uint( TILE_SIZE );
 
-    // Ceil to fix resolutions that are not multiple of tile size
-    uint tile_x_count = (uint(frame.resolution.x) + uint(TILE_SIZE) - 1u) / uint(TILE_SIZE);
-    uint stride = uint(LIGHT_MASK_U32_COUNT) * tile_x_count;
-    uint address = tile.y * stride + tile.x;
+    uint tile_x_count = ( uint( frame.resolution.x ) + uint( TILE_SIZE ) - 1u ) / uint( TILE_SIZE );
 
-    return address;
+    return ( tile.y * tile_x_count + tile.x ) * uint( LIGHT_MASK_U32_COUNT );
 }
 
 vec4 calculate_lighting(vec4 base_colour, vec3 orm, vec3 normal, vec3 emissive, vec3 world_position, uvec2 pixel_position, vec2 screen_uv, bool transparent) {
@@ -509,7 +579,7 @@ vec4 calculate_lighting(vec4 base_colour, vec3 orm, vec3 normal, vec3 emissive, 
         else {
             // Directional light
             // NOTE(marco): we compute ray-traced directional lighting only for opaque objects
-            final_color.rgb += calculate_raytraced_directional_light_contribution( albedo, roughness, normal, emissive, world_position, V, F0, NoV, pixel_position, raytraced_shadow_light_position );
+            final_color.rgb += calculate_raytraced_directional_light_contribution( albedo, roughness, normal, emissive, world_position, V, F0, NoV, pixel_position, light_cb.raytraced_shadow_light_position );
         }
     }
 #endif // RAYTRACED_SHADOWS
@@ -524,24 +594,24 @@ vec4 calculate_lighting(vec4 base_colour, vec3 orm, vec3 normal, vec3 emissive, 
     const float ao = 1.0f;
 
 #if defined (ENABLE_INDIRECT_DIFFUSE)
-    //vec2 upsampling_weights = textureLod(global_textures[nonuniformEXT(bilateral_weights_texture_index)], screen_uv, 0).rg;
-    vec3 indirect_irradiance = textureLod(global_textures[nonuniformEXT(indirect_lighting_texture_index)], screen_uv, 0).rgb;
-    vec3 indirect_diffuse = indirect_irradiance * gi_intensity * base_colour.rgb;
+    //vec2 upsampling_weights = textureLod(global_textures[nonuniformEXT(light_cb.bilateral_weights_texture_index)], screen_uv, 0).rg;
+    vec3 indirect_irradiance = textureLod(global_textures[nonuniformEXT(light_cb.indirect_lighting_texture_index)], screen_uv, 0).rgb;
+    vec3 indirect_diffuse = indirect_irradiance * light_cb.gi_intensity * base_colour.rgb;
 
     final_color.rgb += (kD * indirect_diffuse) * ao;
 #endif // ENABLE_INDIRECT_DIFFUSE
 
 #if defined (ENABLE_INDIRECT_SPECULAR)
-    vec3 reflection_color = textureLod( global_textures[reflections_texture_index], screen_uv, 0 ).rgb;
+    vec3 reflection_color = textureLod( global_textures[light_cb.reflections_texture_index], screen_uv, 0 ).rgb;
 
-    vec2 envBRDF = textureLod(global_textures[nonuniformEXT(brdf_lut_texture_index)], vec2(NoV, roughness), 0).rg;
-    vec3 indirect_specular = reflection_color * (F * envBRDF.x + envBRDF.y);
+    vec2 envBRDF = textureLod(global_textures[nonuniformEXT(light_cb.brdf_lut_texture_index)], vec2(NoV, roughness), 0).rg;
+    vec3 indirect_specular = reflection_color * (F * envBRDF.x + envBRDF.y) * light_cb.reflections_intensity;
     final_color.rgb += (indirect_specular) * ao;
 #endif // ENABLE_INDIRECT_SPECULAR
 
 #if defined(DEBUG_OPTIONS)
 
-    if ( debug_show_light_tiles > 0 ) {
+    if ( light_cb.debug_show_light_tiles > 0 ) {
         uint v = 0;
         for ( int i = 0; i < LIGHT_MASK_U32_COUNT; ++i ) {
             v += tiles[ address + i];
@@ -552,12 +622,12 @@ vec4 calculate_lighting(vec4 base_colour, vec3 orm, vec3 normal, vec3 emissive, 
         }
     }
 
-    if ( debug_show_tiles > 0 ) {
+    if ( light_cb.debug_show_tiles > 0 ) {
         uint mhash = hash( address );
         final_color.rgb *= vec3(float(mhash & 255), float((mhash >> 8) & 255), float((mhash >> 16) & 255)) / 255.0;
     }
 
-    if ( debug_show_bins > 0 ) {
+    if ( light_cb.debug_show_bins > 0 ) {
         uint bin_hash = hash( bin_index );
         final_color.rgb = vec3(float(bin_hash & 255), float((bin_hash >> 8) & 255), float((bin_hash >> 16) & 255)) / 255.0;
     }

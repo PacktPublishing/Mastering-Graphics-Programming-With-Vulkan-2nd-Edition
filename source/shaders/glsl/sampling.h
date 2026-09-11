@@ -211,7 +211,7 @@ BrdfSample sampleVNDFOrDiffuse(vec3 Ve, vec3 albedo, vec3 n, float metalness, fl
 }
 
 // Adapted from https://www.pbr-book.org/4ed/Sampling_Algorithms/Sampling_Multidimensional_Functions#UniformlySamplingHemispheresandSpheres
-BrdfSample sample_unform_diffuse( vec2 rnd ) {
+BrdfSample sample_uniform_diffuse( vec2 rnd ) {
     float z = rnd.x;
     float r = sqrt( max( 1 - z*z, 0 ) );
     float phi = 2 * PI * rnd.y;
@@ -221,4 +221,55 @@ BrdfSample sample_unform_diffuse( vec2 rnd ) {
     brdfSample.pdf = 1 / ( 2 * PI );
 
     return brdfSample;
+}
+
+BrdfSample sample_diffuse( vec2 rnd, vec3 n ) {
+    float r = sqrt( rnd.x );
+    float phi = 2.0 * PI * rnd.y;
+
+    vec3 local_wi = vec3( r * cos( phi ), r * sin( phi ), sqrt( max( 0.0, 1.0 - rnd.x ) ) );
+
+    vec3 up = abs( n.z ) < 0.999 ? vec3( 0.0, 0.0, 1.0 ) : vec3( 1.0, 0.0, 0.0 );
+    vec3 tangent = normalize( cross( up, n ) );
+    vec3 bitangent = cross( n, tangent );
+
+    BrdfSample brdfSample;
+    brdfSample.wi = normalize( tangent * local_wi.x + bitangent * local_wi.y + n * local_wi.z );
+
+    float NoL = max( dot( n, brdfSample.wi ), 0.0 );
+    brdfSample.pdf = NoL * INV_PI;
+
+    return brdfSample;
+}
+
+// Simplest possible procedural sky color
+vec3 sample_procedural_sky( vec3 ray_direction, vec3 sun_direction ) {
+
+    vec3 view_dir = normalize( ray_direction );
+    vec3 sun_dir  = normalize( sun_direction ); // Points toward the sun.
+
+    // With Y-up, this is the sine of the solar elevation.
+    float sun_height = clamp( sun_dir.y, -1.0, 1.0 );
+
+    float daylight = smoothstep( -0.08, 0.15, sun_height );
+
+    float sunset = smoothstep( -0.25, -0.02, sun_height ) * ( 1.0 - smoothstep( 0.05, 0.25, sun_height ) );
+
+    // Vertical sky gradient.
+    float height = smoothstep( -0.05, 0.75, view_dir.y );
+
+    vec3 night_sky = mix( vec3( 0.010, 0.012, 0.030 ), vec3( 0.005, 0.010, 0.030 ), height );
+
+                         // Horizon                // Zenith
+    vec3 day_sky = mix( vec3( 0.55, 0.70, 0.95 ), vec3( 0.06, 0.20, 0.65 ), height );
+
+    vec3 sky = mix( night_sky, day_sky, daylight );
+
+    // Warm sunset concentrated around the horizon and toward the sun.
+    float horizon = exp( -abs( view_dir.y ) * 6.0 );
+    float sun_facing = pow( max( dot( view_dir, sun_dir ), 0.0 ), 8.0 );
+
+    sky += vec3( 1.0, 0.18, 0.035 ) * sunset * horizon * mix( 0.15, 1.0, sun_facing );
+
+    return sky;
 }

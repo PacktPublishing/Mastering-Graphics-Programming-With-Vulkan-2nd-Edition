@@ -487,7 +487,7 @@ void ObjModel::load_model( cstring filename, cstring path, ArenaAllocator* temp_
                 indirect_command.instanceCount = cpu_data.joint_count;
             }
 
-            gpu.flush_buffer( physics_cpu_buffer, 0, physics_buffer_size );
+            gpu.flush_buffer( physics_cpu_buffer, 0, ( u32 )physics_buffer_size );
 
             // Device-local physics buffer.
             BufferHandle physics_gpu_buffer = gpu.create_buffer( {
@@ -521,7 +521,7 @@ void ObjModel::load_model( cstring filename, cstring path, ArenaAllocator* temp_
             RASSERT( mapped_indirect_buffer->mapped_data );
 
             memcpy( mapped_indirect_buffer->mapped_data, indirect_commands.data, indirect_buffer_size );
-            gpu.flush_buffer( indirect_cpu_buffer, 0, indirect_buffer_size );
+            gpu.flush_buffer( indirect_cpu_buffer, 0, ( u32 )indirect_buffer_size );
 
             BufferHandle indirect_gpu_buffer = gpu.create_buffer( {
                 .size = indirect_buffer_size,

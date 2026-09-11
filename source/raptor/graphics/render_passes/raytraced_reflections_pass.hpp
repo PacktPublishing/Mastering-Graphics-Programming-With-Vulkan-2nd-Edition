@@ -33,7 +33,7 @@ namespace raptor {
         void                    update_psos( FrameGraphResourceContext& context, PipelineUpdatePhase phase ) override;
 
         void                    update_dependent_resources( FrameGraphResourceContext& context ) override;
-        void                    create_descriptors( FrameGraphRenderContext& context );
+        void                    create_descriptors( Renderer* renderer, RenderBlackboard* render_blackboard );
 
         Renderer*               renderer;
 

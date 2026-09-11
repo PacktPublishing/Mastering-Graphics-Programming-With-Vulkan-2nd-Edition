@@ -279,17 +279,17 @@ void DebugPass::render( FrameGraphRenderContext& context ) {
 #endif
 
     // Draw GI debug probe spheres
-    if ( context.render_config->gi_show_probes ) {
-        cb->bind_pipeline( debug_mesh_pipeline.pipeline );
-        cb->bind_vertex_buffer( sphere_mesh_buffer, 0, 0 );
-        cb->bind_index_buffer( sphere_mesh_indices, 0, VK_INDEX_TYPE_UINT32 );
-        cb->bind_descriptor_set(
-            { renderer->gpu->bindless_descriptor_set, sphere_mesh_descriptor_set[ current_frame_index ] },
-            { render_blackboard.scene_cb_offset, render_blackboard.ddgi_constants_offset } );
+    //if ( context.render_config->gi_show_probes ) {
+    //    cb->bind_pipeline( debug_mesh_pipeline.pipeline );
+    //    cb->bind_vertex_buffer( sphere_mesh_buffer, 0, 0 );
+    //    cb->bind_index_buffer( sphere_mesh_indices, 0, VK_INDEX_TYPE_UINT32 );
+    //    cb->bind_descriptor_set(
+    //        { renderer->gpu->bindless_descriptor_set, sphere_mesh_descriptor_set[ current_frame_index ] },
+    //        { render_blackboard.scene_cb_offset, render_blackboard.ddgi_constants_offset } );
 
-        // TODO: draw only one sphere
-        cb->draw_indexed( TopologyType::Triangle, sphere_index_count, context.render_config->gi_total_probes, 0, 0, 0 );
-    }
+    //    // TODO: draw only one sphere
+    //    cb->draw_indexed( TopologyType::Triangle, sphere_index_count, context.render_config->gi_total_probes, 0, 0, 0 );
+    //}
 
     // pipeline = renderer->get_pipeline( debug_material, 1 );
 

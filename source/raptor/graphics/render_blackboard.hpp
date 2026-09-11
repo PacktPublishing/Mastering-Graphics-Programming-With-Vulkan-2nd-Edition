@@ -1,6 +1,7 @@
 #pragma once
 
 #include "foundation/color.hpp"
+#include "foundation/span.hpp"
 
 #include "graphics/gpu_resources.hpp"
 
@@ -10,6 +11,9 @@
 #include "external/glm/vec4.hpp"
 
 namespace raptor {
+
+struct Light;
+struct PointlightShadowsRuntimeData;
 
 // Gpu Data //////////////////////////////////////////////////////////////
 struct alignas( 16 ) GpuFrameData {
@@ -81,41 +85,6 @@ struct alignas( 16 ) GpuFrameData {
 
 }; // struct GpuFrameData
 
-struct alignas( 16 ) GpuLightingData {
-
-    u32                     cubemap_shadows_index;
-    u32                     debug_show_light_tiles;
-    u32                     debug_show_tiles;
-    u32                     debug_show_bins;
-
-    u32                     disable_shadows;
-    u32                     debug_modes;
-    u32                     debug_texture_index;
-    u32                     shadow_visibility_texture_index;
-
-    u32                     volumetric_fog_texture_index;
-    u32                     volumetric_fog_num_slices;
-    f32                     volumetric_fog_near;
-    f32                     volumetric_fog_far;
-
-    f32                     volumetric_fog_distribution_scale;
-    f32                     volumetric_fog_distribution_bias;
-    f32                     gi_intensity;
-    u32                     indirect_lighting_texture_index;
-
-    u32                     bilateral_weights_texture_index;
-    u32                     reflections_texture_index;
-
-    u32                     raytraced_shadow_light_color_type;
-    f32                     raytraced_shadow_light_radius;
-
-    glm::vec3               raytraced_shadow_light_position;
-    f32                     raytraced_shadow_light_intensity;
-
-    u32                     brdf_lut_texture_index;
-    u32                     pad[ 3 ];
-}; // GpuLightingData
-
 
 // Render Configs ////////////////////////////////////////////////////////
 //
@@ -130,7 +99,13 @@ struct LightingRenderConfig {
     bool                    enable_camera_inside    = true;
     bool                    force_fullscreen_light_aabb = false;
 
-    void                    draw_imgui();
+    bool                    load_shadow_test_lights = false;
+    bool                    load_shadow_test_lights_adv = false;
+
+    u32                     selected_light_index = 0;
+    bool                    show_light_edit_debug_draws = false;
+
+    void                    draw_imgui( Span<Light> lights );
 
 }; // struct LightingRenderConfig
 
@@ -152,13 +127,22 @@ struct GpuCullingRenderConfig {
 //
 struct ShadowRenderConfig {
 
-    bool                    disable_shadows = false;
+    bool                    disable_shadows     = false;
+
+    bool                    force_shadow_mip    = false;
+    u32                     forced_shadow_mip   = 0;
+
     f32                     depth_bias_constant = 1.25f;
-    f32                     depth_bias_clamp = 0.0f;
-    f32                     depth_bias_slope = 1.75f;
+    f32                     depth_bias_clamp    = 0.0f;
+    f32                     depth_bias_slope    = 1.75f;
+    bool                    use_slope_mip_scale = true;
 
+    f32                     shadow_resolution_scale = 1.0f;
 
-    void                    draw_imgui();
+    u32                     pcf_samples         = 4;
+    f32                     pcf_radius          = 1.0f;
+
+    void                    draw_imgui( const PointlightShadowsRuntimeData& shadows );
 
 }; // struct ShadowRenderConfig
 
@@ -226,10 +210,10 @@ struct VolumetricFogRenderConfig {
     u32                     noise_type                  = 0;
     f32                     noise_position_scale        = 1.0f;
     f32                     noise_speed_scale           = 0.2f;
-    glm::vec3               box_position                = glm::vec3{ 0, 0, 0 };
-    glm::vec3               box_size                    = glm::vec3{ 1.f, 2.f, 0.5f };
+    glm::vec3               box_position                = glm::vec3{ 3.0f, 0, 0 };
+    glm::vec3               box_size                    = glm::vec3{ 3.f, 0.5f, 2.f };
     f32                     box_density                 = 3.0f;
-    u32                     box_color                   = raptor::Color::green().abgr;
+    u32                     box_color                   = raptor::Color::gray().abgr;
     f32                     temporal_reprojection_jittering_scale = 0.2f;
     f32                     application_dithering_scale = 0.023f;
     bool                    application_apply_opacity_anti_aliasing = true;
@@ -302,16 +286,19 @@ struct RaytracedReflectionsConfig {
     f32                     wavelet_sigma_z = 1.f;
     f32                     wavelet_sigma_n = 128.f;
     f32                     wavelet_sigma_l = 4.f;
+    f32                     intensity = 1.0f;
 
     void                    draw_imgui();
 }; // struct RaytracedReflectionsConfig
 
 //
-struct REStirGIConfig {
+struct ReSTIRGIConfig {
     bool                    enabled = false;
 
+    f32                     gi_intensity = 1.f;
+
     void                    draw_imgui();
-}; // struct REStirGIConfig
+}; // struct ReSTIRGIConfig
 
 //
 struct RenderConfig {
@@ -326,38 +313,12 @@ struct RenderConfig {
     TAARenderConfig         taa;
     RaytracedShadowsConfig  raytraced_shadows;
     RaytracedReflectionsConfig raytraced_reflections;
-    REStirGIConfig          restirgi;
+    ReSTIRGIConfig          restirgi;
 
     u32                     cubemap_debug_face_index = 5;
     bool                    cubemap_face_debug_enabled = false;
 
     bool                    enable_meshlet_animations = false;
-
-    // Global illumination
-    bool                    gi_show_probes = false;
-    glm::vec3               gi_probe_grid_position{ -10.0,0.5,-10.0 };
-    glm::vec3               gi_probe_spacing{ 1.f, 1.f, 1.f };
-    f32                     gi_probe_sphere_scale = 0.1f;
-    f32                     gi_max_probe_offset = 0.4f;
-    f32                     gi_self_shadow_bias = 0.3f;
-    f32                     gi_hysteresis = 0.95f;
-    bool                    gi_debug_border = false;
-    bool                    gi_debug_border_type = false;
-    bool                    gi_debug_border_source = false;
-    u32                     gi_total_probes = 0;
-    f32                     gi_intensity = 1.0f;
-    bool                    gi_use_visibility = true;
-    bool                    gi_use_backface_smoothing = true;
-    bool                    gi_use_perceptual_encoding = true;
-    bool                    gi_use_backface_blending = true;
-    bool                    gi_use_probe_offsetting = true;
-    bool                    gi_recalculate_offsets = false;     // When moving grid or changing spaces, recalculate offsets.
-    bool                    gi_use_probe_status = false;
-    bool                    gi_use_half_resolution = true;
-    bool                    gi_use_infinite_bounces = true;
-    f32                     gi_infinite_bounces_multiplier = 0.75f;
-    i32                     gi_per_frame_probes_update = 1000;
-
     bool                    pointlight_rendering = true;
     bool                    pointlight_use_meshlets = true;
     bool                    use_tetrahedron_shadows = false;
@@ -462,6 +423,20 @@ struct DebugDrawRuntimeData {
 struct PointlightShadowsRuntimeData {
 
     u32                     cubemap_shadows_index;
+
+    BufferHandle            shadow_resolutions[ k_max_frames ];
+    BufferHandle            shadow_resolutions_readback[ k_max_frames ];
+
+    bool                    shadow_resolution_readback_valid[ k_max_frames ]{};
+
+    u32                     mip_light_count[ 3 ]{};
+
+    u32                     resident_pages;
+    u32                     max_mip0_pages;
+
+    VkDeviceSize            resident_memory;
+    VkDeviceSize            allocated_memory;
+    VkDeviceSize            max_mip0_memory;
 
 }; // struct PointlightShadowsRuntimeData
 

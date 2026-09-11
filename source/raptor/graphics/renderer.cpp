@@ -16,6 +16,8 @@
 #include "external/vk_mem_alloc.h"
 #include "external/stb_image.h"
 
+#include "../shaders/shared_structs.h"
+
 #include <mutex>
 
 namespace raptor {
@@ -736,16 +738,16 @@ DescriptorSetHandle Renderer::create_descriptor_set( DescriptorSetBinder& descri
     binding = get_binding_index( reflection_info, "LightConstants" );
     //RASSERT( binding == u16_max || binding == k_light_constants );
     if ( binding != u16_max ) {
-        descriptors.bind_dynamic_buffer( binding, sizeof( GpuLightingData ) );
+        descriptors.bind_dynamic_buffer( binding, sizeof( GpuLightConstants ) );
     }
 
     binding = get_binding_index( reflection_info, "light_consts" );
     //RASSERT( binding == u16_max || binding == k_light_constants );
     if ( binding != u16_max ) {
-        descriptors.bind_dynamic_buffer( binding, sizeof( GpuLightingData ) );
+        descriptors.bind_dynamic_buffer( binding, sizeof( GpuLightConstants ) );
     }
     /*if ( has_binding( set_layout, k_light_constants ) ) {
-        descriptors.bind_dynamic_buffer( k_light_constants, sizeof( GpuLightingData ) );
+        descriptors.bind_dynamic_buffer( k_light_constants, sizeof( GpuLightConstants ) );
     }*/
 
     binding = get_binding_index( reflection_info, "as" );

@@ -1485,6 +1485,7 @@ VkShaderModuleCreateInfo ShaderCompiler::compile_shader_slang( cstring code, u32
     search_paths.push( vulkan_binaries_path );
     search_paths.push( "../source/shaders/slang" );
     search_paths.push( "../../../source/shaders/slang" );
+    search_paths.push( "../../../source/shaders/slang/chapter15" );
 
     //for ( u32 i = 0; i < includes.size; ++i ) {
     //    search_paths.push_back( includes[ i ].data );

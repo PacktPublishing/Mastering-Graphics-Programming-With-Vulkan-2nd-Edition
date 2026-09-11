@@ -176,7 +176,7 @@ int main( int argc, char** argv ) {
 
     // graphics
     GpuDeviceCreation dc;
-    dc.debug_options.set_default();
+    dc.debug_options.set_validation();
     dc.enable_bindless = true;
     dc.enable_ray_tracing = true;
     dc.set_window( window.width, window.height, window.platform_handle ).set_allocator( &MemoryService::instance()->system_allocator )
@@ -224,7 +224,7 @@ int main( int argc, char** argv ) {
 
     FrameRenderer frame_renderer;
     frame_renderer.init( allocator, &renderer, &frame_graph, &scene_graph, &render_scene );
-    frame_renderer.set_upscale_settings( { .render_scale = 0.666f, .enabled = true } );
+    frame_renderer.set_upscale_settings( { .render_scale = 0.666f, .enabled = false } );
     frame_renderer.calculate_resolution_info( gpu.swapchain_width, gpu.swapchain_height );
 
     frame_graph_builder.set_resolution_info( &frame_renderer.resolution_info );
@@ -233,6 +233,9 @@ int main( int argc, char** argv ) {
     // Add locally declared rendering features to the frame renderer to enable them
     MeshesRenderingFeature meshes;
     frame_renderer.meshes = &meshes;
+
+    PointlightShadowsRenderingFeature pointlight_shadows_feature;
+    frame_renderer.point_shadows = &pointlight_shadows_feature;
 
     GpuCullingRenderingFeature gpu_culling_feature;
     frame_renderer.gpu_culling = &gpu_culling_feature;
@@ -499,39 +502,21 @@ int main( int argc, char** argv ) {
                     renderer.set_presentation_mode( ( raptor::PresentMode::Enum )present_mode );
                 }
 
-                if ( ImGui::CollapsingHeader( "Lights" ) ) {
-                    static u32 light_to_debug = 0;
-                    ImGui::SliderUint( "Active Lights", &render_scene.active_lights, 1, k_num_lights - 1 );
-                    ImGui::SliderUint( "Light Index", &light_to_debug, 0, render_scene.active_lights - 1 );
-
-                    Light& selected_light = render_scene.lights[ light_to_debug ];
-                    ImGui::SliderFloat3( "Light position", &selected_light.world_position[0], -10.f, 10.f, "%2.3f" );
-                    ImGui::SliderFloat( "Light radius", &selected_light.radius, 0.01f, 30.f, "%2.3f" );
-                    ImGui::SliderFloat( "Light intensity", &selected_light.intensity, 0.01f, 30.f, "%2.3f" );
-
-                    f32 light_color[ 3 ] = { selected_light.color.x, selected_light.color.y, selected_light.color.z };
-                    ImGui::ColorEdit3( "Light color", light_color );
-                    selected_light.color = { light_color[ 0 ], light_color[ 1 ], light_color[ 2 ] };
-
-                    ImGui::Checkbox( "Light Edit Debug Draws", &frame_renderer.render_config.show_light_edit_debug_draws );
-
-                    if ( frame_renderer.render_config.show_light_edit_debug_draws ) {
-                        const Light& light = render_scene.lights[ light_to_debug ];
-                        debug_draw_feature.point_light_wire( light.world_position, light.radius, Color::white() );
-                    }
-                }
-
                 if ( ImGui::Button( "Reload Pipelines" ) ) {
 
                     frame_renderer.reload_psos();
                 }
 
+                Span<Light> active_lights{};
+                active_lights.data = render_scene.active_lights > 0 ? &render_scene.lights[ 0 ] : nullptr;
+                active_lights.size = render_scene.active_lights;
+                frame_renderer.render_config.lighting.draw_imgui( active_lights );
+                frame_renderer.render_config.shadows.draw_imgui( frame_renderer.render_blackboard.point_shadows );
+
                 frame_renderer.render_config.debug_draw.mesh_instances_count = render_scene.mesh_instances.size;
                 frame_renderer.render_config.debug_draw.draw_imgui();
-                frame_renderer.render_config.lighting.draw_imgui();
                 frame_renderer.render_config.gpu_culling.draw_imgui();
                 frame_renderer.render_config.meshlets.draw_imgui();
-                frame_renderer.render_config.shadows.draw_imgui();
                 frame_renderer.render_config.post.draw_imgui();
                 frame_renderer.render_config.volumetric_fog.draw_imgui();
                 frame_renderer.render_config.taa.draw_imgui();
@@ -702,12 +687,6 @@ int main( int argc, char** argv ) {
                                                            gfx_done_value,
                                                            VK_PIPELINE_STAGE_2_TRANSFER_BIT ) );
 
-            if ( wait_for_sparse_semaphore ) {
-                waits.push( GpuDevice::build_semaphore_submit( gpu.vulkan_bind_binary_semaphore,
-                                                               0,
-                                                               VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT_KHR ) );
-            }
-
             // SIGNALS
             // Signal compute, last texture will be written by a compute shader
             signals.clear();
@@ -732,6 +711,12 @@ int main( int argc, char** argv ) {
             // Second wait: frame limiter timeline semaphore, waiting on the frame limiter value
             waits.push( GpuDevice::build_semaphore_submit( gpu.vulkan_graphics_timeline_semaphore,
                                                            frame_limiter_value, VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT, 0 ) );
+
+            if ( wait_for_sparse_semaphore ) {
+                waits.push( GpuDevice::build_semaphore_submit( gpu.vulkan_bind_binary_semaphore,
+                                                               0,
+                                                               VK_PIPELINE_STAGE_2_ALL_GRAPHICS_BIT ) );
+            }
 
             cbs.push( frame_graph.get_command_buffer_from_batch( CommandQueueType::Graphics, 0 ) );
 

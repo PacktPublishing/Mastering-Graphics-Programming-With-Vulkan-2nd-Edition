@@ -130,6 +130,7 @@ namespace GlobalSamplers {
         LinearRepeat,
         NearestClamp,
         NearestRepeat,
+        ShadowLinearClamp,
         Count
     }; // enum Enum
 } // namespace GlobalSamplers
@@ -194,7 +195,10 @@ struct GpuDevice : public Service {
     void                            destroy_page_pool( PagePoolHandle pool_handle );
 
     void                            reset_pool( PagePoolHandle pool_handle );
-    void                            bind_image_pages( PagePoolHandle pool_handle, ImageHandle handle, u32 x, u32 y, u32 width, u32 height, u32 layer );
+    void                            bind_image_pages( PagePoolHandle pool_handle, ImageHandle handle, u32 x, u32 y, u32 width, u32 height, u32 layer, u32 mip_level );
+    void                            unbind_image_pages( PagePoolHandle pool_handle, ImageHandle handle, u32 x, u32 y, u32 width, u32 height, u32 layer, u32 mip_level );
+    
+    SparseImageMemoryStats          get_sparse_image_memory_stats( PagePoolHandle pool, ImageHandle image );
 
     void                            update_descriptor_set( DescriptorSetHandle set );
 
@@ -363,6 +367,8 @@ struct GpuDevice : public Service {
     bool                            timestamps_enabled                  = false;
     bool                            resized                             = false;
     bool                            vertical_sync                       = false;
+    bool                            cooperative_vector_supported        = false;
+    VkDeviceSize                    cooperative_vector_matrix_alignment = 64;
 
     bool                            device_fault_extension_present      = false;
     bool                            device_fault_enabled                = false;
@@ -437,8 +443,12 @@ struct GpuDevice : public Service {
     Array<BLASBuildInfo>            blas_build_requests;
     Array<TLASBuildInfo>            tlas_build_requests;
 
+    // Spase resources
     Array<SparseMemoryBindInfo>     pending_sparse_memory_info;
     Array<VkSparseImageMemoryBind>  pending_sparse_queue_binds;
+
+    Array<SparseMemoryBindInfo>     pending_sparse_opaque_memory_info;
+    Array<VkSparseMemoryBind>       pending_sparse_opaque_queue_binds;
 
     u32                             num_threads = 1;
     f32                             gpu_timestamp_frequency;
@@ -450,7 +460,10 @@ struct GpuDevice : public Service {
     u32                             ray_query_present : 1                    = false;
     u32                             unified_layout_present : 1               = false;
     u32                             pipeline_binary_present : 1              = false;
-    u32                             feature_flags_padding : 25               = false;
+    u32                             device_shader_atomic_float_extension_present : 1 = false;
+    u32                             cooperative_matrix_extension_present : 1 = false;
+    u32                             shader_replicated_composites_extension_present : 1 = false;
+    u32                             feature_flags_padding : 22               = false;
 
     sizet                           ubo_alignment                   = 256;
     sizet                           ssbo_alignemnt                  = 256;

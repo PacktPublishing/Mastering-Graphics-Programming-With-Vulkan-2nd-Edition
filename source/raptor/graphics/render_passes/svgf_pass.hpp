@@ -134,8 +134,7 @@ namespace raptor {
 
         Renderer*               renderer;
 
-        u32                     reflections_constants_offset;
-        u32                     restirgi_constants_offset;
+        u32                     constants_offset;
 
         SVGFCommonResources     resources;
         SVGFAccumulationOutput  output;
@@ -145,7 +144,7 @@ namespace raptor {
         ComputePipelineState    pipeline;
 
         f32                     texture_scale = 1.0f;
-        bool                    reset_history = false;
+        bool                    reset_history = true;
 
     }; // SVGFAccumulationPass
 
@@ -171,8 +170,7 @@ namespace raptor {
 
         Renderer*               renderer;
 
-        u32                     reflections_constants_offset;
-        u32                     restirgi_constants_offset;
+        u32                     constants_offset;
 
         SVGFCommonResources     resources;
         SVGFAccumulationOutput  accumulation_input;
@@ -226,14 +224,15 @@ namespace raptor {
         ImageViewHandle         reflections_ping_pong_color_image_view;
         ImageHandle             restirgi_ping_pong_color_image;
         ImageViewHandle         restirgi_ping_pong_color_image_view;
-        ImageHandle             ping_pong_variance_image;
-        ImageViewHandle         ping_pong_variance_image_view;
+        ImageHandle             reflections_ping_pong_variance_image;
+        ImageViewHandle         reflections_ping_pong_variance_image_view;
+        ImageHandle             restirgi_ping_pong_variance_image;
+        ImageViewHandle         restirgi_ping_pong_variance_image_view;
 
         ImageHandle             svgf_reflections_output_texture;
         ImageHandle             svgf_restirgi_output_texture;
 
-        u32                     reflections_constant_offsets[ k_num_passes ];
-        u32                     restirgi_constant_offsets[ k_num_passes ];
+        u32                     constant_offsets[ k_num_passes ];
 
         DescriptorSetHandle     descriptor_set[ k_num_passes ];
         ComputePipelineState    pipeline;

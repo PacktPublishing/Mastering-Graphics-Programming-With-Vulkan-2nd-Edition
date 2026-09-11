@@ -1,0 +1,164 @@
+#ifndef NEURAL_MATERIAL_COMMON_SLANG
+#define NEURAL_MATERIAL_COMMON_SLANG
+
+static const uint k_neural_material_batch_size = 256;
+static const uint k_neural_material_input_size = 11;
+static const uint k_neural_material_latent_size = 8;
+
+[Differentiable]
+float relu(float x) {
+    return max(x, 0.0f);
+}
+
+[Differentiable]
+float saturate_f32(float x) {
+    return clamp(x, 0.0f, 1.0f);
+}
+
+[Differentiable]
+float safe_sqrt(float x) {
+    return sqrt(max(x, 1e-8f));
+}
+
+[Differentiable]
+float safe_rcp(float x) {
+    return 1.0f / max(abs(x), 1e-8f);
+}
+
+[Differentiable]
+float square(float x) {
+    return x * x;
+}
+
+[Differentiable]
+float l1_log_loss(float prediction, float target) {
+    // return log(1.0f + abs(prediction - target));
+    float eps = 1e-6;
+    return abs(log(prediction + eps) - log(target + eps));
+}
+
+[Differentiable]
+float3 l1_log_loss3(float3 prediction, float3 target) {
+
+    return float3(
+        l1_log_loss(prediction.x, target.x),
+        l1_log_loss(prediction.y, target.y),
+        l1_log_loss(prediction.z, target.z));
+}
+
+[Differentiable]
+float l1_log_loss_avg(float3 prediction, no_diff float3 target) {
+
+    return (l1_log_loss(prediction.x, target.x) +
+            l1_log_loss(prediction.y, target.y) +
+            l1_log_loss(prediction.z, target.z)) / 3.0f;
+}
+
+// Log1p loss
+[Differentiable]
+float l1_log1p_loss(float prediction, float target) {
+    return abs(log(1.0f + prediction) - log(1.0f + target));
+}
+
+[Differentiable]
+float l1_log1p_loss_avg(float3 prediction, no_diff float3 target) {
+    return (
+        l1_log1p_loss(prediction.x, target.x) +
+        l1_log1p_loss(prediction.y, target.y) +
+        l1_log1p_loss(prediction.z, target.z)) / 3.0f;
+}
+
+[Differentiable]
+float l1_loss_avg(float3 prediction, no_diff float3 target)
+{
+    float3 e = abs(prediction - target);
+    return (e.x + e.y + e.z) / 3.0f;
+}
+
+[Differentiable]
+float mixed_log1p_l1_loss_avg(float3 prediction, no_diff float3 target)
+{
+    const float log_weight = 0.8f;
+    const float l1_weight = 0.2f;
+
+    return log_weight * l1_log1p_loss_avg(prediction, target) +
+           l1_weight * l1_loss_avg(prediction, target);
+}
+
+// Tonemapped loss
+[Differentiable]
+float3 simple_tonemap(float3 x) {
+    return x / (1.0f.xxx + x);
+}
+
+[Differentiable]
+float tonemapped_l1_loss_avg(float3 prediction, no_diff float3 target) {
+    float3 p = simple_tonemap(prediction);
+    float3 t = simple_tonemap(target);
+
+    float3 e = abs(p - t);
+    return (e.x + e.y + e.z) / 3.0f;
+}
+
+uint wang_hash(uint seed) {
+
+    seed = (seed ^ 61u) ^ (seed >> 16u);
+    seed *= 9u;
+    seed = seed ^ (seed >> 4u);
+    seed *= 0x27d4eb2du;
+    seed = seed ^ (seed >> 15u);
+    return seed;
+}
+
+float rand01(inout uint seed) {
+
+    seed = wang_hash(seed);
+    return float(seed & 0x00ffffffu) / float(0x01000000u);
+}
+
+float rand_range(inout uint seed, float min_value, float max_value) {
+
+    return lerp(min_value, max_value, rand01(seed));
+}
+
+float3 safe_normalize(float3 v) {
+
+    const float len_sq = dot(v, v);
+    if (len_sq <= 1e-10f)
+    {
+        return float3(0.0f, 0.0f, 1.0f);
+    }
+
+    return v * rsqrt(len_sq);
+}
+
+void build_tangent_frame(float3 n, out float3 t, out float3 b) {
+
+    const float3 up = abs(n.z) < 0.999f ? float3(0.0f, 0.0f, 1.0f) : float3(0.0f, 1.0f, 0.0f);
+    t = safe_normalize(cross(up, n));
+    b = safe_normalize(cross(n, t));
+}
+
+// Adam optimizer scalar step.
+void optimizer_step( inout float value, inout float grad,
+                     inout float exp_avg, inout float exp_avg_sq,
+                     float learning_rate, uint optimize_counter ) {
+
+    const float beta1 = 0.9f;
+    const float beta2 = 0.999f;
+    const float epsilon = 1e-7f;
+
+    exp_avg = beta1 * exp_avg + (1.0f - beta1) * grad;
+    exp_avg_sq = beta2 * exp_avg_sq + (1.0f - beta2) * grad * grad;
+
+    const float bias_correction1 = 1.0f - pow(beta1, float(optimize_counter + 1));
+    const float bias_correction2 = 1.0f - pow(beta2, float(optimize_counter + 1));
+
+    const float m_hat = exp_avg / max(bias_correction1, 1e-8f);
+    const float v_hat = exp_avg_sq / max(bias_correction2, 1e-8f);
+
+    value -= learning_rate * m_hat / (sqrt(v_hat) + epsilon);
+    grad = 0.0f;
+}
+
+#endif // NEURAL_MATERIAL_COMMON_SLANG

@@ -329,12 +329,13 @@ namespace raptor {
     //
     struct alignas( 16 ) GpuMeshInstanceData {
         glm::mat4               world;
-       // glm::mat4               inverse_world;
 
         u32                     mesh_index;
         u32                     pad000;
         u32                     pad001;
         u32                     pad002;
+
+        glm::mat4               inverse_world;
     }; // struct GpuMeshInstanceData
 
     //
@@ -488,10 +489,12 @@ namespace raptor {
         glm::vec4               aabb_min;
         glm::vec4               aabb_max;
 
-        f32                     shadow_map_resolution;
+        u32                     shadow_mip_level;
+        u32                     shadow_map_resolution;
         u32                     tile_x;
         u32                     tile_y;
         f32                     solid_angle;
+        f32                     projected_radius;
 
     }; // struct Light
 
@@ -504,7 +507,7 @@ namespace raptor {
         glm::vec3               color;
         f32                     intensity;
 
-        f32                     shadow_map_resolution;
+        f32                     shadow_mip_level;
         f32                     rcp_n_minus_f;          // Calculation of 1 / (n - f) used to retrieve cubemap shadows depth value.
         f32                     pad1;
         f32                     pad2;

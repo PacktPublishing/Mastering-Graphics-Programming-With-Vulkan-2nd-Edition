@@ -115,14 +115,21 @@ void GameCamera::update( InputService* input, u32 window_width, u32 window_heigh
     }
 }
 
+static bool s_jittering_optimized = false;
+
 void GameCamera::apply_jittering( f32 x, f32 y ) {
     // Reset camera projection
     camera.calculate_projection_matrix();
 
-    //camera.projection.m20 += x;
-    //camera.projection.m21 += y;
-    glm::mat4 jittering_matrix = glm::translate( glm::mat4( 1.0f ), glm::vec3{ x, y, 0.0f } );
-    camera.projection = jittering_matrix * camera.projection;
+    if ( s_jittering_optimized ) {
+        camera.projection[ 2 ][ 0 ] += x * camera.projection[ 2 ][ 3 ];
+        camera.projection[ 2 ][ 1 ] += y * camera.projection[ 2 ][ 3 ];
+    }
+    else {
+        glm::mat4 jittering_matrix = glm::translate( glm::mat4( 1.0f ), glm::vec3{ x, y, 0.0f } );
+        camera.projection = jittering_matrix * camera.projection;
+    }
+
     camera.calculate_view_projection();
 }
 

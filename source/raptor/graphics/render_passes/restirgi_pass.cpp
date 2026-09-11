@@ -8,7 +8,7 @@ namespace raptor {
 
 static void cache_restirgi_common_resources( FrameGraph* frame_graph, ReSTIRGICommonResources* resources ) {
 
-    FrameGraphResource* resource = frame_graph->get_resource( "gbuffer_normals" );
+    FrameGraphResource* resource = frame_graph->get_resource( "svgf_current_normals" );
     resources->normals_texture = resource->resource_info.texture.image;
     resources->normals_image_view = resource->resource_info.texture.image_view;
 
@@ -16,7 +16,7 @@ static void cache_restirgi_common_resources( FrameGraph* frame_graph, ReSTIRGICo
     resources->depth_texture = resource->resource_info.texture.image;
     resources->depth_image_view = resource->resource_info.texture.image_view;
 
-    resource = frame_graph->get_resource( "linear_z_dd" );
+    resource = frame_graph->get_resource( "svgf_current_linear_depth" );
     resources->linear_depth_texture = resource->resource_info.texture.image;
     resources->linear_depth_image_view = resource->resource_info.texture.image_view;
 
@@ -24,7 +24,7 @@ static void cache_restirgi_common_resources( FrameGraph* frame_graph, ReSTIRGICo
     resources->albedo_texture = resource->resource_info.texture.image;
     resources->albedo_image_view = resource->resource_info.texture.image_view;
 
-    resource = frame_graph->get_resource( "mesh_id" );
+    resource = frame_graph->get_resource( "svgf_current_mesh_id" );
     resources->mesh_id_texture = resource->resource_info.texture.image;
     resources->mesh_id_image_view = resource->resource_info.texture.image_view;
 
@@ -32,7 +32,7 @@ static void cache_restirgi_common_resources( FrameGraph* frame_graph, ReSTIRGICo
     resources->orm_texture = resource->resource_info.texture.image;
     resources->orm_image_view = resource->resource_info.texture.image_view;
 
-    resource = frame_graph->get_resource( "motion_vectors" );
+    resource = frame_graph->get_resource( "svgf_current_motion_vectors" );
     resources->motion_vectors_texture = resource->resource_info.texture.image;
     resources->motion_vectors_image_view = resource->resource_info.texture.image_view;
 
@@ -86,15 +86,7 @@ void ReSTIRGIPass::declare_frame_graph_node( FrameGraphResourceContext& context 
         .inputs = {
             {
                 .type = FrameGraphResourceType_Texture,
-                .handle = builder.get_output_handle( "gbuffer_pass_late", "depth" )
-            },
-            {
-                .type = FrameGraphResourceType_Texture,
                 .handle = builder.get_output_handle( "gbuffer_pass_late", "gbuffer_colour" )
-            },
-            {
-                .type = FrameGraphResourceType_Texture,
-                .handle = builder.get_output_handle( "gbuffer_pass_late", "gbuffer_normals" )
             },
             {
                 .type = FrameGraphResourceType_Texture,
@@ -102,8 +94,20 @@ void ReSTIRGIPass::declare_frame_graph_node( FrameGraphResourceContext& context 
             },
             {
                 .type = FrameGraphResourceType_Texture,
-                .handle = builder.get_output_handle( "motion_vector_pass", "visibility_motion_vectors" )
-            }
+                .handle = builder.get_output_handle( "svgf_guide_downsample_pass", "svgf_current_normals" )
+            },
+            {
+                .type = FrameGraphResourceType_Texture,
+                .handle = builder.get_output_handle( "svgf_guide_downsample_pass", "svgf_current_mesh_id" )
+            },
+            {
+                .type = FrameGraphResourceType_Texture,
+                .handle = builder.get_output_handle( "svgf_guide_downsample_pass", "svgf_current_linear_depth" )
+            },
+            {
+                .type = FrameGraphResourceType_Texture,
+                .handle = builder.get_output_handle( "svgf_guide_downsample_pass", "svgf_current_motion_vectors" )
+            },
         },
         .outputs = {
             builder.create_output_handle( {
@@ -222,11 +226,16 @@ void ReSTIRGIPass::render( FrameGraphRenderContext& context ) {
         descriptors_created = true;
     }
 
+    const u32 restir_width = ceilu32(render_blackboard.render_width * texture_scale);
+    const u32 restir_height = ceilu32(render_blackboard.render_height * texture_scale);
+
     bool ping = ( gpu.absolute_frame % 2 ) == 0;
     BufferHandle temporal_reservoir_buffer_read = ping ? temporal_reservoir_buffer[ 0 ] : temporal_reservoir_buffer[ 1 ];
     BufferHandle temporal_reservoir_buffer_write = ping ? temporal_reservoir_buffer[ 1 ] : temporal_reservoir_buffer[ 0 ];
 
     CommandBuffer* cb = context.gpu_commands;
+
+    cb->push_marker( "Sample generation" );
 
     if ( reset_history ) {
         cb->add_buffer_barrier( spatial_reservoir_buffer,
@@ -288,8 +297,11 @@ void ReSTIRGIPass::render( FrameGraphRenderContext& context ) {
     cb->bind_descriptor_set( { renderer->gpu->bindless_descriptor_set, descriptor_set },
                               { context.render_blackboard->scene_cb_offset, constants_offset, render_blackboard.lighting.lighting_constants_cb_offset } );
 
-    cb->trace_rays( sample_generation_pipeline.pipeline, render_blackboard.render_width / 2, render_blackboard.render_height / 2, 1 );
+    cb->trace_rays( sample_generation_pipeline.pipeline, restir_width, restir_height, 1 );
 
+    cb->pop_marker();
+
+    cb->push_marker( "Spatial sampling" ); 
     cb->add_buffer_barrier( temporal_reservoir_buffer_write,
         0,
         reservoir_buffer_size,
@@ -314,13 +326,15 @@ void ReSTIRGIPass::render( FrameGraphRenderContext& context ) {
     cb->bind_pipeline( spatial_sampling_pipeline.pipeline );
     cb->bind_descriptor_set( { renderer->gpu->bindless_descriptor_set, descriptor_set },
                               { context.render_blackboard->scene_cb_offset, constants_offset, render_blackboard.lighting.lighting_constants_cb_offset } );
-    cb->dispatch( ( render_blackboard.render_width / 2 + 7 ) / 8, ( render_blackboard.render_height / 2 + 7 ) / 8, 1 );
+    cb->dispatch( ( restir_width + 7 ) / 8, ( restir_height + 7 ) / 8, 1 );
+
+    cb->pop_marker();
 
     // cb->bind_pipeline( temporal_accumulation_pipeline.pipeline );
     // cb->bind_descriptor_set( { renderer->gpu->bindless_descriptor_set, descriptor_set },
     //                           { context.render_blackboard->scene_cb_offset, constants_offset, render_blackboard.lighting.lighting_constants_cb_offset } );
     // cb->dispatch( ( render_blackboard.render_width / 2 + 7 ) / 8, ( render_blackboard.render_height / 2 + 7 ) / 8, 1 );
-
+    
     cb->add_image_barrier( output_indirect_texture, range_aspect( VK_IMAGE_ASPECT_COLOR_BIT, 0, VK_REMAINING_MIP_LEVELS, 0, VK_REMAINING_ARRAY_LAYERS ),
                           { VK_PIPELINE_STAGE_2_TRANSFER_BIT,
                             VK_ACCESS_2_TRANSFER_READ_BIT,
@@ -330,7 +344,7 @@ void ReSTIRGIPass::render( FrameGraphRenderContext& context ) {
                             VK_ACCESS_2_TRANSFER_WRITE_BIT,
                           VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL } );
 
-    // NOTE(marco): re-enabled for a biased version of the algorithm
+    // NOTE(marco): re-enable for a biased version of the algorithm
     // cb->add_buffer_barrier( temporal_reservoir_buffer_write,
     //     0,
     //     reservoir_buffer_size,
@@ -350,11 +364,11 @@ void ReSTIRGIPass::render( FrameGraphRenderContext& context ) {
 
     // cb->copy_buffer( spatial_reservoir_buffer, 0, temporal_reservoir_buffer_write, 0, reservoir_buffer_size );
 
-    cb->copy_image( output_indirect_texture, output_history_texture, {
-        VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
-        VK_ACCESS_2_SHADER_READ_BIT,
-        VK_IMAGE_LAYOUT_READ_ONLY_OPTIMAL
-    } );
+    //cb->copy_image( output_indirect_texture, output_history_texture, {
+    //    VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
+    //    VK_ACCESS_2_SHADER_READ_BIT,
+    //    VK_IMAGE_LAYOUT_READ_ONLY_OPTIMAL
+    //} );
 }
 
 void ReSTIRGIPass::on_resize(FrameGraphResourceContext& context, u32 new_width, u32 new_height ) {
@@ -410,6 +424,8 @@ void ReSTIRGIPass::create_gpu_resources( FrameGraphResourceContext& context ) {
 
     cache_restirgi_common_resources( frame_graph, &resources );
 
+    texture_scale = context.render_config->raytraced_reflections.reflections_scale;
+
     ImageCreation texture_creation{ };
     const u32 adjusted_width = ceilu32( render_blackboard.render_width * texture_scale );
     const u32 adjusted_height = ceilu32( render_blackboard.render_height * texture_scale );
@@ -450,7 +466,7 @@ void ReSTIRGIPass::create_gpu_resources( FrameGraphResourceContext& context ) {
         VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_STORAGE_BIT,
         output_indirect_texture, output_indirect_image_view );
 
-    reservoir_buffer_size = adjusted_width * adjusted_height * sizeof( Reservoir );
+    reservoir_buffer_size = adjusted_width * adjusted_height * sizeof( ReservoirPacked );
     BufferCreation buffer_creation{
         .size = reservoir_buffer_size,
         .usage = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT |
@@ -474,6 +490,8 @@ void ReSTIRGIPass::upload_gpu_data( FrameGraphResourceContext& context ) {
     if ( !enabled ) {
         return;
     }
+
+    cache_restirgi_common_resources( context.frame_graph, &resources );
 
     GpuDevice& gpu = *renderer->gpu;
     RenderScene& scene = *context.render_scene;
@@ -515,8 +533,8 @@ void ReSTIRGIPass::upload_gpu_data( FrameGraphResourceContext& context ) {
         gpu_constants->light_range = light_radius;
         gpu_constants->light_intensity = light_intensity;
 
-        gpu_constants->resolution[0] = render_blackboard.render_width;
-        gpu_constants->resolution[1] = render_blackboard.render_height;
+        gpu_constants->resolution[0] = ceilu32( render_blackboard.render_width * texture_scale );
+        gpu_constants->resolution[1] = ceilu32( render_blackboard.render_height * texture_scale );
     }
 }
 
@@ -530,12 +548,6 @@ void ReSTIRGIPass::destroy_gpu_resources( FrameGraphResourceContext& context ) {
     gpu.destroy_buffer( spatial_reservoir_buffer );
     gpu.destroy_buffer( temporal_reservoir_buffer[ 0 ] );
     gpu.destroy_buffer( temporal_reservoir_buffer[ 1 ] );
-    gpu.destroy_image( resources.normal_history_texture );
-    gpu.destroy_image_view( resources.normal_history_image_view );
-    gpu.destroy_image( resources.linear_depth_history_texture );
-    gpu.destroy_image_view( resources.linear_depth_history_image_view );
-    gpu.destroy_image( resources.mesh_id_history_texture );
-    gpu.destroy_image_view( resources.mesh_id_history_image_view );
     gpu.destroy_image_view( output_image_view );
     gpu.destroy_image( output_texture );
     gpu.destroy_image_view( output_history_image_view );

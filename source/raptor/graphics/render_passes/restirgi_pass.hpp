@@ -72,6 +72,20 @@ namespace raptor {
         u32  pad;
     };
 
+    struct alignas( 16 ) ReservoirPacked {
+        glm::vec3   xs;
+        u32         ns_oct;
+        u32         lo_rgb9e5;
+        u32         s_albedo_rgb9e5;
+        u32         s_rough_metal;
+        f32         p_hat;
+        f32         W;
+        f32         w_sum;
+        u32         M;
+        u32         debug;
+    };
+    static_assert( sizeof( ReservoirPacked ) == 48, "GLSL std430 mismatch" );
+
     //
     //
     struct ReSTIRGIPass : public FrameGraphRenderPass {

@@ -274,7 +274,7 @@ void main() {
                 uint word_id = light_id / 32;
                 uint bit_id = light_id % 32;
 
-                if ( ( tiles[ address + word_id ] & ( 1 << bit_id ) ) != 0 ) {
+                if ( ( tiles[ address + word_id ] & ( 1 << bit_id ) ) != 0u ) {
                     uint global_light_index = light_indices[ light_id ];
                     Light point_light = lights[ global_light_index ];
 
@@ -305,7 +305,7 @@ void main() {
                             vec2 disk_offset = vogel_disk_offset(i, samples, 0.1f);
                             vec3 sampling_position = v + (t * disk_offset.x + b * disk_offset.y) * pcf_radius;
 
-                            float closest_depth = texture( global_textures_cubemaps_array[nonuniformEXT(cubemap_shadows_index)], vec4(sampling_position, shadow_light_index) ).r;
+                            float closest_depth = texture( global_textures_cubemaps_array[nonuniformEXT(light_cb.cubemap_shadows_index)], vec4(sampling_position, shadow_light_index) ).r;
                             float closest_local_z = decode_local_z( closest_depth, light_radius, point_light.rcp_n_minus_f );
 
                             // bias in local_z space

@@ -27,6 +27,7 @@ namespace raptor {
         static const Color          blue()          { return { 0xffff0000 }; }
         static const Color          yellow()        { return { 0xff00ffff }; }
         static const Color          black()         { return { 0xff000000 }; }
+        static const Color          gray()          { return { 0xff808080 }; }
         static const Color          white()         { return { 0xffffffff }; }
         static const Color          transparent()   { return { 0x00000000 }; }
 

@@ -13,6 +13,9 @@
 
 
 // NEW
+
+const uint k_shadow_mip_count = 3;
+
 struct ShadowDrawKey {
     uint    light_index;
     uint    face_index;
@@ -48,8 +51,8 @@ struct ShadowMeshletInstance {
     uint global_meshlet_index;  // Index into the global meshlet buffer.
 };
 
-const uint k_shadow_meshlet_index_bits = 26u;
-const uint k_shadow_meshlet_index_mask = (1u << k_shadow_meshlet_index_bits) - 1u;
+const uint k_shadow_meshlet_index_bits = 26;
+const uint k_shadow_meshlet_index_mask = (1 << k_shadow_meshlet_index_bits) - 1;
 const uint k_shadow_face_mask = 0x3fu;
 
 uint pack_shadow_meshlet(uint global_meshlet_index, uint face_mask) {
@@ -82,7 +85,7 @@ layout(std430, set = MATERIAL_SET, binding = 33) buffer ShadowIndirectCommandBuf
 
 // Counter
 layout(std430, set = MATERIAL_SET, binding = 34) buffer ShadowIndirectCountBuffer {
-    uint draw_count;
+    uint draw_count[ k_shadow_mip_count ];
 } shadow_indirect_count_sb;
 
 
@@ -175,7 +178,11 @@ bool aabb_intersects_cubemap_face(vec3 light_position, vec3 face_forward, vec3 f
 
 void main() {
     if (gl_GlobalInvocationID.x == 0) {
-        shadow_indirect_count_sb.draw_count = 0;
+        
+        for ( uint mip = 0; mip < k_shadow_mip_count; ++mip ) {
+            shadow_indirect_count_sb.draw_count[mip] = 0;
+        }
+
         shadow_meshlet_alloc_sb.meshlet_instance_cursor = 0;
 
         //if (pc.clear_debug != 0) 
@@ -212,6 +219,7 @@ layout(push_constant) uniform Push {
     uint key_count;
     uint mesh_instance_count;
     uint tiles_per_key;
+    uint draw_base[k_shadow_mip_count];
     uint pad001;
 } pc;
 
@@ -259,28 +267,44 @@ bool sphere_intersects_cubemap_face(vec3 light_position, vec3 face_forward, vec3
     float x = dot(relative_center, face_right);
     float y = dot(relative_center, face_up);
 
-    if (z + sphere_radius < near_z) return false;
-    if (z - sphere_radius > far_z) return false;
-    if (abs(x) > z + sphere_radius) return false;
-    if (abs(y) > z + sphere_radius) return false;
+    if (z + sphere_radius < near_z) {
+        return false;
+    }
+
+    if (z - sphere_radius > far_z) {
+        return false;
+    }
+
+    // The side planes of a 90-degree cubemap face have normals with length sqrt(2),
+    // so the sphere radius must be scaled by sqrt(2) for the plane test.
+    const float side_radius = sphere_radius * 1.41421356;
+
+    if (abs(x) > z + side_radius) {
+        return false;
+    }
+
+    if (abs(y) > z + side_radius) {
+        return false;
+    }
 
     return true;
 }
 
 uint calculate_face_mask(vec3 light_position, float light_radius, vec3 sphere_center, float sphere_radius) {
-    uint face_mask = 0u;
+    uint face_mask = 0;
 
-    for (uint face = 0u; face < 6u; ++face) {
+    for (uint face = 0; face < 6; ++face) {
         FaceBasis basis = make_face_basis(face);
 
-        if (sphere_intersects_cubemap_face(light_position, basis.forward, basis.right, basis.up, sphere_center, sphere_radius, 0.01, light_radius)) {
-            face_mask |= 1u << face;
+        if (sphere_intersects_cubemap_face(light_position, basis.forward, basis.right, basis.up, sphere_center, sphere_radius, 0.01, light_radius)) 
+        {
+            face_mask |= 1 << face;
         }
     }
 
     // A mesh intersecting the light sphere must affect at least one cubemap face.
     // Fall back to all faces if bounds or numerical errors produce an empty mask.
-    return face_mask != 0u ? face_mask : k_shadow_face_mask;
+    return face_mask != 0 ? face_mask : k_shadow_face_mask;
 }
 
 layout(local_size_x = 256, local_size_y = 1, local_size_z = 1) in;
@@ -296,19 +320,19 @@ void main() {
 
     const ShadowDrawKey key = shadow_draw_key_sb.keys[key_index];
     const Light light = lights[key.light_index];
-    const uint mesh_instance_index = tile_index * 256u + lane;
+    const uint mesh_instance_index = tile_index * 256 + lane;
 
-    uint meshlet_count = 0u;
-    uint face_mask = 0u;
+    uint meshlet_count = 0;
+    uint face_mask = 0;
 
     if (mesh_instance_index < pc.mesh_instance_count) {
         const MeshInstanceDraw mesh_instance = mesh_instance_draws[mesh_instance_index];
         const uint mesh_draw_index = mesh_instance.mesh_draw_index;
         const MeshDraw mesh_draw = mesh_draws[mesh_draw_index];
 
-        if ((mesh_draw.flags & (DrawFlags_AlphaMask | DrawFlags_Transparent)) == 0u) {
-            const vec3 local_aabb_min = mesh_aabb_sb.aabbs[mesh_draw_index * 2u].xyz;
-            const vec3 local_aabb_max = mesh_aabb_sb.aabbs[mesh_draw_index * 2u + 1u].xyz;
+        if ((mesh_draw.flags & (DrawFlags_AlphaMask | DrawFlags_Transparent)) == 0) {
+            const vec3 local_aabb_min = mesh_aabb_sb.aabbs[mesh_draw_index * 2].xyz;
+            const vec3 local_aabb_max = mesh_aabb_sb.aabbs[mesh_draw_index * 2 + 1].xyz;
 
             vec3 world_aabb_min;
             vec3 world_aabb_max;
@@ -335,20 +359,20 @@ void main() {
 
     barrier();
 
-    if (lane == 0u) {
-        uint total_meshlet_count = 0u;
+    if (lane == 0) {
+        uint total_meshlet_count = 0;
 
         // Build six independent prefix sums.
-        for (uint face = 0u; face < 6u; ++face) {
-            const uint face_bit = 1u << face;
-            const uint prefix_base = face * 256u;
+        for (uint face = 0; face < 6; ++face) {
+            const uint face_bit = 1 << face;
+            const uint prefix_base = face * 256;
 
-            uint running = 0u;
+            uint running = 0;
 
-            for (uint instance_lane = 0u; instance_lane < 256u; ++instance_lane) {
+            for (uint instance_lane = 0; instance_lane < 256; ++instance_lane) {
                 s_face_prefix[prefix_base + instance_lane] = running;
 
-                if ((s_face_mask[instance_lane] & face_bit) != 0u) {
+                if ((s_face_mask[instance_lane] & face_bit) != 0) {
                     running += s_meshlet_count[instance_lane];
                 }
             }
@@ -360,17 +384,20 @@ void main() {
 
         s_total_meshlet_count = total_meshlet_count;
 
-        if (total_meshlet_count > 0u) {
+        if (total_meshlet_count > 0) {
             const uint allocation_base = atomicAdd(shadow_meshlet_alloc_sb.meshlet_instance_cursor, total_meshlet_count);
 
-            for (uint face = 0u; face < 6u; ++face) {
+            for (uint face = 0; face < 6; ++face) {
                 s_face_base[face] += allocation_base;
             }
 
-            s_first_draw_index = atomicAdd(shadow_indirect_count_sb.draw_count, 6u);
+            //s_first_draw_index = atomicAdd(shadow_indirect_count_sb.draw_count, 6);
+            const uint mip_level = key.mip_level;
+
+            s_first_draw_index = pc.draw_base[mip_level] + atomicAdd(shadow_indirect_count_sb.draw_count[mip_level], 6);
 
 #if defined(SHADOW_LIST_DEBUG)
-            atomicAdd(shadow_global_debug_sb.total_draws_built, 6u);
+            atomicAdd(shadow_global_debug_sb.total_draws_built, 6);
             atomicAdd(shadow_global_debug_sb.total_meshlets_allocated, total_meshlet_count);
 #endif
         }
@@ -379,30 +406,30 @@ void main() {
     barrier();
 
     // This value is workgroup-uniform, so every invocation exits together.
-    if (s_total_meshlet_count == 0u) {
+    if (s_total_meshlet_count == 0) {
         return;
     }
 
     const uint local_meshlet_count = s_meshlet_count[lane];
     const uint local_face_mask = s_face_mask[lane];
 
-    if (local_meshlet_count > 0u) {
+    if (local_meshlet_count > 0) {
         const MeshInstanceDraw mesh_instance = mesh_instance_draws[mesh_instance_index];
         const MeshDraw mesh_draw = mesh_draws[mesh_instance.mesh_draw_index];
         const uint meshlet_offset = mesh_draw.meshlet_offset;
 
         // Duplicate the meshlets only into the cubemap faces touched by this mesh instance.
-        for (uint face = 0u; face < 6u; ++face) {
-            const uint face_bit = 1u << face;
+        for (uint face = 0; face < 6; ++face) {
+            const uint face_bit = 1 << face;
 
-            if ((local_face_mask & face_bit) == 0u) {
+            if ((local_face_mask & face_bit) == 0) {
                 continue;
             }
 
-            const uint prefix_index = face * 256u + lane;
+            const uint prefix_index = face * 256 + lane;
             const uint destination_base = s_face_base[face] + s_face_prefix[prefix_index];
 
-            for (uint meshlet_index = 0u; meshlet_index < local_meshlet_count; ++meshlet_index) {
+            for (uint meshlet_index = 0; meshlet_index < local_meshlet_count; ++meshlet_index) {
                 ShadowMeshletInstance candidate;
                 candidate.mesh_instance_index = mesh_instance_index;
                 candidate.global_meshlet_index = pack_shadow_meshlet(meshlet_offset + meshlet_index, face_bit);
@@ -415,7 +442,7 @@ void main() {
     barrier();
 
     // Write one independent draw for every cubemap face.
-    if (lane < 6u) {
+    if (lane < 6) {
         const uint face = lane;
         const uint draw_index = s_first_draw_index + face;
 
@@ -439,28 +466,29 @@ void main() {
 #if defined (COMPUTE_BUILD_INDIRECT_CMDS)
 
 layout(push_constant, scalar) uniform Push {
-    uint max_draws;
-    uint meshlets_per_task_wg; // typically 32
-    uint pad000;
-    uint pad001;
+    uint meshlets_per_task_wg;
+    uint draw_base[k_shadow_mip_count];
 } pc;
 
 layout(local_size_x = 64, local_size_y = 1, local_size_z = 1) in;
 
 void main() {
-    uint i = gl_GlobalInvocationID.x;
-    uint dc = shadow_indirect_count_sb.draw_count;
+    const uint mip_level = gl_WorkGroupID.y;
+    const uint local_draw_index = gl_GlobalInvocationID.x;
+    const uint draw_count = shadow_indirect_count_sb.draw_count[mip_level];
 
-    if (i >= dc || i >= pc.max_draws) {
+    if (local_draw_index >= draw_count) {
         return;
     }
 
-    uint meshlet_count = shadow_draw_meta_sb.metas[i].meshlet_count;
-    uint wg = (meshlet_count + (pc.meshlets_per_task_wg - 1)) / pc.meshlets_per_task_wg;
+    const uint draw_index = pc.draw_base[mip_level] + local_draw_index;
 
-    shadow_indirect_cmds_sb.commands[i].group_count_x = wg;
-    shadow_indirect_cmds_sb.commands[i].group_count_y = 1;
-    shadow_indirect_cmds_sb.commands[i].group_count_z = 1;
+    const uint meshlet_count = shadow_draw_meta_sb.metas[draw_index].meshlet_count;
+    const uint wg = (meshlet_count + (pc.meshlets_per_task_wg - 1)) / pc.meshlets_per_task_wg;
+
+    shadow_indirect_cmds_sb.commands[draw_index].group_count_x = wg;
+    shadow_indirect_cmds_sb.commands[draw_index].group_count_y = 1;
+    shadow_indirect_cmds_sb.commands[draw_index].group_count_z = 1;
 }
 
 
@@ -590,11 +618,15 @@ bool accept_meshlet2(uint mesh_instance_index, uint global_meshlet_index, Shadow
 
 layout(local_size_x = 32, local_size_y = 1, local_size_z = 1) in;
 
+layout(push_constant, scalar) uniform Push {
+    uint draw_meta_base;
+} pc;
+
 void main() {
     const uint lane = gl_LocalInvocationID.x;
-    const uint draw_index = gl_DrawIDARB;
+    const uint draw_index = pc.draw_meta_base + gl_DrawIDARB;
     const ShadowDrawMeta meta = shadow_draw_meta_sb.metas[draw_index];
-    const uint local_meshlet_index = gl_WorkGroupID.x * 32u + lane;
+    const uint local_meshlet_index = gl_WorkGroupID.x * 32 + lane;
 
     bool accept = false;
     PayloadEntry entry;
@@ -605,21 +637,23 @@ void main() {
 
         const uint global_meshlet_index = unpack_shadow_meshlet_index(candidate.global_meshlet_index);
         const uint face_mask = unpack_shadow_face_mask(candidate.global_meshlet_index);
-        const uint face_bit = 1u << meta.face_index;
+        const uint face_bit = 1 << meta.face_index;
 
-        if ((face_mask & face_bit) != 0u || disable_shadow_meshlets_cubemap_face_cull()) {
+        if ((face_mask & face_bit) != 0 || disable_shadow_meshlets_cubemap_face_cull()) {
             entry.mesh_instance_index = candidate.mesh_instance_index;
             entry.global_meshlet_index = global_meshlet_index;
             accept = accept_meshlet2(entry.mesh_instance_index, entry.global_meshlet_index, meta);
         }
     }
 
-    const uvec4 ballot = subgroupBallot(accept);
-    const uint compact_index = subgroupBallotExclusiveBitCount(ballot);
+    const uvec4 visibility_mask = subgroupBallot(accept);
+    const uint compact_index = subgroupBallotExclusiveBitCount(visibility_mask);
 
-    if (accept) payload.entries[compact_index] = entry;
+    if (accept) {
+        payload.entries[compact_index] = entry;
+    }
 
-    if (lane == 0u) {
+    if (lane == 0) {
         payload.draw_index = draw_index;
         payload.light_index = meta.light_index;
         payload.face_index = meta.face_index;
@@ -627,10 +661,8 @@ void main() {
         payload.shadow_slot = meta.shadow_slot;
     }
 
-    const uint visible_count = subgroupBallotBitCount(ballot);
-    if (subgroupElect() && visible_count > 0u) {
-        EmitMeshTasksEXT(visible_count, 1, 1);
-    }
+    const uint visible_count = subgroupBallotBitCount(visibility_mask);
+    EmitMeshTasksEXT(visible_count, 1, 1);
 }
 
 #endif // TASK_MESHLET_DEPTH
@@ -662,37 +694,37 @@ layout(set = MATERIAL_SET, binding = 43) readonly buffer MeshletPositionOnlyData
 
 
 uint read_meshlet_index_u8( uint base_word_offset, uint byte_offset ) {
-    uint word_index = base_word_offset + (byte_offset >> 2u);
-    uint shift      = (byte_offset & 3u) * 8u;
+    uint word_index = base_word_offset + (byte_offset >> 2);
+    uint shift      = (byte_offset & 3) * 8;
     return (meshletData[word_index] >> shift) & 0xffu;
 }
 
 uvec3 read_meshlet_triangle(uint base_word_offset, uint triangle_index) {
-    uint byte_offset = triangle_index * 3u;
-    uint word_index = base_word_offset + (byte_offset >> 2u);
-    uint byte_in_word = byte_offset & 3u;
-    uint shift = byte_in_word * 8u;
+    uint byte_offset = triangle_index * 3;
+    uint word_index = base_word_offset + (byte_offset >> 2);
+    uint byte_in_word = byte_offset & 3;
+    uint shift = byte_in_word * 8;
 
     uint word0 = meshletData[word_index];
     uint packed_triangle = word0 >> shift;
 
-    if (shift > 8u) {
-        uint word1 = meshletData[word_index + 1u];
-        packed_triangle |= word1 << (32u - shift);
+    if (shift > 8) {
+        uint word1 = meshletData[word_index + 1];
+        packed_triangle |= word1 << (32 - shift);
     }
 
     return uvec3(
         packed_triangle & 0xffu,
-        (packed_triangle >> 8u) & 0xffu,
-        (packed_triangle >> 16u) & 0xffu
+        (packed_triangle >> 8) & 0xffu,
+        (packed_triangle >> 16) & 0xffu
     );
 }
 
 vec3 unpack_mesh_position_101010(uint packed_position, vec3 aabb_min, vec3 aabb_max) {
     const uvec3 quantized = uvec3(
-        packed_position & 1023u,
-        (packed_position >> 10u) & 1023u,
-        (packed_position >> 20u) & 1023u
+        packed_position & 1023,
+        (packed_position >> 10) & 1023,
+        (packed_position >> 20) & 1023
     );
 
     const vec3 normalized = vec3(quantized) * (1.0 / 1023.0);
@@ -721,10 +753,11 @@ void main() {
         return;
     }
 
+    SetMeshOutputsEXT( vertex_count, triangle_count );
 
     const uint mesh_index = meshlets[global_meshlet_index].mesh_index;
-    const vec3 mesh_aabb_min = mesh_aabb_sb.aabbs[mesh_index * 2u].xyz;
-    const vec3 mesh_aabb_max = mesh_aabb_sb.aabbs[mesh_index * 2u + 1u].xyz;
+    const vec3 mesh_aabb_min = mesh_aabb_sb.aabbs[mesh_index * 2].xyz;
+    const vec3 mesh_aabb_max = mesh_aabb_sb.aabbs[mesh_index * 2 + 1].xyz;
 
     uint connectivity_data_offset = meshlets[global_meshlet_index].connectivity_data_offset;
     uint vertex_offset = connectivity_data_offset;
@@ -739,10 +772,10 @@ void main() {
     {
         uint vi = meshletData[vertex_offset + i];
 
-        //vec3 position = vec3(vertex_positions[vi].v.x, vertex_positions[vi].v.y, vertex_positions[vi].v.z);
+        vec3 position = vec3(vertex_positions[vi].v.x, vertex_positions[vi].v.y, vertex_positions[vi].v.z);
 
         const uint packed_position = meshletPositionOnlyData[connectivity_data_offset + i];
-        vec3 position = unpack_mesh_position_101010(packed_position, mesh_aabb_min, mesh_aabb_max);
+        //vec3 position = unpack_mesh_position_101010(packed_position, mesh_aabb_min, mesh_aabb_max);
 
         gl_MeshVerticesEXT[ i ].gl_Position = (mvp * vec4(position, 1));
     }
@@ -750,19 +783,17 @@ void main() {
     for (uint i = task_index; i < triangle_count; i += 32) {
 
         // Each triangle has 3 consecutive 8-bit indices
-        // uint byte_base = i * 3u;
+        // uint byte_base = i * 3;
 
-        // uint a = read_meshlet_index_u8(index_offset, byte_base + 0u);
-        // uint b = read_meshlet_index_u8(index_offset, byte_base + 1u);
-        // uint c = read_meshlet_index_u8(index_offset, byte_base + 2u);
+        // uint a = read_meshlet_index_u8(index_offset, byte_base + 0);
+        // uint b = read_meshlet_index_u8(index_offset, byte_base + 1);
+        // uint c = read_meshlet_index_u8(index_offset, byte_base + 2);
 
         // gl_PrimitiveTriangleIndicesEXT[i] = uvec3(a, b, c);
         gl_PrimitiveTriangleIndicesEXT[i] = read_meshlet_triangle(index_offset, i);
         gl_MeshPrimitivesEXT[i].gl_Layer = layer_index;
         gl_MeshPrimitivesEXT[i].gl_CullPrimitiveEXT = false;
     }
-
-    SetMeshOutputsEXT( vertex_count, triangle_count );
 
     // Debug triangle
     // if (task_index < 3) {
@@ -777,7 +808,6 @@ void main() {
 #endif // MESH_MESHLET_DEPTH
 
 #if defined (COMPUTE_POINTSHADOWS_RESOLUTION_CALCULATION)
-
 struct Light {
     vec3            world_position;
     float           radius;
@@ -791,10 +821,6 @@ struct Light {
     float           lpad02;
 };
 
-layout(set = MATERIAL_SET, binding = 35) readonly buffer LightsAABBArray {
-    vec4            light_aabbs[];
-};
-
 layout(set = MATERIAL_SET, binding = 36) buffer ShadowResolutions {
     uint            shadow_resolutions[];
 };
@@ -803,163 +829,112 @@ layout(set = MATERIAL_SET, binding = 21) readonly buffer Lights {
     Light           lights[];
 };
 
-
-layout( push_constant ) uniform PushConstants {
+layout(push_constant) uniform PushConstants {
     uint            depth_pyramid_texture_index;
 };
 
 vec3 line_intersection_to_z_plane( vec3 a, vec3 b, float z_plane ) {
-    // Plane: z = z_plane in view space (RH: in front is negative Z)
+
     vec3 ab = b - a;
 
-    // Avoid divide-by-zero if ray is parallel to plane.
-    float denom = ab.z;
-    if ( abs( denom ) < 1.0e-8 ) {
-        return vec3( a.xy, z_plane );
+    if ( abs(ab.z) < 1.0e-8 ) {
+        return vec3(a.xy, z_plane);
     }
 
-    float t = ( z_plane - a.z ) / denom;
+    float t = (z_plane - a.z) / ab.z;
     return a + ab * t;
 }
 
-vec3 screen_to_view(vec2 screen_pos, mat4 inverse_projection, float clip_z) {
-    // screen_pos: pixels, origin top-left
-    vec2 uv = uv_from_pixels( ivec2(screen_pos), uint(frame.resolution.x), uint(frame.resolution.y) );
-
-    // NDC: x in [-1,1], y in [-1,1] with top-left screen => flip y here.
-    vec4 clip = vec4( uv.x * 2.0 - 1.0,
-                      (1.0 - uv.y) * 2.0 - 1.0,
-                      clip_z,
-                      1.0 );
-
-    vec4 view4 = inverse_projection * clip;
-
-    // Perspective divide is REQUIRED.
-    view4.xyz /= max(view4.w, 1.0e-8);
-
-    return view4.xyz;
-}
-
 bool sphere_intersects_aabb( vec3 c, float r, vec3 bmin, vec3 bmax ) {
-    vec3 q = clamp( c, bmin, bmax );
+
+    vec3 q = clamp(c, bmin, bmax);
     vec3 d = c - q;
-    return dot(d,d) <= r * r;
+
+    return dot(d, d) <= r * r;
 }
 
-layout (local_size_x = 8, local_size_y = 8, local_size_z = 1) in;
+float cluster_solid_angle(     vec3 light_position, vec3 cluster_min, vec3 cluster_max ) {
+
+    vec3 center = (cluster_min + cluster_max) * 0.5;
+    vec3 extent = (cluster_max - cluster_min) * 0.5;
+    vec3 delta = center - light_position;
+
+    float radius_sq = dot(extent, extent);
+    float distance_sq = dot(delta, delta);
+
+    // Saturate the estimate when the light is inside the bounding sphere.
+    float sin_theta_sq = clamp( radius_sq / max(distance_sq, 1.0e-12), 0.0, 1.0 );
+
+    float cos_theta = sqrt(1.0 - sin_theta_sq);
+
+    // Equivalent to 2*pi*(1-cos_theta), avoiding cancellation
+    // when the cluster subtends a small angle.
+    return (2.0 * PI) * sin_theta_sq / (1.0 + cos_theta);
+}
+
+layout( local_size_x = 8, local_size_y = 8, local_size_z = 1) in;
+
 void main() {
-    ivec3 pos = ivec3(gl_GlobalInvocationID.xyz);
 
-    const uint tile_x_count = (uint(frame.resolution.x) + 63u) / 64u;
-    const uint tile_y_count = (uint(frame.resolution.y) + 63u) / 64u;
+    uvec2 pos = gl_GlobalInvocationID.xy;
 
-    if (uint(pos.x) >= tile_x_count || uint(pos.y) >= tile_y_count) {
+    const uint tile_size = 64u;
+    const uint z_count = 32u;
+
+    uvec2 resolution = uvec2(frame.resolution.xy);
+    uvec2 tile_count = (resolution + uvec2(tile_size - 1u)) / tile_size;
+
+    if (any(greaterThanEqual(pos, tile_count))) {
         return;
     }
 
-    const float tile_size   = 64.0;
-    const float tile_pixels = tile_size * tile_size;
+    vec2 min_screen = vec2(pos * tile_size);
+    vec2 max_screen = min( min_screen + vec2(float(tile_size)), frame.resolution.xy );
 
-    vec2 min_screen = vec2( float(pos.x) * tile_size, float(pos.y) * tile_size );
-    vec2 max_screen = vec2( float(pos.x + 1) * tile_size, float(pos.y + 1) * tile_size );
+    vec2 tile_extent = max_screen - min_screen;
+    float tile_pixels = tile_extent.x * tile_extent.y;
 
-    vec2 tile_center = (min_screen + max_screen) * 0.5;
+    vec3 min_point_view = view_position_from_depth( min_screen / frame.resolution.xy, 1.0, frame.inverse_projection );
+    vec3 max_point_view = view_position_from_depth( max_screen / frame.resolution.xy, 1.0, frame.inverse_projection );
 
-    const uint  z_count      = 32u;
-    const float z_ratio      = frame.z_far / frame.z_near;
-    const float z_bin_range  = 1.0 / float(z_count);
+    const vec3 eye_vs = vec3(0.0);
 
-    const float tile_radius_sq = pow(tile_size * 0.5, 2.0) * 2.0;
+    float z_ratio = frame.z_far / frame.z_near;
+    float z_bin_range = 1.0 / float(z_count);
 
-    // Build rays through tile corners (use far plane for stable direction).
-    // ZO => far clip_z = 1.
-    vec3 max_point_view = screen_to_view( max_screen, frame.inverse_projection, 1.0 );
-    vec3 min_point_view = screen_to_view( min_screen, frame.inverse_projection, 1.0 );
+    for (uint l = 0u; l < frame.active_lights; ++l) {
 
-    // Depth pyramid: mip choice is your old heuristic; keep for now.
-    const float raw_depth = texelFetch(global_textures[nonuniformEXT(depth_pyramid_texture_index)], pos.xy, 7).r;
+        vec3 light_view_position = ( frame.world_to_camera * vec4(lights[l].world_position, 1.0) ).xyz;
 
-    const vec2 screen_uv = uv_from_pixels(pos.xy, uint(frame.resolution.x), uint(frame.resolution.y));
-    const vec3 pixel_view_position = view_position_from_depth(screen_uv, raw_depth, frame.inverse_projection);
+        float light_radius = lights[l].radius;
+        float requested_resolution = 0.0;
 
-    // RH: in front of camera => pixel_view_position.z is negative.
-    // Convert to positive distance.
-    float center_d = -pixel_view_position.z;
+        for (uint z = 0u; z < z_count; ++z) {
 
-    // Clamp to [near, far] to avoid out-of-range bins.
-    center_d = clamp(center_d, frame.z_near, frame.z_far);
+            float near_d = frame.z_near * pow(z_ratio, float(z) * z_bin_range);
+            float far_d = frame.z_near * pow(z_ratio, float(z + 1u) * z_bin_range);
 
-    float linear_d = (center_d - frame.z_near) / (frame.z_far - frame.z_near);
-    int bin_index  = int( clamp(linear_d / BIN_WIDTH, 0.0, float(z_count - 1u)) );
+            vec3 min_near = line_intersection_to_z_plane( eye_vs, min_point_view, -near_d );
+            vec3 min_far = line_intersection_to_z_plane( eye_vs, min_point_view, -far_d );
+            vec3 max_near = line_intersection_to_z_plane( eye_vs, max_point_view, -near_d );
+            vec3 max_far = line_intersection_to_z_plane( eye_vs, max_point_view, -far_d );
 
-    // Logarithmic slice distances (positive).
-    float tile_near_d = frame.z_near * pow( z_ratio, float(bin_index)     * z_bin_range );
-    float tile_far_d  = frame.z_near * pow( z_ratio, float(bin_index + 1) * z_bin_range );
+            vec3 cluster_min = min( min(min_near, min_far), min(max_near, max_far) );
+            vec3 cluster_max = max( max(min_near, min_far), max(max_near, max_far) );
 
-    // RH view-space planes are NEGATIVE z in front.
-    float z_plane_near = -tile_near_d;
-    float z_plane_far  = -tile_far_d;
+            if (!sphere_intersects_aabb( light_view_position, light_radius, cluster_min, cluster_max)) {
+                continue;
+            }
 
-    // Eye/camera position for this math must be in VIEW SPACE.
-    // If camera_position is in world-space, this is WRONG.
-    // Best: use vec3(0,0,0) because we're in view space after unprojection.
-    vec3 eye_vs = vec3(0.0);
+            float solid_angle = cluster_solid_angle( light_view_position, cluster_min, cluster_max );
+            float cluster_resolution = sqrt( (4.0 * PI * tile_pixels) / (6.0 * max(solid_angle, 1.0e-8)) );
 
-    vec3 min_point_near = line_intersection_to_z_plane( eye_vs, min_point_view, z_plane_near );
-    vec3 min_point_far  = line_intersection_to_z_plane( eye_vs, min_point_view, z_plane_far );
-    vec3 max_point_near = line_intersection_to_z_plane( eye_vs, max_point_view, z_plane_near );
-    vec3 max_point_far  = line_intersection_to_z_plane( eye_vs, max_point_view, z_plane_far );
-
-    vec3 min_point_aabb_view = min( min( min_point_near, min_point_far ), min( max_point_near, max_point_far ) );
-    vec3 max_point_aabb_view = max( max( min_point_near, min_point_far ), max( max_point_near, max_point_far ) );
-
-    // Optional debug world AABB
-    vec4 min_point_aabb_world = frame.inverse_view * vec4(min_point_aabb_view, 1.0);
-    vec4 max_point_aabb_world = frame.inverse_view * vec4(max_point_aabb_view, 1.0);
-
-    for ( uint l = 0u; l < active_lights; ++l ) {
-
-        // Prefer light center + radius, but if you only have AABBs, you can keep both paths.
-        // If lights[] contains radius, use sphere-vs-AABB to test cluster overlap more robustly.
-        vec3 light_world_position = lights[ l ].world_position;
-        float light_radius = lights[ l ].radius;
-
-        vec3 light_view_pos = (frame.view * vec4(light_world_position, 1.0)).xyz;
-
-        // Quick reject: sphere vs cluster AABB in VIEW space.
-        if ( !sphere_intersects_aabb( light_view_pos, light_radius, min_point_aabb_view, max_point_aabb_view ) ) {
-            continue;
+            requested_resolution = max( requested_resolution, cluster_resolution );
         }
 
-        // Project to NDC.
-        vec4 sphere_clip = frame.view_projection * vec4( light_world_position, 1.0 );
-        if ( sphere_clip.w == 0.0 ) {
-            continue;
+        if (requested_resolution > 0.0) {
+            atomicMax( shadow_resolutions[l], uint(ceil(requested_resolution)) );
         }
-
-        vec2 ndc = sphere_clip.xy / sphere_clip.w;
-
-        // Convert to screen pixels with TOP-LEFT origin (flip Y).
-        vec2 sphere_screen = vec2(
-            (ndc.x * 0.5 + 0.5) * frame.resolution.x,
-            (1.0 - (ndc.y * 0.5 + 0.5)) * frame.resolution.y
-        );
-
-        float d = length( sphere_screen - tile_center );
-
-        // If d < tile_radius, solid angle saturates.
-        float diff = max( d * d - tile_radius_sq, 0.0 );
-
-        float solid_angle;
-        if ( d > 1.0e-6 ) {
-            solid_angle = ( 2.0 * PI ) * ( 1.0 - ( sqrt( diff ) / d ) );
-        } else {
-            solid_angle = ( 2.0 * PI );
-        }
-
-        float res_f = sqrt( ( 4.0 * PI * tile_pixels ) / ( 6.0 * max(solid_angle, 1.0e-8) ) );
-
-        atomicMax( shadow_resolutions[l], uint(res_f) );
     }
 }
 
@@ -1057,7 +1032,7 @@ void main() {
     min_point_aabb_world = inverse_view * min_point_aabb_world;
     max_point_aabb_world = inverse_view * max_point_aabb_world;
 
-    for ( uint l = 0; l < active_lights; ++l ) {
+    for ( uint l = 0; l < frame.active_lights; ++l ) {
         const vec3 light_aabb_min = light_aabbs[ l * 2 ].xyz;
         const vec3 light_aabb_max = light_aabbs[ l * 2 + 1 ].xyz;
 

@@ -19,9 +19,9 @@ void RaytracedReflectionsPass::declare_frame_graph_node( FrameGraphResourceConte
                 .type = FrameGraphResourceType_Texture,
                 .handle = builder.get_output_handle( "gbuffer_pass_late", "depth" )
             },
-            {
+             {
                 .type = FrameGraphResourceType_Texture,
-                .handle = builder.get_output_handle( "gbuffer_pass_late", "gbuffer_normals" )
+                .handle = builder.get_output_handle( "svgf_guide_downsample_pass", "svgf_current_normals" )
             },
             {
                 .type = FrameGraphResourceType_Texture,
@@ -63,7 +63,7 @@ void RaytracedReflectionsPass::render( FrameGraphRenderContext& context ) {
     }
 
     if ( !descriptors_created ) {
-        create_descriptors( context );
+        create_descriptors( context.renderer, context.render_blackboard );
         descriptors_created = true;
     }
 
@@ -289,12 +289,16 @@ void RaytracedReflectionsPass::update_dependent_resources( FrameGraphResourceCon
 
     if ( !enabled )
         return;
+
+    create_descriptors( context.renderer, context.render_blackboard );
 }
 
-void RaytracedReflectionsPass::create_descriptors( FrameGraphRenderContext& context ) {
+void RaytracedReflectionsPass::create_descriptors( Renderer* renderer, RenderBlackboard* render_blackboard ) {
 
     GpuDevice* gpu = renderer->gpu;
-    RenderBlackboard& render_blackboard = *context.render_blackboard;
+
+    gpu->destroy_descriptor_set( reflections_descriptor_set );
+    gpu->destroy_descriptor_set( brdf_lut_generation_descriptor_set );
 
     ShaderReflectionInfo* reflection_info = renderer->get_shader_reflection( reflections_pipeline.pipeline );
 
@@ -303,7 +307,7 @@ void RaytracedReflectionsPass::create_descriptors( FrameGraphRenderContext& cont
     // descriptors.dynamic_buffers.push( { 55, sizeof( GpuDDGIConstants ) } );
     descriptors.name = "rt_reflections_ds";
 
-    reflections_descriptor_set = renderer->create_descriptor_set( descriptors, reflection_info, reflections_pipeline.pipeline, 0, render_blackboard );
+    reflections_descriptor_set = renderer->create_descriptor_set( descriptors, reflection_info, reflections_pipeline.pipeline, 0, *render_blackboard );
 
     // BRDF LUT generation
     reflection_info = renderer->get_shader_reflection( brdf_lut_generation_pipeline.pipeline );
@@ -311,7 +315,7 @@ void RaytracedReflectionsPass::create_descriptors( FrameGraphRenderContext& cont
     descriptors.reset();
     descriptors.name = "brdf_lut_generation_ds";
 
-    brdf_lut_generation_descriptor_set = renderer->create_descriptor_set( descriptors, reflection_info, brdf_lut_generation_pipeline.pipeline, 0, render_blackboard );;
+    brdf_lut_generation_descriptor_set = renderer->create_descriptor_set( descriptors, reflection_info, brdf_lut_generation_pipeline.pipeline, 0, *render_blackboard );;
 }
 
 } // namespace raptor

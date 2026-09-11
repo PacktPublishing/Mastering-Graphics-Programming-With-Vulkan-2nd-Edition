@@ -4,6 +4,8 @@
 
 #include "foundation/numerics.hpp"
 
+#include "shaders/shared_structs.h"
+
 namespace raptor {
 
 static void cache_svgf_common_resources( FrameGraph* frame_graph, SVGFCommonResources* resources ) {
@@ -20,7 +22,7 @@ static void cache_svgf_common_resources( FrameGraph* frame_graph, SVGFCommonReso
     resources->mesh_id_texture = resource->resource_info.texture.image;
     resources->mesh_id_image_view = resource->resource_info.texture.image_view;
 
-    resource = frame_graph->get_resource( "motion_vectors" );
+    resource = frame_graph->get_resource( "visibility_motion_vectors" );
     resources->motion_vectors_texture = resource->resource_info.texture.image;
     resources->motion_vectors_image_view = resource->resource_info.texture.image_view;
 
@@ -111,51 +113,11 @@ static void cache_svgf_current_guide_resources( FrameGraph* frame_graph, SVGFGui
     resources->motion_vectors_image_view = resource->resource_info.texture.image_view;
 }
 
-struct SVGFGpuConstants {
-    u32 motion_vectors_texture_index;
-    u32 mesh_id_texture_index;
-    u32 normals_texture_index;
-    u32 depth_normal_fwidth_texture_index;
-
-    // Current half-res guides
-    u32 current_motion_vectors_texture_index;
-    u32 current_mesh_id_texture_index;
-    u32 current_normals_texture_index;
-    u32 current_depth_normal_fwidth_texture_index;
-
-    u32 current_linear_z_dd_texture_index;
-    u32 history_mesh_id_texture_index;
-    u32 history_normals_texture_index;
-    u32 history_linear_depth_texture;
-
-    u32 output_texture_index;
-    u32 history_output_texture_index;
-    u32 history_moments_texture_index;
-    u32 integrated_color_texture_index;
-
-    u32 integrated_moments_texture_index;
-    u32 variance_texture_index;
-    u32 filtered_color_texture_index;
-    u32 updated_variance_texture_index;
-
-    u32 linear_z_dd_texture_index;
-    f32 output_resolution_scale;
-    f32 output_resolution_scale_rcp;
-    f32 temporal_depth_difference;
-
-    f32 temporal_normal_difference;
-    f32 input_resolution_scale;
-    f32 input_resolution_scale_rcp;
-    f32 pad002;
+struct SVGFDenoiseGpuConstants {
+    SVGFConstants svgf;
+    SVGFOutputs reflections;
+    SVGFOutputs restirgi;
 };
-
-struct SVGFPushConstants {
-    u32         step_size = 1;
-    f32         sigma_z = 1.0;
-    f32         sigma_n = 128.0;
-    f32         sigma_l = 4.0;
-};
-
 
 // SVGFGuideDownsamplePass ///////////////////////////////////////////////
 void SVGFGuideDownsamplePass::declare_frame_graph_node( FrameGraphResourceContext& context ) {
@@ -202,6 +164,8 @@ void SVGFGuideDownsamplePass::declare_frame_graph_node( FrameGraphResourceContex
                     .texture = {
                         .width = half_width,
                         .height = half_height,
+                        .scale_width = texture_scale,
+                        .scale_height = texture_scale,
                         .format = VK_FORMAT_R16G16B16A16_SFLOAT,
                         .flags = TextureFlags::Compute_mask,
                         .compute = true
@@ -215,6 +179,8 @@ void SVGFGuideDownsamplePass::declare_frame_graph_node( FrameGraphResourceContex
                     .texture = {
                         .width = half_width,
                         .height = half_height,
+                        .scale_width = texture_scale,
+                        .scale_height = texture_scale,
                         .format = VK_FORMAT_R32_UINT,
                         .flags = TextureFlags::Compute_mask,
                         .compute = true
@@ -228,6 +194,8 @@ void SVGFGuideDownsamplePass::declare_frame_graph_node( FrameGraphResourceContex
                     .texture = {
                         .width = half_width,
                         .height = half_height,
+                        .scale_width = texture_scale,
+                        .scale_height = texture_scale,
                         .format = VK_FORMAT_R16G16_SFLOAT,
                         .flags = TextureFlags::Compute_mask,
                         .compute = true
@@ -241,6 +209,8 @@ void SVGFGuideDownsamplePass::declare_frame_graph_node( FrameGraphResourceContex
                     .texture = {
                         .width = half_width,
                         .height = half_height,
+                        .scale_width = texture_scale,
+                        .scale_height = texture_scale,
                         .format = VK_FORMAT_R16G16_SFLOAT,
                         .flags = TextureFlags::Compute_mask,
                         .compute = true
@@ -254,6 +224,8 @@ void SVGFGuideDownsamplePass::declare_frame_graph_node( FrameGraphResourceContex
                     .texture = {
                         .width = half_width,
                         .height = half_height,
+                        .scale_width = texture_scale,
+                        .scale_height = texture_scale,
                         .format = VK_FORMAT_R16G16_SFLOAT,
                         .flags = TextureFlags::Compute_mask,
                         .compute = true
@@ -285,7 +257,7 @@ void SVGFGuideDownsamplePass::update_psos( FrameGraphResourceContext& context, P
         {
         .stages = {
             {
-                .source_file_path = "glsl/reflections.glsl",
+                .source_file_path = "glsl/svgf.glsl",
                 .type = VK_SHADER_STAGE_COMPUTE_BIT,
             },
         },
@@ -366,7 +338,7 @@ void SVGFGuideDownsamplePass::upload_gpu_data( FrameGraphResourceContext& contex
     GpuDevice& gpu = *renderer->gpu;
     RenderScene& scene = *context.render_scene;
 
-    SVGFGpuConstants* gpu_constants = gpu.dynamic_buffer_allocate<SVGFGpuConstants>( &constants_offset );
+    SVGFConstants* gpu_constants = gpu.dynamic_buffer_allocate<SVGFConstants>( &constants_offset );
     if ( gpu_constants ) {
 
         gpu_constants->motion_vectors_texture_index = resources.motion_vectors_image_view.index();
@@ -385,22 +357,10 @@ void SVGFGuideDownsamplePass::upload_gpu_data( FrameGraphResourceContext& contex
         gpu_constants->history_normals_texture_index = 0;
         gpu_constants->history_linear_depth_texture = 0;
 
-        gpu_constants->output_texture_index = 0;
-        gpu_constants->history_output_texture_index = 0;
-        gpu_constants->history_moments_texture_index = 0;
-        gpu_constants->integrated_color_texture_index = 0;
-        gpu_constants->integrated_moments_texture_index = 0;
-
-        gpu_constants->variance_texture_index = 0;
-        gpu_constants->filtered_color_texture_index = 0;
-        gpu_constants->updated_variance_texture_index = 0;
-
-        // NOTE(marco): unused
-        gpu_constants->filtered_color_texture_index = 0;
-        gpu_constants->updated_variance_texture_index = 0;
-
         gpu_constants->output_resolution_scale = texture_scale;
         gpu_constants->output_resolution_scale_rcp = 1.0f / texture_scale;
+        gpu_constants->input_resolution_scale = texture_scale;
+        gpu_constants->input_resolution_scale_rcp = 1.0f / texture_scale;
         gpu_constants->temporal_depth_difference = context.render_config->raytraced_reflections.temporal_depth_difference;
         gpu_constants->temporal_normal_difference = context.render_config->raytraced_reflections.temporal_normal_difference;
     }
@@ -424,7 +384,7 @@ void SVGFGuideDownsamplePass::create_descriptors( FrameGraphResourceContext& con
     ShaderReflectionInfo* reflection_info = renderer->get_shader_reflection( pipeline.pipeline );
 
     DescriptorSetBinder descriptors;
-    descriptors.dynamic_buffers.push( { 40, sizeof( SVGFGpuConstants ) } );
+    descriptors.dynamic_buffers.push( { 40, sizeof( SVGFConstants ) } );
     descriptors.name = "svgf_guide_downsample_ds";
 
     descriptor_set = renderer->create_descriptor_set( descriptors, reflection_info, pipeline.pipeline, 0, render_blackboard );
@@ -595,7 +555,7 @@ void SVGFAccumulationPass::update_psos( FrameGraphResourceContext& context, Pipe
         {
         .stages = {
             {
-                .source_file_path = "glsl/reflections.glsl",
+                .source_file_path = "glsl/svgf.glsl",
                 .type = VK_SHADER_STAGE_COMPUTE_BIT,
             },
         },
@@ -625,6 +585,7 @@ void SVGFAccumulationPass::render( FrameGraphRenderContext& context ) {
     RenderBlackboard& render_blackboard = *context.render_blackboard;
 
     if ( !render_blackboard.tlas.is_valid() ) {
+        reset_history = true;
         return;
     }
 
@@ -640,21 +601,21 @@ void SVGFAccumulationPass::render( FrameGraphRenderContext& context ) {
 
     gpu_commands->bind_descriptor_set(
         { renderer->gpu->bindless_descriptor_set, descriptor_set },
-        { render_blackboard.scene_cb_offset, reflections_constants_offset } );
+        { render_blackboard.scene_cb_offset, constants_offset } );
 
     gpu_commands->add_image_barrier( resources.integrated_reflection_color_texture, range_aspect( VK_IMAGE_ASPECT_COLOR_BIT, 0, VK_REMAINING_MIP_LEVELS, 0, VK_REMAINING_ARRAY_LAYERS ),
                         { VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
                         VK_ACCESS_2_SHADER_WRITE_BIT,
                         VK_IMAGE_LAYOUT_GENERAL } );
-    gpu_commands->flush_barriers();
-
-    gpu_commands->dispatch( raptor::ceilu32( render_blackboard.render_width * texture_scale / 8.0f ), raptor::ceilu32( render_blackboard.render_height * texture_scale / 8.0f ), 1 );
-
-    gpu_commands->bind_descriptor_set(
-        { renderer->gpu->bindless_descriptor_set, descriptor_set },
-        { render_blackboard.scene_cb_offset, restirgi_constants_offset } );
-
+    gpu_commands->add_image_barrier( resources.integrated_reflection_moments_texture, range_aspect( VK_IMAGE_ASPECT_COLOR_BIT, 0, VK_REMAINING_MIP_LEVELS, 0, VK_REMAINING_ARRAY_LAYERS ),
+                        { VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
+                        VK_ACCESS_2_SHADER_WRITE_BIT,
+                        VK_IMAGE_LAYOUT_GENERAL } );
     gpu_commands->add_image_barrier( resources.integrated_restirgi_color_texture, range_aspect( VK_IMAGE_ASPECT_COLOR_BIT, 0, VK_REMAINING_MIP_LEVELS, 0, VK_REMAINING_ARRAY_LAYERS ),
+                          { VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
+                            VK_ACCESS_2_SHADER_WRITE_BIT,
+                            VK_IMAGE_LAYOUT_GENERAL } );
+    gpu_commands->add_image_barrier( resources.integrated_restirgi_moments_texture, range_aspect( VK_IMAGE_ASPECT_COLOR_BIT, 0, VK_REMAINING_MIP_LEVELS, 0, VK_REMAINING_ARRAY_LAYERS ),
                           { VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
                             VK_ACCESS_2_SHADER_WRITE_BIT,
                             VK_IMAGE_LAYOUT_GENERAL } );
@@ -759,7 +720,7 @@ void SVGFAccumulationPass::create_gpu_resources( FrameGraphResourceContext& cont
     create_descriptors( context );
 }
 
-static void svgf_cache_reflections_image_view_indices( SVGFAccumulationOutput& accumulation, SVGFCommonResources& resources, SVGFGuideResources& current_guide, SVGFGpuConstants* gpu_constants ) {
+static void svgf_cache_common_image_view_indices( SVGFAccumulationOutput& accumulation, SVGFCommonResources& resources, SVGFGuideResources& current_guide, SVGFConstants* gpu_constants ) {
     gpu_constants->motion_vectors_texture_index = resources.motion_vectors_image_view.index();
     gpu_constants->mesh_id_texture_index = resources.mesh_id_image_view.index();
     gpu_constants->normals_texture_index = resources.normals_image_view.index();
@@ -772,33 +733,32 @@ static void svgf_cache_reflections_image_view_indices( SVGFAccumulationOutput& a
     gpu_constants->history_mesh_id_texture_index = accumulation.last_frame_mesh_id_image_view.index();
     gpu_constants->history_normals_texture_index = accumulation.last_frame_normals_image_view.index();
     gpu_constants->history_linear_depth_texture = accumulation.last_frame_linear_depth_image_view.index();
-    gpu_constants->output_texture_index = resources.reflections_image_view.index();
-    gpu_constants->history_output_texture_index = accumulation.reflections_history_image_view.index();
-    gpu_constants->history_moments_texture_index = accumulation.reflections_moments_history_image_view.index();
-    gpu_constants->integrated_color_texture_index = resources.integrated_reflection_color_image_view.index();
-    gpu_constants->integrated_moments_texture_index = resources.integrated_reflection_moments_image_view.index();
     gpu_constants->depth_normal_fwidth_texture_index = resources.depth_normal_fwidth_image_view.index();
 }
 
-static void svgf_cache_restirgi_image_view_indices( SVGFAccumulationOutput& accumulation, SVGFCommonResources& resources, SVGFGuideResources& current_guide, SVGFGpuConstants* gpu_constants ) {
-    gpu_constants->motion_vectors_texture_index = resources.motion_vectors_image_view.index();
-    gpu_constants->mesh_id_texture_index = resources.mesh_id_image_view.index();
-    gpu_constants->normals_texture_index = resources.normals_image_view.index();
-    gpu_constants->linear_z_dd_texture_index = resources.linear_z_dd_image_view.index();
-    gpu_constants->current_motion_vectors_texture_index = current_guide.motion_vectors_image_view.index();
-    gpu_constants->current_mesh_id_texture_index = current_guide.mesh_id_image_view.index();
-    gpu_constants->current_normals_texture_index = current_guide.normals_image_view.index();
-    gpu_constants->current_linear_z_dd_texture_index = current_guide.linear_depth_image_view.index();
-    gpu_constants->current_depth_normal_fwidth_texture_index = current_guide.depth_normal_fwidth_image_view.index();
-    gpu_constants->history_mesh_id_texture_index = accumulation.last_frame_mesh_id_image_view.index();
-    gpu_constants->history_normals_texture_index = accumulation.last_frame_normals_image_view.index();
-    gpu_constants->history_linear_depth_texture = accumulation.last_frame_linear_depth_image_view.index();
-    gpu_constants->output_texture_index = resources.restirgi_output_image_view.index();
-    gpu_constants->history_output_texture_index = accumulation.restirgi_history_image_view.index();
-    gpu_constants->history_moments_texture_index = accumulation.restirgi_moments_history_image_view.index();
-    gpu_constants->integrated_color_texture_index = resources.integrated_restirgi_color_image_view.index();
-    gpu_constants->integrated_moments_texture_index = resources.integrated_restirgi_moments_image_view.index();
-    gpu_constants->depth_normal_fwidth_texture_index = resources.depth_normal_fwidth_image_view.index();
+static void svgf_cache_reflections_output_indices( SVGFAccumulationOutput& accumulation, SVGFCommonResources& resources, SVGFOutputs* outputs ) {
+    outputs->output_texture_index = resources.reflections_image_view.index();
+    outputs->history_output_texture_index = accumulation.reflections_history_image_view.index();
+    outputs->history_moments_texture_index = accumulation.reflections_moments_history_image_view.index();
+    outputs->integrated_color_texture_index = resources.integrated_reflection_color_image_view.index();
+    outputs->integrated_moments_texture_index = resources.integrated_reflection_moments_image_view.index();
+}
+
+static void svgf_cache_restirgi_output_indices( SVGFAccumulationOutput& accumulation, SVGFCommonResources& resources, SVGFOutputs* outputs ) {
+    outputs->output_texture_index = resources.restirgi_output_image_view.index();
+    outputs->history_output_texture_index = accumulation.restirgi_history_image_view.index();
+    outputs->history_moments_texture_index = accumulation.restirgi_moments_history_image_view.index();
+    outputs->integrated_color_texture_index = resources.integrated_restirgi_color_image_view.index();
+    outputs->integrated_moments_texture_index = resources.integrated_restirgi_moments_image_view.index();
+}
+
+static void svgf_set_common_constants( SVGFConstants* gpu_constants, f32 texture_scale, FrameGraphResourceContext& context ) {
+    gpu_constants->output_resolution_scale = texture_scale;
+    gpu_constants->output_resolution_scale_rcp = 1.0f / texture_scale;
+    gpu_constants->input_resolution_scale = texture_scale;
+    gpu_constants->input_resolution_scale_rcp = 1.0f / texture_scale;
+    gpu_constants->temporal_depth_difference = context.render_config->raytraced_reflections.temporal_depth_difference;
+    gpu_constants->temporal_normal_difference = context.render_config->raytraced_reflections.temporal_normal_difference;
 }
 
 void SVGFAccumulationPass::upload_gpu_data( FrameGraphResourceContext& context ) {
@@ -809,37 +769,22 @@ void SVGFAccumulationPass::upload_gpu_data( FrameGraphResourceContext& context )
     GpuDevice& gpu = *renderer->gpu;
     RenderScene& scene = *context.render_scene;
 
-    SVGFGpuConstants* gpu_constants = gpu.dynamic_buffer_allocate<SVGFGpuConstants>( &reflections_constants_offset );
+    SVGFDenoiseGpuConstants* gpu_constants = gpu.dynamic_buffer_allocate<SVGFDenoiseGpuConstants>( &constants_offset );
     if ( gpu_constants ) {
-        svgf_cache_reflections_image_view_indices( output, resources, guide, gpu_constants );
+        svgf_cache_common_image_view_indices( output, resources, guide, &gpu_constants->svgf );
+        svgf_set_common_constants( &gpu_constants->svgf, texture_scale, context );
+
+        svgf_cache_reflections_output_indices( output, resources, &gpu_constants->reflections );
         // NOTE(marco): unused
-        gpu_constants->variance_texture_index = 0;
-        gpu_constants->filtered_color_texture_index = 0;
-        gpu_constants->updated_variance_texture_index = 0;
+        gpu_constants->reflections.variance_texture_index = 0;
+        gpu_constants->reflections.filtered_color_texture_index = 0;
+        gpu_constants->reflections.updated_variance_texture_index = 0;
 
-        gpu_constants->output_resolution_scale = texture_scale;
-        gpu_constants->output_resolution_scale_rcp = 1.0f / texture_scale;
-        gpu_constants->input_resolution_scale = texture_scale;
-        gpu_constants->input_resolution_scale_rcp = 1.0f / texture_scale;
-        gpu_constants->temporal_depth_difference = context.render_config->raytraced_reflections.temporal_depth_difference;
-        gpu_constants->temporal_normal_difference = context.render_config->raytraced_reflections.temporal_normal_difference;
-    }
-
-    gpu_constants = gpu.dynamic_buffer_allocate<SVGFGpuConstants>( &restirgi_constants_offset );
-    if ( gpu_constants ) {
-        svgf_cache_restirgi_image_view_indices( output, resources, guide, gpu_constants );
+        svgf_cache_restirgi_output_indices( output, resources, &gpu_constants->restirgi );
         // NOTE(marco): unused
-        gpu_constants->variance_texture_index = 0;
-        gpu_constants->filtered_color_texture_index = 0;
-        gpu_constants->updated_variance_texture_index = 0;
-
-        // NOTE(marco): restirgi is full screen
-        gpu_constants->output_resolution_scale = texture_scale;
-        gpu_constants->output_resolution_scale_rcp = 1.0f / texture_scale;
-        gpu_constants->input_resolution_scale = 1.0f;
-        gpu_constants->input_resolution_scale_rcp = 1.0f;
-        gpu_constants->temporal_depth_difference = context.render_config->raytraced_reflections.temporal_depth_difference;
-        gpu_constants->temporal_normal_difference = context.render_config->raytraced_reflections.temporal_normal_difference;
+        gpu_constants->restirgi.variance_texture_index = 0;
+        gpu_constants->restirgi.filtered_color_texture_index = 0;
+        gpu_constants->restirgi.updated_variance_texture_index = 0;
     }
 }
 
@@ -882,7 +827,7 @@ void SVGFAccumulationPass::create_descriptors( FrameGraphResourceContext& contex
     ShaderReflectionInfo* reflection_info = renderer->get_shader_reflection( pipeline.pipeline );
 
     DescriptorSetBinder descriptors;
-    descriptors.dynamic_buffers.push( { 40, sizeof( SVGFGpuConstants ) } );
+    descriptors.dynamic_buffers.push( { 40, sizeof( SVGFDenoiseGpuConstants ) } );
     descriptors.name = "svgf_accumulation_pass_ds";
 
     descriptor_set = renderer->create_descriptor_set( descriptors, reflection_info, pipeline.pipeline, 0, render_blackboard );
@@ -936,6 +881,8 @@ void SVGFVariancePass::declare_frame_graph_node( FrameGraphResourceContext& cont
                     .texture = {
                         .width = ceilu32( render_blackboard.render_width * texture_scale ),
                         .height = ceilu32( render_blackboard.render_height * texture_scale ),
+                        .scale_width = texture_scale,
+                        .scale_height = texture_scale,
                         .format = VK_FORMAT_R16G16B16A16_SFLOAT,
                         .compute = true
                     }
@@ -948,6 +895,8 @@ void SVGFVariancePass::declare_frame_graph_node( FrameGraphResourceContext& cont
                     .texture = {
                         .width = ceilu32( render_blackboard.render_width * texture_scale ),
                         .height = ceilu32( render_blackboard.render_height * texture_scale ),
+                        .scale_width = texture_scale,
+                        .scale_height = texture_scale,
                         .format = VK_FORMAT_R16G16B16A16_SFLOAT,
                         .compute = true,
                     }
@@ -978,7 +927,7 @@ void SVGFVariancePass::update_psos( FrameGraphResourceContext& context, Pipeline
         {
         .stages = {
             {
-                .source_file_path = "glsl/reflections.glsl",
+                .source_file_path = "glsl/svgf.glsl",
                 .type = VK_SHADER_STAGE_COMPUTE_BIT,
             },
         },
@@ -1023,12 +972,7 @@ void SVGFVariancePass::render( FrameGraphRenderContext& context ) {
 
     gpu_commands->bind_descriptor_set(
         { renderer->gpu->bindless_descriptor_set, descriptor_set },
-        { render_blackboard.scene_cb_offset, reflections_constants_offset } );
-    gpu_commands->dispatch( raptor::ceilu32( render_blackboard.render_width * texture_scale / 8.0f ), raptor::ceilu32( render_blackboard.render_height * texture_scale / 8.0f ), 1 );
-
-    gpu_commands->bind_descriptor_set(
-        { renderer->gpu->bindless_descriptor_set, descriptor_set },
-        {  render_blackboard.scene_cb_offset, restirgi_constants_offset } );
+        { render_blackboard.scene_cb_offset, constants_offset } );
 
     gpu_commands->dispatch( raptor::ceilu32( render_blackboard.render_width * texture_scale / 8.0f ), raptor::ceilu32( render_blackboard.render_height * texture_scale / 8.0f ), 1 );
 }
@@ -1084,38 +1028,24 @@ void SVGFVariancePass::upload_gpu_data( FrameGraphResourceContext& context ) {
     GpuDevice& gpu = *renderer->gpu;
     RenderScene& scene = *context.render_scene;
 
-    SVGFGpuConstants* gpu_constants = gpu.dynamic_buffer_allocate<SVGFGpuConstants>( &reflections_constants_offset );
+    SVGFDenoiseGpuConstants* gpu_constants = gpu.dynamic_buffer_allocate<SVGFDenoiseGpuConstants>( &constants_offset );
     if ( gpu_constants ) {
-        svgf_cache_reflections_image_view_indices( accumulation_input, resources, guide, gpu_constants );
-        gpu_constants->variance_texture_index = reflections_variance_image_view.index();
+        svgf_cache_common_image_view_indices( accumulation_input, resources, guide, &gpu_constants->svgf );
+        svgf_set_common_constants( &gpu_constants->svgf, texture_scale, context );
+
+        svgf_cache_reflections_output_indices( accumulation_input, resources, &gpu_constants->reflections );
+        gpu_constants->reflections.variance_texture_index = reflections_variance_image_view.index();
 
         // NOTE(marco): unused
-        gpu_constants->filtered_color_texture_index = 0;
-        gpu_constants->updated_variance_texture_index = 0;
+        gpu_constants->reflections.filtered_color_texture_index = 0;
+        gpu_constants->reflections.updated_variance_texture_index = 0;
 
-        gpu_constants->output_resolution_scale = texture_scale;
-        gpu_constants->output_resolution_scale_rcp = 1.0f / texture_scale;
-        gpu_constants->input_resolution_scale = texture_scale;
-        gpu_constants->input_resolution_scale_rcp = 1.0f / texture_scale;
-        gpu_constants->temporal_depth_difference = context.render_config->raytraced_reflections.temporal_depth_difference;
-        gpu_constants->temporal_normal_difference = context.render_config->raytraced_reflections.temporal_normal_difference;
-    }
-
-    gpu_constants = gpu.dynamic_buffer_allocate<SVGFGpuConstants>( &restirgi_constants_offset );
-    if ( gpu_constants ) {
-        svgf_cache_restirgi_image_view_indices( accumulation_input, resources, guide, gpu_constants );
-        gpu_constants->variance_texture_index = restirgi_variance_image_view.index();
+        svgf_cache_restirgi_output_indices( accumulation_input, resources, &gpu_constants->restirgi );
+        gpu_constants->restirgi.variance_texture_index = restirgi_variance_image_view.index();
 
         // NOTE(marco): unused
-        gpu_constants->filtered_color_texture_index = 0;
-        gpu_constants->updated_variance_texture_index = 0;
-
-        gpu_constants->output_resolution_scale = texture_scale;
-        gpu_constants->output_resolution_scale_rcp = 1.0f / texture_scale;
-        gpu_constants->input_resolution_scale = texture_scale;
-        gpu_constants->input_resolution_scale_rcp = 1.0f / texture_scale;
-        gpu_constants->temporal_depth_difference = context.render_config->raytraced_reflections.temporal_depth_difference;
-        gpu_constants->temporal_normal_difference = context.render_config->raytraced_reflections.temporal_normal_difference;
+        gpu_constants->restirgi.filtered_color_texture_index = 0;
+        gpu_constants->restirgi.updated_variance_texture_index = 0;
     }
 }
 
@@ -1143,7 +1073,7 @@ void SVGFVariancePass::create_descriptors( FrameGraphResourceContext& context ) 
     ShaderReflectionInfo* reflection_info = renderer->get_shader_reflection( pipeline.pipeline );
 
     DescriptorSetBinder descriptors;
-    descriptors.dynamic_buffers.push( { 40, sizeof( SVGFGpuConstants ) } );
+    descriptors.dynamic_buffers.push( { 40, sizeof( SVGFDenoiseGpuConstants ) } );
     descriptors.name = "svgf_variance_ds";
 
     descriptor_set = renderer->create_descriptor_set( descriptors, reflection_info, pipeline.pipeline, 0, render_blackboard );
@@ -1227,7 +1157,7 @@ void SVGFWaveletPass::update_psos( FrameGraphResourceContext& context, PipelineU
         {
         .stages = {
             {
-                .source_file_path = "glsl/reflections.glsl",
+                .source_file_path = "glsl/svgf.glsl",
                 .type = VK_SHADER_STAGE_COMPUTE_BIT,
             },
         },
@@ -1271,14 +1201,22 @@ void SVGFWaveletPass::render( FrameGraphRenderContext& context ) {
     for ( u32 i = 0; i < k_num_passes; ++i ) {
         gpu_commands->bind_descriptor_set(
             { renderer->gpu->bindless_descriptor_set, descriptor_set[ i ] },
-            { render_blackboard.scene_cb_offset, reflections_constant_offsets[ i ] } );
+            { render_blackboard.scene_cb_offset, constant_offsets[ i ] } );
 
         if ( ( i % 2 ) == 0 ) {
             gpu_commands->add_image_barrier( resources.integrated_reflection_color_texture, range_aspect( VK_IMAGE_ASPECT_COLOR_BIT, 0, VK_REMAINING_MIP_LEVELS, 0, VK_REMAINING_ARRAY_LAYERS ),
                           { VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
                             VK_ACCESS_2_SHADER_READ_BIT,
                             VK_IMAGE_LAYOUT_READ_ONLY_OPTIMAL } );
+            gpu_commands->add_image_barrier( resources.integrated_restirgi_color_texture, range_aspect( VK_IMAGE_ASPECT_COLOR_BIT, 0, VK_REMAINING_MIP_LEVELS, 0, VK_REMAINING_ARRAY_LAYERS ),
+                          { VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
+                            VK_ACCESS_2_SHADER_READ_BIT,
+                            VK_IMAGE_LAYOUT_READ_ONLY_OPTIMAL } );
             gpu_commands->add_image_barrier( reflections_variance_texture, range_aspect( VK_IMAGE_ASPECT_COLOR_BIT, 0, VK_REMAINING_MIP_LEVELS, 0, VK_REMAINING_ARRAY_LAYERS ),
+                          { VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
+                            VK_ACCESS_2_SHADER_READ_BIT,
+                            VK_IMAGE_LAYOUT_READ_ONLY_OPTIMAL } );
+            gpu_commands->add_image_barrier( restirgi_variance_texture, range_aspect( VK_IMAGE_ASPECT_COLOR_BIT, 0, VK_REMAINING_MIP_LEVELS, 0, VK_REMAINING_ARRAY_LAYERS ),
                           { VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
                             VK_ACCESS_2_SHADER_READ_BIT,
                             VK_IMAGE_LAYOUT_READ_ONLY_OPTIMAL } );
@@ -1287,7 +1225,15 @@ void SVGFWaveletPass::render( FrameGraphRenderContext& context ) {
                           { VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
                             VK_ACCESS_2_SHADER_WRITE_BIT,
                             VK_IMAGE_LAYOUT_GENERAL } );
-            gpu_commands->add_image_barrier( ping_pong_variance_image, range_aspect( VK_IMAGE_ASPECT_COLOR_BIT, 0, VK_REMAINING_MIP_LEVELS, 0, VK_REMAINING_ARRAY_LAYERS ),
+            gpu_commands->add_image_barrier( restirgi_ping_pong_color_image, range_aspect( VK_IMAGE_ASPECT_COLOR_BIT, 0, VK_REMAINING_MIP_LEVELS, 0, VK_REMAINING_ARRAY_LAYERS ),
+                          { VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
+                            VK_ACCESS_2_SHADER_WRITE_BIT,
+                            VK_IMAGE_LAYOUT_GENERAL } );
+            gpu_commands->add_image_barrier( reflections_ping_pong_variance_image, range_aspect( VK_IMAGE_ASPECT_COLOR_BIT, 0, VK_REMAINING_MIP_LEVELS, 0, VK_REMAINING_ARRAY_LAYERS ),
+                          { VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
+                            VK_ACCESS_2_SHADER_WRITE_BIT,
+                            VK_IMAGE_LAYOUT_GENERAL } );
+            gpu_commands->add_image_barrier( restirgi_ping_pong_variance_image, range_aspect( VK_IMAGE_ASPECT_COLOR_BIT, 0, VK_REMAINING_MIP_LEVELS, 0, VK_REMAINING_ARRAY_LAYERS ),
                           { VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
                             VK_ACCESS_2_SHADER_WRITE_BIT,
                             VK_IMAGE_LAYOUT_GENERAL } );
@@ -1296,7 +1242,15 @@ void SVGFWaveletPass::render( FrameGraphRenderContext& context ) {
                           { VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
                             VK_ACCESS_2_SHADER_WRITE_BIT,
                             VK_IMAGE_LAYOUT_GENERAL } );
+            gpu_commands->add_image_barrier( resources.integrated_restirgi_color_texture, range_aspect( VK_IMAGE_ASPECT_COLOR_BIT, 0, VK_REMAINING_MIP_LEVELS, 0, VK_REMAINING_ARRAY_LAYERS ),
+                          { VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
+                            VK_ACCESS_2_SHADER_WRITE_BIT,
+                            VK_IMAGE_LAYOUT_GENERAL } );
             gpu_commands->add_image_barrier( reflections_variance_texture, range_aspect( VK_IMAGE_ASPECT_COLOR_BIT, 0, VK_REMAINING_MIP_LEVELS, 0, VK_REMAINING_ARRAY_LAYERS ),
+                          { VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
+                            VK_ACCESS_2_SHADER_WRITE_BIT,
+                            VK_IMAGE_LAYOUT_GENERAL } );
+            gpu_commands->add_image_barrier( restirgi_variance_texture, range_aspect( VK_IMAGE_ASPECT_COLOR_BIT, 0, VK_REMAINING_MIP_LEVELS, 0, VK_REMAINING_ARRAY_LAYERS ),
                           { VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
                             VK_ACCESS_2_SHADER_WRITE_BIT,
                             VK_IMAGE_LAYOUT_GENERAL } );
@@ -1305,7 +1259,15 @@ void SVGFWaveletPass::render( FrameGraphRenderContext& context ) {
                           { VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
                             VK_ACCESS_2_SHADER_READ_BIT,
                             VK_IMAGE_LAYOUT_READ_ONLY_OPTIMAL } );
-            gpu_commands->add_image_barrier( ping_pong_variance_image, range_aspect( VK_IMAGE_ASPECT_COLOR_BIT, 0, VK_REMAINING_MIP_LEVELS, 0, VK_REMAINING_ARRAY_LAYERS ),
+            gpu_commands->add_image_barrier( restirgi_ping_pong_color_image, range_aspect( VK_IMAGE_ASPECT_COLOR_BIT, 0, VK_REMAINING_MIP_LEVELS, 0, VK_REMAINING_ARRAY_LAYERS ),
+                          { VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
+                            VK_ACCESS_2_SHADER_READ_BIT,
+                            VK_IMAGE_LAYOUT_READ_ONLY_OPTIMAL } );
+            gpu_commands->add_image_barrier( reflections_ping_pong_variance_image, range_aspect( VK_IMAGE_ASPECT_COLOR_BIT, 0, VK_REMAINING_MIP_LEVELS, 0, VK_REMAINING_ARRAY_LAYERS ),
+                          { VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
+                            VK_ACCESS_2_SHADER_READ_BIT,
+                            VK_IMAGE_LAYOUT_READ_ONLY_OPTIMAL } );
+            gpu_commands->add_image_barrier( restirgi_ping_pong_variance_image, range_aspect( VK_IMAGE_ASPECT_COLOR_BIT, 0, VK_REMAINING_MIP_LEVELS, 0, VK_REMAINING_ARRAY_LAYERS ),
                           { VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
                             VK_ACCESS_2_SHADER_READ_BIT,
                             VK_IMAGE_LAYOUT_READ_ONLY_OPTIMAL } );
@@ -1320,60 +1282,6 @@ void SVGFWaveletPass::render( FrameGraphRenderContext& context ) {
         if ( i == 0 ) {
             gpu_commands->copy_image( reflections_ping_pong_color_image, accumulation_input.reflections_history_texture,
                 { VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, VK_ACCESS_2_SHADER_READ_BIT, VK_IMAGE_LAYOUT_READ_ONLY_OPTIMAL } );
-        }
-    }
-
-    push_constants.step_size = 0;
-    for ( u32 i = 0; i < k_num_passes; ++i ) {
-        gpu_commands->bind_descriptor_set(
-            { renderer->gpu->bindless_descriptor_set, descriptor_set[ i ] },
-            { render_blackboard.scene_cb_offset, restirgi_constant_offsets[ i ] } );
-
-        if ( ( i % 2 ) == 0 ) {
-            gpu_commands->add_image_barrier( resources.integrated_restirgi_color_texture, range_aspect( VK_IMAGE_ASPECT_COLOR_BIT, 0, VK_REMAINING_MIP_LEVELS, 0, VK_REMAINING_ARRAY_LAYERS ),
-                          { VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
-                            VK_ACCESS_2_SHADER_READ_BIT,
-                            VK_IMAGE_LAYOUT_READ_ONLY_OPTIMAL } );
-            gpu_commands->add_image_barrier( restirgi_variance_texture, range_aspect( VK_IMAGE_ASPECT_COLOR_BIT, 0, VK_REMAINING_MIP_LEVELS, 0, VK_REMAINING_ARRAY_LAYERS ),
-                          { VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
-                            VK_ACCESS_2_SHADER_READ_BIT,
-                            VK_IMAGE_LAYOUT_READ_ONLY_OPTIMAL } );
-
-            gpu_commands->add_image_barrier( restirgi_ping_pong_color_image, range_aspect( VK_IMAGE_ASPECT_COLOR_BIT, 0, VK_REMAINING_MIP_LEVELS, 0, VK_REMAINING_ARRAY_LAYERS ),
-                          { VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
-                            VK_ACCESS_2_SHADER_WRITE_BIT,
-                            VK_IMAGE_LAYOUT_GENERAL } );
-            gpu_commands->add_image_barrier( ping_pong_variance_image, range_aspect( VK_IMAGE_ASPECT_COLOR_BIT, 0, VK_REMAINING_MIP_LEVELS, 0, VK_REMAINING_ARRAY_LAYERS ),
-                          { VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
-                            VK_ACCESS_2_SHADER_WRITE_BIT,
-                            VK_IMAGE_LAYOUT_GENERAL } );
-        } else {
-            gpu_commands->add_image_barrier( resources.integrated_restirgi_color_texture, range_aspect( VK_IMAGE_ASPECT_COLOR_BIT, 0, VK_REMAINING_MIP_LEVELS, 0, VK_REMAINING_ARRAY_LAYERS ),
-                          { VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
-                            VK_ACCESS_2_SHADER_WRITE_BIT,
-                            VK_IMAGE_LAYOUT_GENERAL } );
-            gpu_commands->add_image_barrier( restirgi_variance_texture, range_aspect( VK_IMAGE_ASPECT_COLOR_BIT, 0, VK_REMAINING_MIP_LEVELS, 0, VK_REMAINING_ARRAY_LAYERS ),
-                          { VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
-                            VK_ACCESS_2_SHADER_WRITE_BIT,
-                            VK_IMAGE_LAYOUT_GENERAL } );
-
-            gpu_commands->add_image_barrier( restirgi_ping_pong_color_image, range_aspect( VK_IMAGE_ASPECT_COLOR_BIT, 0, VK_REMAINING_MIP_LEVELS, 0, VK_REMAINING_ARRAY_LAYERS ),
-                          { VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
-                            VK_ACCESS_2_SHADER_READ_BIT,
-                            VK_IMAGE_LAYOUT_READ_ONLY_OPTIMAL } );
-            gpu_commands->add_image_barrier( ping_pong_variance_image, range_aspect( VK_IMAGE_ASPECT_COLOR_BIT, 0, VK_REMAINING_MIP_LEVELS, 0, VK_REMAINING_ARRAY_LAYERS ),
-                          { VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
-                            VK_ACCESS_2_SHADER_READ_BIT,
-                            VK_IMAGE_LAYOUT_READ_ONLY_OPTIMAL } );
-        }
-        gpu_commands->flush_barriers();
-
-        push_constants.step_size = 1 << i;
-
-        gpu_commands->push_constants( pipeline.pipeline, 0, sizeof( SVGFPushConstants ), &push_constants );
-        gpu_commands->dispatch( raptor::ceilu32( render_blackboard.render_width * texture_scale / 8.0f ), raptor::ceilu32( render_blackboard.render_height * texture_scale / 8.0f ), 1 );
-
-        if ( i == 0 ) {
             gpu_commands->copy_image( restirgi_ping_pong_color_image, accumulation_input.restirgi_history_texture,
                 { VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, VK_ACCESS_2_SHADER_READ_BIT, VK_IMAGE_LAYOUT_READ_ONLY_OPTIMAL } );
         }
@@ -1424,15 +1332,18 @@ void SVGFWaveletPass::on_resize(FrameGraphResourceContext& context, u32 new_widt
 
     gpu.resize_image( reflections_ping_pong_color_image, adjusted_width, adjusted_height );
     gpu.resize_image( restirgi_ping_pong_color_image, adjusted_width, adjusted_height );
-    gpu.resize_image( ping_pong_variance_image, adjusted_width, adjusted_height );
+    gpu.resize_image( reflections_ping_pong_variance_image, adjusted_width, adjusted_height );
+    gpu.resize_image( restirgi_ping_pong_variance_image, adjusted_width, adjusted_height );
 
     gpu.recreate_image_view( reflections_ping_pong_color_image_view );
     gpu.recreate_image_view( restirgi_ping_pong_color_image_view );
-    gpu.recreate_image_view( ping_pong_variance_image_view );
+    gpu.recreate_image_view( reflections_ping_pong_variance_image_view );
+    gpu.recreate_image_view( restirgi_ping_pong_variance_image_view );
 
     gpu.add_image_view_to_bindless( reflections_ping_pong_color_image_view );
     gpu.add_image_view_to_bindless( restirgi_ping_pong_color_image_view );
-    gpu.add_image_view_to_bindless( ping_pong_variance_image_view );
+    gpu.add_image_view_to_bindless( reflections_ping_pong_variance_image_view );
+    gpu.add_image_view_to_bindless( restirgi_ping_pong_variance_image_view );
 }
 
 void SVGFWaveletPass::create_gpu_resources( FrameGraphResourceContext& context ) {
@@ -1461,15 +1372,25 @@ void SVGFWaveletPass::create_gpu_resources( FrameGraphResourceContext& context )
     create_2d_texture_and_add_to_framegraph( gpu, frame_graph, adjusted_width, adjusted_height, VK_FORMAT_R16G16B16A16_SFLOAT, "restirgi_denoised_output", "restirgi_denoised_output", restirgi_ping_pong_color_image, restirgi_ping_pong_color_image_view );
 
     ImageCreation texture_creation{ };
-    texture_creation.set_size( adjusted_width, adjusted_height, 1 ).set_format_type( VK_FORMAT_R32_SFLOAT, TextureType::Texture2D ).set_flags( TextureFlags::Compute_mask ).set_name( "ping_pong_variance_texture" );
-    ping_pong_variance_image = gpu.create_image( texture_creation );
+    texture_creation.set_size( adjusted_width, adjusted_height, 1 ).set_format_type( VK_FORMAT_R32_SFLOAT, TextureType::Texture2D ).set_flags( TextureFlags::Compute_mask ).set_name( "reflections_ping_pong_variance_texture" );
+    reflections_ping_pong_variance_image = gpu.create_image( texture_creation );
 
-    ping_pong_variance_image_view = gpu.create_image_view( {
-        .parent_image = ping_pong_variance_image,
+    reflections_ping_pong_variance_image_view = gpu.create_image_view( {
+        .parent_image = reflections_ping_pong_variance_image,
         .view_type = VK_IMAGE_VIEW_TYPE_2D,
         .sub_resource = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1 }, .name = texture_creation.name } );
 
-    gpu.add_image_view_to_bindless( ping_pong_variance_image_view );
+    gpu.add_image_view_to_bindless( reflections_ping_pong_variance_image_view );
+
+    texture_creation.set_name( "restirgi_ping_pong_variance_texture" );
+    restirgi_ping_pong_variance_image = gpu.create_image( texture_creation );
+
+    restirgi_ping_pong_variance_image_view = gpu.create_image_view( {
+        .parent_image = restirgi_ping_pong_variance_image,
+        .view_type = VK_IMAGE_VIEW_TYPE_2D,
+        .sub_resource = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1 }, .name = texture_creation.name } );
+
+    gpu.add_image_view_to_bindless( restirgi_ping_pong_variance_image_view );
 
     cache_svgf_common_resources( frame_graph, &resources );
     cache_svgf_accumulation_resources( frame_graph, &accumulation_input );
@@ -1500,40 +1421,26 @@ void SVGFWaveletPass::upload_gpu_data( FrameGraphResourceContext& context ) {
 
     for ( u32 i = 0; i < k_num_passes; ++i ) {
 
-        SVGFGpuConstants* gpu_constants = gpu.dynamic_buffer_allocate<SVGFGpuConstants>( &reflections_constant_offsets[ i ] );
+        SVGFDenoiseGpuConstants* gpu_constants = gpu.dynamic_buffer_allocate<SVGFDenoiseGpuConstants>( &constant_offsets[ i ] );
         if ( gpu_constants ) {
-            svgf_cache_reflections_image_view_indices( accumulation_input, resources, guide, gpu_constants );
+            svgf_cache_common_image_view_indices( accumulation_input, resources, guide, &gpu_constants->svgf );
+            svgf_set_common_constants( &gpu_constants->svgf, texture_scale, context );
 
-            gpu_constants->integrated_color_texture_index = ( i % 2 == 0 ) ? resources.integrated_reflection_color_image_view.index() : reflections_ping_pong_color_image_view.index();
-            gpu_constants->variance_texture_index = ( i % 2 == 0 ) ? reflections_variance_image_view.index() : ping_pong_variance_image_view.index();
+            svgf_cache_reflections_output_indices( accumulation_input, resources, &gpu_constants->reflections );
 
-            gpu_constants->filtered_color_texture_index = ( i % 2 == 1 ) ? resources.integrated_reflection_color_image_view.index() : reflections_ping_pong_color_image_view.index();
-            gpu_constants->updated_variance_texture_index = ( i % 2 == 1 ) ? reflections_variance_image_view.index() : ping_pong_variance_image_view.index();
+            gpu_constants->reflections.integrated_color_texture_index = ( i % 2 == 0 ) ? resources.integrated_reflection_color_image_view.index() : reflections_ping_pong_color_image_view.index();
+            gpu_constants->reflections.variance_texture_index = ( i % 2 == 0 ) ? reflections_variance_image_view.index() : reflections_ping_pong_variance_image_view.index();
 
-            gpu_constants->output_resolution_scale = texture_scale;
-            gpu_constants->output_resolution_scale_rcp = 1.0f / texture_scale;
-            gpu_constants->input_resolution_scale = texture_scale;
-            gpu_constants->input_resolution_scale_rcp = 1.0f / texture_scale;
-            gpu_constants->temporal_depth_difference = context.render_config->raytraced_reflections.temporal_depth_difference;
-            gpu_constants->temporal_normal_difference = context.render_config->raytraced_reflections.temporal_normal_difference;
-        }
+            gpu_constants->reflections.filtered_color_texture_index = ( i % 2 == 1 ) ? resources.integrated_reflection_color_image_view.index() : reflections_ping_pong_color_image_view.index();
+            gpu_constants->reflections.updated_variance_texture_index = ( i % 2 == 1 ) ? reflections_variance_image_view.index() : reflections_ping_pong_variance_image_view.index();
 
-        gpu_constants = gpu.dynamic_buffer_allocate<SVGFGpuConstants>( &restirgi_constant_offsets[ i ] );
-        if ( gpu_constants ) {
-            svgf_cache_restirgi_image_view_indices( accumulation_input, resources, guide, gpu_constants );
+            svgf_cache_restirgi_output_indices( accumulation_input, resources, &gpu_constants->restirgi );
 
-            gpu_constants->integrated_color_texture_index = ( i % 2 == 0 ) ? resources.integrated_restirgi_color_image_view.index() : restirgi_ping_pong_color_image_view.index();
-            gpu_constants->variance_texture_index = ( i % 2 == 0 ) ? restirgi_variance_image_view.index() : ping_pong_variance_image_view.index();
+            gpu_constants->restirgi.integrated_color_texture_index = ( i % 2 == 0 ) ? resources.integrated_restirgi_color_image_view.index() : restirgi_ping_pong_color_image_view.index();
+            gpu_constants->restirgi.variance_texture_index = ( i % 2 == 0 ) ? restirgi_variance_image_view.index() : restirgi_ping_pong_variance_image_view.index();
 
-            gpu_constants->filtered_color_texture_index = ( i % 2 == 1 ) ? resources.integrated_restirgi_color_image_view.index() : restirgi_ping_pong_color_image_view.index();
-            gpu_constants->updated_variance_texture_index = ( i % 2 == 1 ) ? restirgi_variance_image_view.index() : ping_pong_variance_image_view.index();
-
-            gpu_constants->output_resolution_scale = texture_scale;
-            gpu_constants->output_resolution_scale_rcp = 1.0f / texture_scale;
-            gpu_constants->input_resolution_scale = texture_scale;
-            gpu_constants->input_resolution_scale_rcp = 1.0f / texture_scale;
-            gpu_constants->temporal_depth_difference = context.render_config->raytraced_reflections.temporal_depth_difference;
-            gpu_constants->temporal_normal_difference = context.render_config->raytraced_reflections.temporal_normal_difference;
+            gpu_constants->restirgi.filtered_color_texture_index = ( i % 2 == 1 ) ? resources.integrated_restirgi_color_image_view.index() : restirgi_ping_pong_color_image_view.index();
+            gpu_constants->restirgi.updated_variance_texture_index = ( i % 2 == 1 ) ? restirgi_variance_image_view.index() : restirgi_ping_pong_variance_image_view.index();
         }
     }
 }
@@ -1547,10 +1454,12 @@ void SVGFWaveletPass::destroy_gpu_resources( FrameGraphResourceContext& context 
 
     gpu.destroy_image( reflections_ping_pong_color_image );
     gpu.destroy_image( restirgi_ping_pong_color_image );
-    gpu.destroy_image( ping_pong_variance_image );
+    gpu.destroy_image( reflections_ping_pong_variance_image );
+    gpu.destroy_image( restirgi_ping_pong_variance_image );
     gpu.destroy_image_view( reflections_ping_pong_color_image_view );
     gpu.destroy_image_view( restirgi_ping_pong_color_image_view );
-    gpu.destroy_image_view( ping_pong_variance_image_view );
+    gpu.destroy_image_view( reflections_ping_pong_variance_image_view );
+    gpu.destroy_image_view( restirgi_ping_pong_variance_image_view );
 
     for ( u32 i = 0; i < k_num_passes; ++i ) {
         gpu.destroy_descriptor_set( descriptor_set[ i ] );
@@ -1571,7 +1480,7 @@ void SVGFWaveletPass::create_descriptors( FrameGraphResourceContext& context ) {
         gpu->destroy_descriptor_set( descriptor_set[ i ] );
 
         descriptors.reset();
-        descriptors.dynamic_buffers.push( { 40, sizeof( SVGFGpuConstants ) } );
+        descriptors.dynamic_buffers.push( { 40, sizeof( SVGFDenoiseGpuConstants ) } );
         descriptors.name = "svgf_wavelet_ds";
 
         descriptor_set[ i ] = renderer->create_descriptor_set( descriptors, reflection_info, pipeline.pipeline, 0, render_blackboard );

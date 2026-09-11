@@ -128,6 +128,8 @@ void FrameRenderer::on_resize( GpuDevice& gpu, u32 new_width, u32 new_height ) {
     if ( point_shadows ) {
         point_shadows->on_resize( renderer, &render_blackboard, new_width, new_height );
     }
+
+    update_dependent_resources();
 }
 
 void FrameRenderer::shutdown() {
@@ -269,10 +271,10 @@ static void copy_gpu_mesh_transform( GpuMeshInstanceData& gpu_mesh_data, RenderS
         const glm::mat4 scale_matrix = glm::scale( glm::mat4( 1.0f ), glm::vec3( global_scale, global_scale, global_scale ) );
         gpu_mesh_data.world = scale_matrix * scene_graph->world_matrices[ mesh_instance.scene_graph_node_index ];
 
-       // gpu_mesh_data.inverse_world = glm::inverse( glm::transpose( gpu_mesh_data.world ) );
+        gpu_mesh_data.inverse_world = glm::inverse( glm::transpose( gpu_mesh_data.world ) );
     } else {
         gpu_mesh_data.world = glm::mat4(1.0f);
-        //gpu_mesh_data.inverse_world = glm::mat4(1.0f);
+        gpu_mesh_data.inverse_world = glm::mat4(1.0f);
     }
 
     gpu_mesh_data.mesh_index = render_scene.meshes[ mesh_instance.mesh_index ].gpu_mesh_index;
@@ -283,6 +285,11 @@ void FrameRenderer::upload_gpu_data( GameCamera& game_camera, glm::vec2 last_cli
     // Update scene constant buffer
     RenderScene& render_scene = *scene;
     GpuDevice& gpu = *renderer->gpu;
+
+    // Scene update
+    if ( lighting ) {
+        lighting->update_scene( *scene, render_config.lighting );
+    }
 
     // Jittering calculations
     glm::vec2 jitter_values = glm::vec2{ 0.0f, 0.0f };
@@ -402,30 +409,6 @@ void FrameRenderer::upload_gpu_data( GameCamera& game_camera, glm::vec2 last_cli
         memcpy( uniform_data, &frame_data, sizeof( GpuFrameData ) );
     }
 
-    // Features //////////////////////////////////////////////////////////
-    UploadGpuDataContext upload_context{ game_camera, last_clicked_position_left_button, frame_scratch,
-                                        renderer, render_blackboard, render_config, frame_graph, &render_scene, frame_data};
-
-    if ( lighting ) {
-        lighting->upload_gpu_data( upload_context );
-    }
-
-    if ( post ) {
-        post->upload_gpu_data( upload_context );
-    }
-
-    if ( debug_draw ) {
-        debug_draw->upload_gpu_data( upload_context );
-    }
-
-    if ( point_shadows ) {
-        point_shadows->upload_gpu_data( upload_context );
-    }
-
-    if ( ray_tracing ) {
-        ray_tracing->upload_gpu_data( upload_context );
-    }
-
     // Cache view data informations
     ViewRuntimeData& main_view = render_blackboard.main_view;
     {
@@ -439,6 +422,30 @@ void FrameRenderer::upload_gpu_data( GameCamera& game_camera, glm::vec2 last_cli
 
     for ( u32 i = 0; i < render_passes.size; ++i ) {
         render_passes[ i ]->upload_gpu_data( resource_context );
+    }
+
+    // Features //////////////////////////////////////////////////////////
+    UploadGpuDataContext upload_context{ game_camera, last_clicked_position_left_button, frame_scratch,
+                                        renderer, render_blackboard, render_config, frame_graph, &render_scene, frame_data};
+
+    if ( point_shadows ) {
+        point_shadows->upload_gpu_data( upload_context );
+    }
+
+    if ( lighting ) {
+        lighting->upload_gpu_data( upload_context );
+    }
+
+    if ( post ) {
+        post->upload_gpu_data( upload_context );
+    }
+
+    if ( debug_draw ) {
+        debug_draw->upload_gpu_data( upload_context );
+    }
+
+    if ( ray_tracing ) {
+        ray_tracing->upload_gpu_data( upload_context );
     }
 
     // UPLOAD DATA TO GPU ////////////////////////////////////////////////
@@ -624,7 +631,7 @@ void FrameRenderer::create_resources( ArenaAllocator* scratch_allocator ) {
     }
 
     if ( point_shadows ) {
-        point_shadows->create_gpu_resources( renderer, &render_blackboard, scene );
+        point_shadows->create_gpu_resources( renderer, &render_blackboard, frame_graph );
     }
 
     FrameGraphResourceContext resource_context{ renderer, frame_graph, &render_blackboard, &render_config, scene };
@@ -889,6 +896,16 @@ void DebugDrawRenderingFeature::upload_gpu_data( UploadGpuDataContext& context )
     GpuDevice* gpu = context.renderer->gpu;
     DebugDrawRuntimeData& debug = context.render_blackboard.debug_draw;
 
+    const LightingRenderConfig& lighting = context.render_config.lighting;
+
+    if ( lighting.show_light_edit_debug_draws && context.scene->active_lights > 0 ) {
+
+        const u32 light_index = raptor::min( lighting.selected_light_index, context.scene->active_lights - 1 );
+        const Light& light = context.scene->lights[ light_index ];
+
+        point_light_wire( light.world_position, light.radius, Color::white() );
+    }
+
     // Cache line counts
     debug.cpu_lines_count = lines.size;
     debug.cpu_lines2d_count = lines_2d.size;
@@ -898,8 +915,8 @@ void DebugDrawRenderingFeature::upload_gpu_data( UploadGpuDataContext& context )
         const VkDeviceSize mapping_size = sizeof( LineVertex ) * lines.size;
 
         Buffer* buffer = gpu->get_buffer( debug.cpu_lines_vb );
-        memcpy( buffer->mapped_data, lines.data, mapping_size );
-        gpu->flush_buffer( debug.cpu_lines_vb, 0, mapping_size );
+        memcpy( buffer->mapped_data, lines.data, ( u32 )mapping_size );
+        gpu->flush_buffer( debug.cpu_lines_vb, 0, ( u32 )mapping_size );
 
         lines.clear();
     }
@@ -909,7 +926,7 @@ void DebugDrawRenderingFeature::upload_gpu_data( UploadGpuDataContext& context )
 
         Buffer* buffer = gpu->get_buffer( debug.cpu_lines2d_vb );
         memcpy( buffer->mapped_data, lines_2d.data, mapping_size );
-        gpu->flush_buffer( debug.cpu_lines2d_vb, 0, mapping_size );
+        gpu->flush_buffer( debug.cpu_lines2d_vb, 0, ( u32 )mapping_size );
 
         lines_2d.clear();
     }
@@ -1737,13 +1754,13 @@ void MeshesRenderingFeature::create_geometry_resources( Renderer* renderer, Rend
 }
 
 void MeshesRenderingFeature::create_gpu_resources( Renderer* renderer, RenderBlackboard* render_blackboard, RenderScene* scene ) {
-    
+
 }
 
 void MeshesRenderingFeature::destroy_gpu_resources( Renderer* renderer, RenderBlackboard* render_blackboard ) {
 
     GpuDevice* gpu = renderer->gpu;
-    
+
     MeshRuntimeData& geometry_data = render_blackboard->geometry_data;
 
     gpu->destroy_buffer( geometry_data.position_buffer_gpu );
@@ -1848,7 +1865,7 @@ void GpuCullingRenderingFeature::upload_gpu_data( UploadGpuDataContext& context 
 
 void MeshletsRenderingFeature::create_geometry_resources( Renderer* renderer, RenderBlackboard* render_blackboard, RenderScene* scene ) {
     GpuDevice* gpu = renderer->gpu;
-    
+
     MeshletsRuntimeData& meshlets = render_blackboard->meshlets;
 
     if ( scene->meshlets_connectivity_data.size > 0 ) {
@@ -1954,7 +1971,7 @@ void MeshletsRenderingFeature::create_geometry_resources( Renderer* renderer, Re
 
             Buffer* buffer = gpu->get_buffer( skin.joint_transforms[ i ] );
             memcpy( buffer->mapped_data, skin.inverse_bind_matrices.data, joint_buffer_size );
-            gpu->flush_buffer( skin.joint_transforms[ i ], 0, joint_buffer_size );
+            gpu->flush_buffer( skin.joint_transforms[ i ], 0, ( u32 )joint_buffer_size );
         }
 
         if ( scene->meshlets_vertex_positions.size > 0 ) {
@@ -2172,6 +2189,9 @@ ClusteringLightingTileInfo calculate_light_tile_buffer_size( u32 width, u32 heig
     return info;
 }
 
+static void setup_sponza_shadow_test( RenderScene& scene );
+static void setup_sponza_shadow_test_adv( RenderScene& scene );
+
 void LightingRenderingFeature::upload_gpu_data( UploadGpuDataContext& context ) {
 
     Renderer* renderer = context.renderer;
@@ -2182,7 +2202,7 @@ void LightingRenderingFeature::upload_gpu_data( UploadGpuDataContext& context ) 
     GameCamera& game_camera = context.game_camera;
 
     // Lighting Constant Buffer
-    GpuLightingData* gpu_lighting_data = gpu.dynamic_buffer_allocate<GpuLightingData>( &render_blackboard.lighting.lighting_constants_cb_offset );
+    GpuLightConstants* gpu_lighting_data = gpu.dynamic_buffer_allocate<GpuLightConstants>( &render_blackboard.lighting.lighting_constants_cb_offset );
     if ( gpu_lighting_data ) {
 
         gpu_lighting_data->cubemap_shadows_index = render_blackboard.point_shadows.cubemap_shadows_index;
@@ -2190,25 +2210,31 @@ void LightingRenderingFeature::upload_gpu_data( UploadGpuDataContext& context ) 
         gpu_lighting_data->debug_show_tiles = render_config.lighting.debug_show_tiles ? 1 : 0;
         gpu_lighting_data->debug_show_bins = render_config.lighting.debug_show_bins ? 1 : 0;
         gpu_lighting_data->disable_shadows = render_config.shadows.disable_shadows ? 1 : 0;
+        gpu_lighting_data->shadow_pcf_samples = ( u32 )glm::clamp( render_config.shadows.pcf_samples, 1u, 16u );
+        gpu_lighting_data->shadow_pcf_radius = glm::clamp( render_config.shadows.pcf_radius, 0.0f, 4.0f );
         gpu_lighting_data->debug_modes = (u32)render_config.lighting.lighting_debug_modes;
         gpu_lighting_data->debug_texture_index = render_blackboard.lighting_debug_texture_index;
-        gpu_lighting_data->gi_intensity = render_config.gi_intensity;
+        gpu_lighting_data->gi_intensity = render_config.restirgi.enabled ? render_config.restirgi.gi_intensity : 0.f;
         gpu_lighting_data->brdf_lut_texture_index = render_blackboard.brdf_lut_image_view.is_valid() ? render_blackboard.brdf_lut_image_view.index() : renderer->gpu->dummy_image_view.index();
 
         gpu_lighting_data->shadow_visibility_texture_index = renderer->gpu->dummy_image_view.index();
         gpu_lighting_data->indirect_lighting_texture_index = renderer->gpu->dummy_image_view.index();
         gpu_lighting_data->bilateral_weights_texture_index = renderer->gpu->dummy_image_view.index();
         gpu_lighting_data->reflections_texture_index = renderer->gpu->dummy_image_view.index();
-
+        gpu_lighting_data->reflections_intensity = render_config.raytraced_reflections.enabled ? render_config.raytraced_reflections.intensity : 0.f;
 
         FrameGraphResource* resource = frame_graph->get_resource( "shadow_visibility" );
         if ( resource ) {
             gpu_lighting_data->shadow_visibility_texture_index = resource->resource_info.texture.image_view.index();
         }
 
-        resource = (FrameGraphResource*)frame_graph->get_resource( "indirect_lighting" );
+        resource = (FrameGraphResource*)frame_graph->get_resource( "restirgi_denoised_output" );
         if ( resource ) {
             gpu_lighting_data->indirect_lighting_texture_index = resource->resource_info.texture.image_view.index();
+        }
+        else {
+            // Reset contribution
+            gpu_lighting_data->gi_intensity = 0.f;
         }
 
         resource = (FrameGraphResource*)frame_graph->get_resource( "bilateral_weights" );
@@ -2219,6 +2245,10 @@ void LightingRenderingFeature::upload_gpu_data( UploadGpuDataContext& context ) 
         resource = (FrameGraphResource*)frame_graph->get_resource( "reflections_denoised_output" );
         if ( resource ) {
             gpu_lighting_data->reflections_texture_index = resource->resource_info.texture.image_view.index();
+        }
+        else {
+            // Reset contribution
+            gpu_lighting_data->reflections_intensity = 0.f;
         }
 
         // Volumetric fog data
@@ -2269,11 +2299,11 @@ void LightingRenderingFeature::upload_gpu_data( UploadGpuDataContext& context ) 
 
         glm::vec4 view_p = world_to_camera * p;
         // > 0 in front of camera
-        f32 center_d = -view_p.z;
+        f32 light_center_d = -view_p.z;
 
         // Sphere range along view direction
-        f32 d_min = center_d - light.radius;   // near side of sphere
-        f32 d_max = center_d + light.radius;   // far side of sphere
+        f32 d_min = light_center_d - light.radius;   // near side of sphere
+        f32 d_max = light_center_d + light.radius;   // far side of sphere
 
         d_min = raptor::max( d_min, scene_data.z_near );
 
@@ -2282,7 +2312,7 @@ void LightingRenderingFeature::upload_gpu_data( UploadGpuDataContext& context ) 
 
         const float dz = z_far - scene_data.z_near;
 
-        sorted_light.projected_z = ( center_d - scene_data.z_near ) / dz;
+        sorted_light.projected_z = ( light_center_d - scene_data.z_near ) / dz;
         sorted_light.projected_z_min = ( d_min - scene_data.z_near ) / dz;
         sorted_light.projected_z_max = ( d_max - scene_data.z_near ) / dz;
 
@@ -2396,13 +2426,11 @@ void LightingRenderingFeature::upload_gpu_data( UploadGpuDataContext& context ) 
 
         glm::vec4 view_space_pos = game_camera.camera.view * pos;
 
-        float center_d = -view_space_pos.z;
-        float d_min = center_d - radius;
-        float d_max = center_d + radius;
+        float light_center_d = -view_space_pos.z;
+        float d_min = light_center_d - radius;
+        float d_max = light_center_d + radius;
 
-        bool camera_visible =
-            ( d_max >= game_camera.camera.near_plane ) &&
-            ( d_min <= game_camera.camera.far_plane );
+        bool camera_visible = ( d_max >= game_camera.camera.near_plane ) && ( d_min <= game_camera.camera.far_plane );
 
         if ( !camera_visible && render_config.lighting.skip_invisible_lights ) {
             continue;
@@ -2445,44 +2473,41 @@ void LightingRenderingFeature::upload_gpu_data( UploadGpuDataContext& context ) 
             aabb_ndc.w = -1.f * glm::min( top_ndc.y, bottom_ndc.y );  // max Y
 
         } else {
+            glm::vec2 ndc_min{ 1.0f };
+            glm::vec2 ndc_max{ -1.0f };
 
-            // Use the 8 corners of the bounding box to find the screen-space AABB
-            glm::vec2 ndc_min{ 1.0f,  1.0f };
-            glm::vec2 ndc_max{ -1.0f, -1.0f };
+            const glm::vec3 center_vs = glm::vec3( view_space_pos );
+            const float near_plane = game_camera.camera.near_plane;
 
-            // World-space cube corners
+            // Build the sphere's bounding box directly in view space, aligned with
+            // the camera axes. This lets us clip it against the near plane by
+            // clamping each corner's Z before the perspective divide.
+            // Projecting the original world-space box without clipping could produce
+            // non-conservative bounds when it crossed the camera plane, missing lit tiles.
             for ( u32 c = 0; c < 8; ++c ) {
-                glm::vec3 offset{
-                    ( c & 1 ) ? radius : -radius,   // x
-                    ( c & 2 ) ? radius : -radius,   // y
-                    ( c & 4 ) ? radius : -radius    // z
+                const glm::vec3 offset{
+                    ( c & 1 ) ? radius : -radius,
+                    ( c & 2 ) ? radius : -radius,
+                    ( c & 4 ) ? radius : -radius
                 };
 
-                glm::vec3 corner_ws = glm::vec3( pos.x, pos.y, pos.z ) + offset;
-                glm::vec4 corner_ws4 = glm::vec4( corner_ws, 1.0f );
+                glm::vec3 corner_vs = center_vs + offset;
 
-                // view space -> clip space
-                glm::vec4 corner_vs4 = game_camera.camera.view * corner_ws4;
-                glm::vec4 corner_clip4 = game_camera.camera.projection * corner_vs4;
+                // RH view space: visible region has Z <= -near.
+                corner_vs.z = glm::min( corner_vs.z, -near_plane );
 
-                glm::vec4 corner_ndc4 = corner_clip4 / corner_clip4.w;
+                const glm::vec4 clip = game_camera.camera.projection * glm::vec4( corner_vs, 1.0f );
+                const glm::vec2 ndc = glm::clamp( glm::vec2( clip ) / clip.w, glm::vec2( -1.0f ), glm::vec2( 1.0f ) );
 
-                // clamp in [-1, 1] to avoid issues with screen coordinates
-                float x = glm::clamp( corner_ndc4.x, -1.0f, 1.0f );
-                float y = glm::clamp( corner_ndc4.y, -1.0f, 1.0f );
-
-                ndc_min.x = glm::min( ndc_min.x, x );
-                ndc_min.y = glm::min( ndc_min.y, y );
-                ndc_max.x = glm::max( ndc_max.x, x );
-                ndc_max.y = glm::max( ndc_max.y, y );
+                ndc_min = glm::min( ndc_min, ndc );
+                ndc_max = glm::max( ndc_max, ndc );
             }
 
-            aabb_ndc.x = ndc_min.x;
-            aabb_ndc.z = ndc_max.x;
-
             // Inverted Y aabb
-            aabb_ndc.y = -1.f * ndc_max.y;
-            aabb_ndc.w = -1.f * ndc_min.y;
+            aabb_ndc = {
+                ndc_min.x, -ndc_max.y,
+                ndc_max.x, -ndc_min.y
+            };
         }
 
         const f32 position_len = glm::length( glm::vec3( view_space_pos.x, view_space_pos.y, view_space_pos.z ) );
@@ -2499,13 +2524,15 @@ void LightingRenderingFeature::upload_gpu_data( UploadGpuDataContext& context ) 
         //rprint( "aabb %f %f %f %f\n", aabb_ndc.x, aabb_ndc.y, aabb_ndc.z, aabb_ndc.w );
 
         // NOTE(marco): xy = top-left, zw = bottom-right
-        glm::vec4 aabb_screen{ ( aabb_ndc.x * 0.5f + 0.5f ) * ( render_blackboard.render_width - 1 ),
-                           ( aabb_ndc.y * 0.5f + 0.5f ) * ( render_blackboard.render_height - 1 ),
-                           ( aabb_ndc.z * 0.5f + 0.5f ) * ( render_blackboard.render_width - 1 ),
-                           ( aabb_ndc.w * 0.5f + 0.5f ) * ( render_blackboard.render_height - 1 ) };
+        glm::vec4 aabb_screen{ ( aabb_ndc.x * 0.5f + 0.5f ) * ( render_blackboard.render_width ),
+                           ( aabb_ndc.y * 0.5f + 0.5f ) * ( render_blackboard.render_height ),
+                           ( aabb_ndc.z * 0.5f + 0.5f ) * ( render_blackboard.render_width ),
+                           ( aabb_ndc.w * 0.5f + 0.5f ) * ( render_blackboard.render_height ) };
 
         f32 width = aabb_screen.z - aabb_screen.x;
         f32 height = aabb_screen.w - aabb_screen.y;
+
+        light.projected_radius = 0.5f * raptor::max( width, height );
 
         if ( width < 0.0001f || height < 0.0001f ) {
             continue;
@@ -2539,12 +2566,12 @@ void LightingRenderingFeature::upload_gpu_data( UploadGpuDataContext& context ) 
 
         for ( u32 y = first_tile_y; y <= last_tile_y; ++y ) {
             for ( u32 x = first_tile_x; x <= last_tile_x; ++x ) {
-                u32 array_index = y * tile_stride + x;
+                u32 array_index = y * tile_stride + x * k_light_mask_u32_count;
 
                 u32 u32_index = i / 32;
                 u32 bit_index = i % 32;
 
-                light_tiles_bits[ array_index + u32_index ] |= ( 1 << bit_index );
+                light_tiles_bits[ array_index + u32_index ] |= ( 1u << bit_index );
             }
         }
     }
@@ -2564,7 +2591,7 @@ void LightingRenderingFeature::upload_gpu_data( UploadGpuDataContext& context ) 
             gpu_light.radius = light.radius;
             gpu_light.color = light.color;
             gpu_light.intensity = light.intensity;
-            gpu_light.shadow_map_resolution = light.shadow_map_resolution;
+            gpu_light.shadow_mip_level = light.shadow_mip_level;
             // NOTE: calculation used to retrieve depth for cubemaps.
             // near = 0.01f as a static value, if you change here change also
             // method vector_to_depth_value in lighting.h in the shaders!
@@ -2610,6 +2637,24 @@ void LightingRenderingFeature::upload_gpu_data( UploadGpuDataContext& context ) 
     }
 
     scratch_allocator->free_marker( current_marker );
+}
+
+void LightingRenderingFeature::update_scene( RenderScene& scene, LightingRenderConfig& config ) {
+
+    if ( config.load_shadow_test_lights ) {
+        setup_sponza_shadow_test( scene );
+
+        config.load_shadow_test_lights = false;
+        return;
+    }
+
+    if ( config.load_shadow_test_lights_adv ) {
+        setup_sponza_shadow_test_adv( scene );
+
+        config.load_shadow_test_lights_adv = false;
+        return;
+    }
+    
 }
 
 // TODO - integrate
@@ -2894,6 +2939,134 @@ void LightingRenderingFeature::on_resize( Renderer* renderer, RenderBlackboard* 
     }
 }
 
+void setup_sponza_shadow_test( RenderScene& scene ) {
+
+    struct TestLight {
+        glm::vec3 position;
+        f32 radius;
+        glm::vec3 color;
+        f32 intensity;
+    };
+
+    static const TestLight lights[] = {
+
+        { {-2.0f, 1.5f, -4.5f}, 2.0f, {1.0f, 0.35f, 0.20f}, 3.0f },
+        { { 2.0f, 1.5f, -4.5f}, 2.0f, {0.20f, 0.45f, 1.0f}, 3.0f },
+
+        { {-2.0f, 1.5f, -3.0f}, 1.5f, {0.25f, 1.00f, 0.40f}, 3.0f },
+        { { 2.0f, 1.5f, -3.0f}, 1.5f, {1.00f, 0.70f, 0.25f}, 3.0f },
+
+        { {-2.0f, 1.5f,  0.0f}, 3.0f, {1.00f, 0.30f, 0.20f}, 3.0f },
+        { { 2.0f, 1.5f,  0.0f}, 3.0f, {0.20f, 0.40f, 1.00f}, 3.0f },
+
+        { {-2.0f, 1.5f,  3.0f}, 1.6f, {0.20f, 1.00f, 0.35f}, 3.0f },
+        { { 2.0f, 1.5f,  3.0f}, 3.0f, {1.00f, 0.65f, 0.20f}, 3.0f },
+
+        { {-2.0f, 1.5f,  4.5f}, 2.5f, {1.00f, 0.35f, 0.25f}, 3.0f },
+        { { 2.0f, 1.5f,  4.5f}, 2.5f, {0.25f, 0.45f, 1.00f}, 3.0f },
+
+        { {-2.0f, 2.5f,  3.0f}, 1.5f, {0.25f, 1.00f, 0.40f}, 3.0f },
+        { { 2.0f, 2.5f,  3.0f}, 1.5f, {1.00f, 0.70f, 0.25f}, 3.0f },
+
+        { {-9.9f, 2.5f,  0.0f}, 3.5f, {0.25f, 1.00f, 0.40f}, 3.0f },
+        { { 9.9f, 2.5f,  0.0f}, 3.5f, {1.00f, 0.70f, 0.25f}, 3.0f },
+
+        { {-2.0f, 2.5f,  1.25f}, 1.5f, {0.25f, 1.00f, 0.40f}, 3.0f },
+        { { 2.0f, 2.5f,  1.25f}, 1.5f, {1.00f, 0.70f, 0.25f}, 3.0f },
+    };
+
+    scene.active_lights = ArraySize( lights );
+
+    for ( u32 i = 0; i < scene.active_lights; ++i ) {
+
+        Light& light = scene.lights[ i ];
+
+        light.world_position = lights[ i ].position;
+        light.radius = lights[ i ].radius;
+        light.color = lights[ i ].color;
+        light.intensity = lights[ i ].intensity;
+    }
+}
+
+void setup_sponza_shadow_test_adv( RenderScene& scene ) {
+
+    struct TestLight {
+        glm::vec3 position;
+        f32 radius;
+        glm::vec3 color;
+        f32 intensity;
+    };
+
+    static const TestLight lights[] = {
+
+        { {-2.0f, 1.5f, -4.5f}, 2.0f, {1.0f, 0.35f, 0.20f}, 3.0f },
+        { { 2.0f, 1.5f, -4.5f}, 2.0f, {0.20f, 0.45f, 1.0f}, 3.0f },
+
+        { {-2.0f, 1.5f, -3.0f}, 1.5f, {0.25f, 1.00f, 0.40f}, 3.0f },
+        { { 2.0f, 1.5f, -3.0f}, 1.5f, {1.00f, 0.70f, 0.25f}, 3.0f },
+
+        { {-2.0f, 1.5f,  0.0f}, 3.0f, {1.00f, 0.30f, 0.20f}, 3.0f },
+        { { 2.0f, 1.5f,  0.0f}, 3.0f, {0.20f, 0.40f, 1.00f}, 3.0f },
+
+        { {-2.0f, 1.5f,  3.0f}, 1.6f, {0.20f, 1.00f, 0.35f}, 3.0f },
+        { { 2.0f, 1.5f,  3.0f}, 3.0f, {1.00f, 0.65f, 0.20f}, 3.0f },
+
+        { {-2.0f, 1.5f,  4.5f}, 2.5f, {1.00f, 0.35f, 0.25f}, 3.0f },
+        { { 2.0f, 1.5f,  4.5f}, 2.5f, {0.25f, 0.45f, 1.00f}, 3.0f },
+
+        { {-2.0f, 2.5f,  3.0f}, 1.5f, {0.25f, 1.00f, 0.40f}, 3.0f },
+        { { 2.0f, 2.5f,  3.0f}, 1.5f, {1.00f, 0.70f, 0.25f}, 3.0f },
+
+        { {-9.9f, 2.5f,  0.0f}, 3.5f, {0.25f, 1.00f, 0.40f}, 3.0f },
+        { { 9.9f, 2.5f,  0.0f}, 3.5f, {1.00f, 0.70f, 0.25f}, 3.0f },
+
+        { {-2.0f, 2.5f,  1.25f}, 1.5f, {0.25f, 1.00f, 0.40f}, 3.0f },
+        { { 2.0f, 2.5f,  1.25f}, 1.5f, {1.00f, 0.70f, 0.25f}, 3.0f },
+
+        { {-2.0f, 4.5f, -4.5f}, 2.0f, {1.0f, 0.35f, 0.20f}, 3.0f },
+        { { 2.0f, 4.5f, -4.5f}, 2.0f, {0.20f, 0.45f, 1.0f}, 3.0f },
+
+        { {-2.0f, 4.5f, -3.0f}, 1.5f, {0.25f, 1.00f, 0.40f}, 3.0f },
+        { { 2.0f, 4.5f, -3.0f}, 1.5f, {1.00f, 0.70f, 0.25f}, 3.0f },
+
+        { {-2.0f, 4.5f,  0.0f}, 3.0f, {1.00f, 0.30f, 0.20f}, 3.0f },
+        { { 2.0f, 4.5f,  0.0f}, 3.0f, {0.20f, 0.40f, 1.00f}, 3.0f },
+
+        { {-2.0f, 4.5f,  3.0f}, 1.6f, {0.20f, 1.00f, 0.35f}, 3.0f },
+        { { 2.0f, 4.5f,  3.0f}, 3.0f, {1.00f, 0.65f, 0.20f}, 3.0f },
+
+        { {-2.0f, 4.5f,  4.5f}, 2.5f, {1.00f, 0.35f, 0.25f}, 3.0f },
+        { { 2.0f, 4.5f,  4.5f}, 2.5f, {0.25f, 0.45f, 1.00f}, 3.0f },
+
+        { {-2.0f, 5.5f,  3.0f}, 1.5f, {0.25f, 1.00f, 0.40f}, 3.0f },
+        { { 2.0f, 5.5f,  3.0f}, 1.5f, {1.00f, 0.70f, 0.25f}, 3.0f },
+
+        { {-9.9f, 5.5f,  0.0f}, 3.5f, {0.25f, 1.00f, 0.40f}, 3.0f },
+        { { 9.9f, 5.5f,  0.0f}, 3.5f, {1.00f, 0.70f, 0.25f}, 3.0f },
+
+        { {-2.0f, 5.5f,  1.25f}, 1.5f, {0.25f, 1.00f, 0.40f}, 3.0f },
+        { { 2.0f, 5.5f,  1.25f}, 1.5f, {1.00f, 0.70f, 0.25f}, 3.0f },
+
+        { { 9.0f, 1.5f,  3.0f}, 3.0f, {1.0f, 0.35f, 0.20f}, 3.0f },
+        { {-9.0f, 1.5f,  3.0f}, 3.0f, {1.0f, 0.35f, 0.20f}, 3.0f },
+        { { 9.0f, 1.5f, -3.0f}, 3.0f, {0.20f, 0.45f, 1.0f}, 3.0f },
+        { {-9.0f, 1.5f, -3.0f}, 3.0f, {0.20f, 0.45f, 1.0f}, 3.0f },
+    };
+
+    scene.active_lights = ArraySize( lights );
+
+    for ( u32 i = 0; i < scene.active_lights; ++i ) {
+
+        Light& light = scene.lights[ i ];
+
+        light.world_position = lights[ i ].position;
+        light.radius = lights[ i ].radius;
+        light.color = lights[ i ].color;
+        light.intensity = lights[ i ].intensity;
+    }
+}
+
+
 // PostProcessRenderingFeature ///////////////////////////////////////////
 
 void PostProcessRenderingFeature::update_psos( Renderer* renderer, FrameGraph* frame_graph, PipelineUpdatePhase phase ) {
@@ -3042,21 +3215,96 @@ void PostProcessRenderingFeature::upload_gpu_data( UploadGpuDataContext& context
 // PointlightShadowsRenderingFeature /////////////////////////////////////
 
 void PointlightShadowsRenderingFeature::create_gpu_resources( Renderer* renderer, RenderBlackboard* render_blackboard,
-                                                              RenderScene* scene ) {
+                                                              FrameGraph* frame_graph ) {
+    GpuDevice& gpu = *renderer->gpu;
+    PointlightShadowsRuntimeData& shadows = render_blackboard->point_shadows;
 
+    for ( size_t i = 0; i < k_max_frames; i++ ) {
 
+        shadows.shadow_resolutions[ i ] = gpu.create_buffer( {
+            .size = sizeof( u32 ) * k_num_lights,
+            .usage = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT |
+                     VK_BUFFER_USAGE_TRANSFER_SRC_BIT |
+                     VK_BUFFER_USAGE_TRANSFER_DST_BIT,
+            .memory_usage = VMA_MEMORY_USAGE_AUTO_PREFER_DEVICE,
+            .name = "shadow_resolutions" } );
+
+        shadows.shadow_resolutions_readback[ i ] = gpu.create_buffer( {
+            .size = sizeof( u32 ) * k_num_lights,
+            .usage = VK_BUFFER_USAGE_TRANSFER_DST_BIT,
+            .memory_usage = VMA_MEMORY_USAGE_AUTO_PREFER_HOST,
+            .allocation_flags = VMA_ALLOCATION_CREATE_HOST_ACCESS_RANDOM_BIT,
+            .name = "shadow_resolutions_readback" } );
+    }
 }
 
 void PointlightShadowsRenderingFeature::destroy_gpu_resources( Renderer* renderer, RenderBlackboard* render_blackboard ) {
 
+    GpuDevice& gpu = *renderer->gpu;
+    PointlightShadowsRuntimeData& shadows = render_blackboard->point_shadows;
+
+    for ( size_t i = 0; i < k_max_frames; i++ ) {
+        gpu.destroy_buffer( shadows.shadow_resolutions[ i ] );
+        gpu.destroy_buffer( shadows.shadow_resolutions_readback[ i ] );
+    }
 }
 
 void PointlightShadowsRenderingFeature::on_resize( Renderer* renderer, RenderBlackboard* render_blackboard, u32 new_width, u32 new_height ) {
 
 }
 
+static u32 shadow_resolution_to_mip( u32 resolution ) {
+
+    if ( resolution > 256 ) {
+        return 0;
+    }
+
+    if ( resolution > 128 ) {
+        return 1;
+    }
+
+    return 2;
+}
 void PointlightShadowsRenderingFeature::upload_gpu_data( UploadGpuDataContext& context ) {
 
+    GpuDevice& gpu = *context.renderer->gpu;
+    PointlightShadowsRuntimeData& shadows = context.render_blackboard.point_shadows;
+    ShadowRenderConfig& config = context.render_config.shadows;
+
+    const u32 frame_index = gpu.current_frame;
+    const u32 active_lights = context.scene->active_lights;
+
+    // Update the desired resolution from the compute readback.
+    if ( shadows.shadow_resolution_readback_valid[ frame_index ] ) {
+
+        const BufferHandle readback = shadows.shadow_resolutions_readback[ frame_index ];
+
+        const u32* resolutions = ( const u32* )gpu.map_buffer( { readback } );
+
+        if ( resolutions ) {
+            for ( u32 i = 0; i < active_lights; ++i ) {
+                context.scene->lights[ i ].shadow_map_resolution = ( f32 )resolutions[ i ];
+            }
+
+            gpu.unmap_buffer( { readback } );
+        }
+    }
+
+    // Select the mip used by both lighting and shadow rendering.
+    shadows.mip_light_count[ 0 ] = 0;
+    shadows.mip_light_count[ 1 ] = 0;
+    shadows.mip_light_count[ 2 ] = 0;
+
+    const u32 forced_mip = raptor::min( config.forced_shadow_mip, 2u );
+
+    for ( u32 i = 0; i < active_lights; ++i ) {
+        Light& light = context.scene->lights[ i ];
+
+        const f32 requested_resolution = light.shadow_map_resolution * config.shadow_resolution_scale;
+        light.shadow_mip_level = config.force_shadow_mip ? forced_mip : shadow_resolution_to_mip( ( u32 )requested_resolution );
+
+        ++shadows.mip_light_count[ light.shadow_mip_level ];
+    }
 }
 
 // RayTracingRenderFeature ///////////////////////////////////////////////
@@ -3249,7 +3497,7 @@ void RayTracingRenderFeature::build_acceleration_structures_from_static_scene( R
 
     Buffer* transform_buffer = renderer->gpu->get_buffer( ray_tracing_scene.geometry_transform_buffer );
     memcpy( transform_buffer->mapped_data, geometry_transforms.data, geometry_transform_buffer_size );
-    renderer->gpu->flush_buffer( ray_tracing_scene.geometry_transform_buffer, 0, geometry_transform_buffer_size );
+    renderer->gpu->flush_buffer( ray_tracing_scene.geometry_transform_buffer, 0, ( u32 )geometry_transform_buffer_size );
 
     BLASHandle blas = renderer->gpu->create_blas( { .geometries = {geometries.as_cspan()}, .name = "mesh_blas" } );
     ray_tracing_scene.blases.push( blas );

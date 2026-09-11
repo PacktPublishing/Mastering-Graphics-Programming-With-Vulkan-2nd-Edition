@@ -30,10 +30,6 @@ struct LightPassConstants {
     u32             output_width;
     u32             output_height;
     u32             emissive;
-
-    u32             gi_index;
-    u32             reflection_index;
-    u32             pad[2];
 }; // struct LightingConstants
 
 void LightingPass::declare_frame_graph_node( FrameGraphResourceContext& context ) {
@@ -148,20 +144,6 @@ void LightingPass::render( FrameGraphRenderContext& context ) {
 
     if ( use_compute ) {
 
-        if ( gi_texture ) {
-            gpu_commands->add_image_barrier( gi_texture->resource_info.texture.image, range_aspect( VK_IMAGE_ASPECT_COLOR_BIT, 0, VK_REMAINING_MIP_LEVELS, 0, VK_REMAINING_ARRAY_LAYERS ),
-                                             { VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
-                                               VK_ACCESS_2_SHADER_READ_BIT,
-                                               VK_IMAGE_LAYOUT_READ_ONLY_OPTIMAL } );
-        }
-        
-        if ( reflections_texture ) {
-            gpu_commands->add_image_barrier( reflections_texture->resource_info.texture.image, range_aspect( VK_IMAGE_ASPECT_COLOR_BIT, 0, VK_REMAINING_MIP_LEVELS, 0, VK_REMAINING_ARRAY_LAYERS ),
-                                             { VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
-                                               VK_ACCESS_2_SHADER_READ_BIT,
-                                               VK_IMAGE_LAYOUT_READ_ONLY_OPTIMAL } );
-        }
-        
         gpu_commands->flush_barriers();
 
         gpu_commands->bind_pipeline( compute_pipeline.pipeline );
@@ -264,20 +246,6 @@ void LightingPass::create_gpu_resources( FrameGraphResourceContext& context ) {
     roughness_texture = get_output_texture( frame_graph, node->inputs[ 2 ] );
     emissive_texture = get_output_texture( frame_graph, node->inputs[ 3 ] );
     depth_texture = get_output_texture( frame_graph, node->inputs[ 4 ] );
-
-    if ( context.render_config->restirgi.enabled ) {
-        gi_texture = frame_graph->get_resource( "restirgi_denoised_output" );
-    }
-    else {
-        gi_texture = nullptr;
-    }
-    
-    if ( context.render_config->raytraced_shadows.enabled ) {
-        reflections_texture = frame_graph->get_resource( "reflections_denoised_output" );
-    }
-    else {
-        reflections_texture = nullptr;
-    }
 
     output_texture = frame_graph->access_resource( node->outputs[ 0 ] );
 
@@ -385,8 +353,6 @@ void LightingPass::upload_gpu_data( FrameGraphResourceContext& context ) {
         lighting_data->output_width = render_blackboard.render_width;
         lighting_data->output_height = render_blackboard.render_height;
         lighting_data->emissive = emissive_texture->resource_info.texture.image_view.index();
-        lighting_data->gi_index = gi_texture ? gi_texture->resource_info.texture.image_view.index() : k_invalid_texture_index;
-        lighting_data->reflection_index = reflections_texture ? reflections_texture->resource_info.texture.image_view.index() : k_invalid_texture_index;
     }
 
     if ( renderer->gpu->fragment_shading_rate_present ) {

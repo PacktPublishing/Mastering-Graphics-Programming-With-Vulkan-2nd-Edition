@@ -184,6 +184,7 @@ struct BufferCreation {
 
     VmaMemoryUsage                  memory_usage        = VMA_MEMORY_USAGE_AUTO_PREFER_DEVICE;
     VmaAllocationCreateFlags        allocation_flags    = 0;
+    VkDeviceSize                    min_alignment       = 0;
 
     cstring                         name                = nullptr;
 }; // struct BufferCreation
@@ -259,6 +260,9 @@ struct SamplerCreation {
     VkSamplerAddressMode            address_mode_w = VK_SAMPLER_ADDRESS_MODE_REPEAT;
 
     VkSamplerReductionMode          reduction_mode = VK_SAMPLER_REDUCTION_MODE_WEIGHTED_AVERAGE;
+
+    VkBool32                        compare_enable  = VK_FALSE;
+    VkCompareOp                     compare_op      = VK_COMPARE_OP_LESS;
 
     cstring                         name        = nullptr;
 
@@ -849,6 +853,7 @@ struct PagePoolAllocation {
 //
 struct SparseMemoryBindInfo {
     VkImage                         image;
+    PagePoolHandle                  page_pool;
     u32                             count;
     u32                             binding_array_offset;
 }; // struct SparseMemoryBindInfo
@@ -857,18 +862,39 @@ struct SparseMemoryBindInfo {
 //
 //
 struct PagePool {
-    Array<PagePoolAllocation>       allocations;
     Array<VmaAllocation>            vma_allocations;
+    Array<VmaAllocation>            mip_tail_allocations;
+
+    Array<u32>                      page_bindings;
+    Array<u32>                      free_pages;
+    Array<u32>                      pending_free_pages;
 
     u32                             block_width;
     u32                             block_height;
     u32                             block_size;
 
+    u32                             mip_tail_first_lod;
+    VkDeviceSize                    mip_tail_size;
+    VkDeviceSize                    mip_tail_offset;
+    VkDeviceSize                    mip_tail_stride;
+    VkSparseImageFormatFlags        sparse_flags;
+
     u32                             size;
     u32                             used_pages;
-
-    PagePoolAllocation*             free_list;
 }; // struct PagePool
+
+//
+//
+struct SparseImageMemoryStats {
+
+    u32             resident_pages;
+    u32             allocated_pages;
+    u32             max_mip0_pages;
+
+    VkDeviceSize    resident_bytes;
+    VkDeviceSize    allocated_bytes;
+    VkDeviceSize    max_mip0_bytes;
+}; // struct SparseImageMemoryStats
 
 //
 //

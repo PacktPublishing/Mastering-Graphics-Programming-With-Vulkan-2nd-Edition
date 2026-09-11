@@ -32,6 +32,7 @@ static const uint nearest_repeat_index  = 3;
 
 // Global bindings ///////////////////////////////////////////////////////
 Texture2D<float4>   global_textures[]   : register(t10, space0);
+Texture2D<float>    global_textures_f32[] : register(t10, space0);
 Texture3D<float4>   global_textures_3d[]: register(t10, space0);
 TextureCubeArray    global_textures_cubemaps_array[] : register(t10, space0);
 
@@ -41,6 +42,11 @@ RWTexture3D<float4> global_images_3d[]  : register(u11, space0);
 SamplerState        global_samplers[]   : register(s12, space0);
 
 ByteAddressBuffer   global_buffers[]    : register(t13, space0);
+StructuredBuffer<float> global_buffers_f32[] : register(t13, space0);
+StructuredBuffer<half> global_buffers_f16[] : register(t13, space0);
+
+RWStructuredBuffer<float> global_buffers_rw_f32[] : register(u13, space0);
+RWStructuredBuffer<half> global_buffers_rw_f16[] : register(u13, space0);
 
 
 // Bindless utilities ////////////////////////////////////////////////////

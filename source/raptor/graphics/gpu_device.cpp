@@ -373,7 +373,7 @@ void GpuDevice::init( const GpuDeviceCreation& creation ) {
     const bool use_gpu_assisted = debug_options.enable_validation_layers &&
                                   debug_options.enable_gpu_assisted;
 
-    const bool use_sync_validation = debug_options.enable_validation_layers && 
+    const bool use_sync_validation = debug_options.enable_validation_layers &&
                                      debug_options.enable_sync_validation &&
                                      !use_gpu_assisted;
 
@@ -396,7 +396,7 @@ void GpuDevice::init( const GpuDeviceCreation& creation ) {
         instance_extensions.push( VK_EXT_LAYER_SETTINGS_EXTENSION_NAME );
 
         if ( use_gpu_assisted ) {
-            layer_settings.push( { "VK_LAYER_KHRONOS_validation", "gpuav_enable", 
+            layer_settings.push( { "VK_LAYER_KHRONOS_validation", "gpuav_enable",
                                  VK_LAYER_SETTING_TYPE_BOOL32_EXT, 1, &setting_true } );
 
             // GPU-AV without Core Checks
@@ -405,7 +405,7 @@ void GpuDevice::init( const GpuDeviceCreation& creation ) {
         }
 
         if ( use_sync_validation ) {
-            layer_settings.push( { "VK_LAYER_KHRONOS_validation", "validate_sync", 
+            layer_settings.push( { "VK_LAYER_KHRONOS_validation", "validate_sync",
                                  VK_LAYER_SETTING_TYPE_BOOL32_EXT, 1, &setting_true } );
         }
 
@@ -540,6 +540,25 @@ void GpuDevice::init( const GpuDeviceCreation& creation ) {
                 device_fault_extension_present = true;
                 continue;
             }
+
+            if ( !strcmp( extensions[ i ].extensionName, VK_EXT_SHADER_ATOMIC_FLOAT_EXTENSION_NAME ) ) {
+                device_shader_atomic_float_extension_present = true;
+                continue;
+            }
+
+            if ( !strcmp( extensions[ i ].extensionName, VK_NV_COOPERATIVE_VECTOR_EXTENSION_NAME ) ) {
+                cooperative_vector_supported = true;
+                continue;
+            }
+            if ( !strcmp( extensions[ i ].extensionName, VK_NV_COOPERATIVE_MATRIX_EXTENSION_NAME ) ) {
+                cooperative_matrix_extension_present = true;
+                continue;
+            }
+
+            if ( !strcmp( extensions[ i ].extensionName, VK_EXT_SHADER_REPLICATED_COMPOSITES_EXTENSION_NAME ) ) {
+                shader_replicated_composites_extension_present = true;
+                continue;
+            }
         }
 
         temp_allocator->free_marker( initial_temp_allocator_marker );
@@ -599,7 +618,7 @@ void GpuDevice::init( const GpuDeviceCreation& creation ) {
 
     {
         u32 main_queue_family_index = u32_max, transfer_queue_family_index = u32_max, compute_queue_family_index = u32_max, present_queue_family_index = u32_max;
-        u32 compute_queue_index = u32_max;
+
         for ( u32 fi = 0; fi < queue_family_count; ++fi ) {
             VkQueueFamilyProperties queue_family = queue_families[ fi ];
 
@@ -619,7 +638,6 @@ void GpuDevice::init( const GpuDeviceCreation& creation ) {
                 // NOTE: removing this will use a real compute only queue.
                 if ( queue_family.queueCount > 1 && !creation.prefer_dedicated_compute_family ) {
                     compute_queue_family_index = fi;
-                    compute_queue_index = 1;
                 }
 
                 continue;
@@ -628,9 +646,8 @@ void GpuDevice::init( const GpuDeviceCreation& creation ) {
             // Search for another compute queue if graphics queue exposes only one queue
             if ( ( queue_family.queueFlags & VK_QUEUE_COMPUTE_BIT ) &&
                  ( ( queue_family.queueFlags & VK_QUEUE_GRAPHICS_BIT ) == 0 ) &&
-                 ( compute_queue_index == u32_max ) ) {
+                 ( compute_queue_family_index == u32_max ) ) {
                 compute_queue_family_index = fi;
-                compute_queue_index = 0;
             }
 
             // Search for transfer queue
@@ -698,6 +715,22 @@ void GpuDevice::init( const GpuDeviceCreation& creation ) {
         device_extensions.push( VK_EXT_DEVICE_FAULT_EXTENSION_NAME );
     }
 
+    if ( cooperative_vector_supported ) {
+        device_extensions.push( VK_NV_COOPERATIVE_VECTOR_EXTENSION_NAME );
+    }
+
+    if ( cooperative_matrix_extension_present ) {
+        device_extensions.push( VK_NV_COOPERATIVE_MATRIX_EXTENSION_NAME );
+    }
+
+    if ( device_shader_atomic_float_extension_present ) {
+        device_extensions.push( VK_EXT_SHADER_ATOMIC_FLOAT_EXTENSION_NAME );
+    }
+
+    if ( shader_replicated_composites_extension_present ) {
+        device_extensions.push( VK_EXT_SHADER_REPLICATED_COMPOSITES_EXTENSION_NAME );
+    }
+
     const float queue_priority[] = { 1.0f, 1.0f, 1.0f, 1.0f, 1.0f, 1.0f, 1.0f, 1.0f };
     Array<VkDeviceQueueCreateInfo> queue_info;
     queue_info.init( temp_allocator, 8 );
@@ -717,20 +750,24 @@ void GpuDevice::init( const GpuDeviceCreation& creation ) {
     }
 
     VkDeviceQueueCreateInfo& main_queue = queue_info.push_use();
-    main_queue.sType = VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO;
-    main_queue.queueFamilyIndex = vulkan_main_queue_family;
-    main_queue.queueCount = main_queue_count;
-    main_queue.pQueuePriorities = queue_priority;
+    main_queue = {
+        .sType = VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO,
+        .queueFamilyIndex = vulkan_main_queue_family,
+        .queueCount = main_queue_count,
+        .pQueuePriorities = queue_priority
+    };
 
     bool separate_compute_queue = vulkan_compute_queue_family < queue_family_count &&
         vulkan_compute_queue_family != vulkan_main_queue_family;
 
     if ( separate_compute_queue ) {
         VkDeviceQueueCreateInfo& compute_queue = queue_info.push_use();
-        compute_queue.queueFamilyIndex = vulkan_compute_queue_family;
-        compute_queue.sType = VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO;
-        compute_queue.queueCount = 1;
-        compute_queue.pQueuePriorities = queue_priority;
+        compute_queue = {
+            .sType = VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO,
+            .queueFamilyIndex = vulkan_compute_queue_family,
+            .queueCount = 1,
+            .pQueuePriorities = queue_priority
+        };
     }
 
     bool separate_transfer_queue = vulkan_transfer_queue_family < queue_family_count &&
@@ -738,11 +775,13 @@ void GpuDevice::init( const GpuDeviceCreation& creation ) {
         vulkan_transfer_queue_family != vulkan_compute_queue_family;
 
     if ( separate_transfer_queue ) {
-        VkDeviceQueueCreateInfo& transfer_queue_info = queue_info.push_use();
-        transfer_queue_info.sType = VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO;
-        transfer_queue_info.queueFamilyIndex = vulkan_transfer_queue_family;
-        transfer_queue_info.queueCount = 1;
-        transfer_queue_info.pQueuePriorities = queue_priority;
+        VkDeviceQueueCreateInfo& transfer_queue = queue_info.push_use();
+        transfer_queue = {
+            .sType = VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO,
+            .queueFamilyIndex = vulkan_transfer_queue_family,
+            .queueCount = 1,
+            .pQueuePriorities = queue_priority
+        };
     }
 
     VkPhysicalDeviceFeatures2 physical_features2{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2 };
@@ -799,19 +838,62 @@ void GpuDevice::init( const GpuDeviceCreation& creation ) {
         current_pnext = &device_fault_features;
     }
 
+    VkPhysicalDeviceShaderAtomicFloatFeaturesEXT shader_atomic_float_features{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_ATOMIC_FLOAT_FEATURES_EXT };
+    if ( device_shader_atomic_float_extension_present ) {
+        shader_atomic_float_features.pNext = current_pnext;
+        current_pnext = &shader_atomic_float_features;
+    }
+
+    VkPhysicalDeviceCooperativeMatrixFeaturesNV cooperative_matrix_features{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_COOPERATIVE_MATRIX_FEATURES_NV };
+    if ( cooperative_matrix_extension_present ) {
+        cooperative_matrix_features.pNext = current_pnext;
+        current_pnext = &cooperative_matrix_features;
+    }
+
+    VkPhysicalDeviceCooperativeVectorFeaturesNV cooperative_vector_features{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_COOPERATIVE_VECTOR_FEATURES_NV };
+    if ( cooperative_vector_supported ) {
+        cooperative_vector_features.pNext = current_pnext;
+        current_pnext = &cooperative_vector_features;
+    }
+
+    VkPhysicalDeviceShaderReplicatedCompositesFeaturesEXT shader_replicated_composites_features{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_REPLICATED_COMPOSITES_FEATURES_EXT };
+    if ( shader_replicated_composites_extension_present ) {
+        shader_replicated_composites_features.pNext = current_pnext;
+        current_pnext = &shader_replicated_composites_features;
+    }
+
     physical_features2.pNext = current_pnext;
 
     vkGetPhysicalDeviceFeatures2( vulkan_physical_device, &physical_features2 );
 
     // For the feature to be correctly working, we need both the possibility to partially bind a descriptor,
     // as some entries in the bindless array will be empty, and SpirV runtime descriptors.
-    bindless_supported = creation.enable_bindless && 
+    bindless_supported = creation.enable_bindless &&
                          vulkan_12_features.descriptorBindingPartiallyBound &&
                          vulkan_12_features.runtimeDescriptorArray;
 
+    if ( cooperative_vector_features.cooperativeVector &&
+         cooperative_vector_features.cooperativeVectorTraining &&
+         cooperative_matrix_features.cooperativeMatrix ) {
+
+        u32 property_count = 0;
+        vkGetPhysicalDeviceCooperativeVectorPropertiesNV( vulkan_physical_device, &property_count, nullptr );
+
+        Array<VkCooperativeVectorPropertiesNV> cooperative_vector_properties;
+        cooperative_vector_properties.init( allocator, property_count, property_count );
+        memset(  cooperative_vector_properties.data, 0, sizeof( VkCooperativeVectorPropertiesNV ) * property_count );
+        for ( u32 i = 0; i < property_count; ++i ) {
+            cooperative_vector_properties[ i ].sType = VK_STRUCTURE_TYPE_COOPERATIVE_VECTOR_PROPERTIES_NV;
+        }
+
+        vkGetPhysicalDeviceCooperativeVectorPropertiesNV( vulkan_physical_device, &property_count, cooperative_vector_properties.data );
+
+        cooperative_vector_properties.shutdown();
+    }
+
     // Disable if shading rate is disabled
     mesh_shaders_features.primitiveFragmentShadingRateMeshShader =
-        ( mesh_shaders_features.primitiveFragmentShadingRateMeshShader == VK_TRUE ) && 
+        ( mesh_shaders_features.primitiveFragmentShadingRateMeshShader == VK_TRUE ) &&
         ( fragment_shading_rate_present == 1 );
 
     // NOTE(marco): needed for virtual textures
@@ -819,7 +901,7 @@ void GpuDevice::init( const GpuDeviceCreation& creation ) {
     RASSERT( physical_features2.features.sparseResidencyImage3D );
     RASSERT( physical_features2.features.sparseResidencyImage2D );
 
-    // 
+    //
     device_fault_enabled = device_fault_extension_present && device_fault_features.deviceFault == VK_TRUE;
 
     if ( device_fault_extension_present ) {
@@ -993,7 +1075,7 @@ void GpuDevice::init( const GpuDeviceCreation& creation ) {
     check( result );
 
     ////////  Create Descriptor Pools
-    //if ( !descriptor_buffer_present ) 
+    //if ( !descriptor_buffer_present )
     {
         const GpuDescriptorPoolCreation& pool_creation = creation.descriptor_pool_creation;
         Array<VkDescriptorPoolSize> pool_sizes( temp_allocator,
@@ -1077,6 +1159,9 @@ void GpuDevice::init( const GpuDeviceCreation& creation ) {
     pending_sparse_queue_binds.init( allocator, 1024 );
     pending_sparse_memory_info.init( allocator, 1024 );
 
+    pending_sparse_opaque_memory_info.init( allocator, 1024 );
+    pending_sparse_opaque_queue_binds.init( allocator, 1024 );
+
     // Create binary semaphores
     // NOTE: swapchain does not support timeline semaphores for image acquisition
     VkSemaphoreCreateInfo semaphore_info{ VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO };
@@ -1150,6 +1235,13 @@ void GpuDevice::init( const GpuDeviceCreation& creation ) {
 
     global_samplers[ GlobalSamplers::NearestRepeat ] = create_sampler( sc );
 
+    sc.set_address_mode_uvw( VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE, VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE, VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE )
+        .set_min_mag_mip( VK_FILTER_LINEAR, VK_FILTER_LINEAR, VK_SAMPLER_MIPMAP_MODE_NEAREST ).set_name( "Sampler Shadow Linear Clamp" );
+    sc.compare_enable = VK_TRUE;
+    sc.compare_op = VK_COMPARE_OP_LESS;
+
+    global_samplers[ GlobalSamplers::ShadowLinearClamp ] = create_sampler( sc );
+
     {
         const VkDeviceSize fullscreen_size = 3 * 3 * sizeof( f32 );
 
@@ -1164,7 +1256,7 @@ void GpuDevice::init( const GpuDeviceCreation& creation ) {
         Buffer* fullscreen_buffer = get_buffer( fullscreen_vertex_buffer );
         RASSERT( fullscreen_buffer && fullscreen_buffer->mapped_data );
 
-        const f32 fullscreen_vertices[] = { 
+        const f32 fullscreen_vertices[] = {
             -1.0f, -1.0f, 0.0f,
              3.0f, -1.0f, 0.0f,
             -1.0f,  3.0f, 0.0f
@@ -1263,7 +1355,7 @@ void GpuDevice::init( const GpuDeviceCreation& creation ) {
     dynamic_per_frame_size = rmega( 10 );
     VkBufferUsageFlags dynamic_buffer_usage = VK_BUFFER_USAGE_VERTEX_BUFFER_BIT | VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT |
         VK_BUFFER_USAGE_INDEX_BUFFER_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT;
-    
+
     dynamic_buffer = create_buffer( {
         .size = VkDeviceSize( dynamic_per_frame_size ) * k_max_frames,
         .usage = dynamic_buffer_usage,
@@ -1477,6 +1569,9 @@ void GpuDevice::shutdown() {
 
     pending_sparse_queue_binds.shutdown();
     pending_sparse_memory_info.shutdown();
+
+    pending_sparse_opaque_queue_binds.shutdown();
+    pending_sparse_opaque_memory_info.shutdown();
 
     // Remove the debug report callback
     if ( debug_options.enable_debug_utils ) {
@@ -1727,12 +1822,15 @@ static void upload_texture_data( Image* texture, void* upload_data, GpuDevice& g
     vkEndCommandBuffer( command_buffer->vk_command_buffer );
 
     // Submit command buffer
-    VkCommandBufferSubmitInfoKHR command_buffer_info{ VK_STRUCTURE_TYPE_COMMAND_BUFFER_SUBMIT_INFO_KHR };
-    command_buffer_info.commandBuffer = command_buffer->vk_command_buffer;
+    VkCommandBufferSubmitInfo command_buffer_info{
+        .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_SUBMIT_INFO_KHR,
+        .commandBuffer = command_buffer->vk_command_buffer };
 
-    VkSubmitInfo2KHR submit_info{ VK_STRUCTURE_TYPE_SUBMIT_INFO_2_KHR };
-    submit_info.commandBufferInfoCount = 1;
-    submit_info.pCommandBufferInfos = &command_buffer_info;
+    VkSubmitInfo2 submit_info{
+        .sType = VK_STRUCTURE_TYPE_SUBMIT_INFO_2_KHR,
+        .commandBufferInfoCount = 1,
+        .pCommandBufferInfos = &command_buffer_info
+    };
 
     vkQueueSubmit2( gpu.vulkan_main_queue, 1, &submit_info, VK_NULL_HANDLE );
 
@@ -2112,7 +2210,7 @@ TLASHandle GpuDevice::create_tlas( const TLASCreation& creation ) {
     RASSERT( tlas_instance_buffer->mapped_data );
 
     memcpy( tlas_instance_buffer->mapped_data, instances.data, instance_buffer_size );
-    flush_buffer( tlas_instance_buffer_handle, 0, instance_buffer_size );
+    flush_buffer( tlas_instance_buffer_handle, 0, ( u32 )instance_buffer_size );
 
     const VkDeviceAddress instance_buffer_address = get_buffer_device_address( tlas_instance_buffer_handle );
     RASSERT( instance_buffer_address != 0 );
@@ -2916,7 +3014,7 @@ PipelineHandle GpuDevice::create_pipeline( const PipelineCreation& creation, con
         RASSERT( mapped_data );
 
         memcpy( mapped_data, sbt_data.data, sbt_buffer_size );
-        flush_buffer( pipeline->shader_binding_table, 0, sbt_buffer_size );
+        flush_buffer( pipeline->shader_binding_table, 0, ( u32 )sbt_buffer_size );
         unmap_buffer( map );
 
         // Cache regions to be used when tracing rays.
@@ -3020,7 +3118,7 @@ BufferHandle GpuDevice::create_buffer( const BufferCreation& creation ) {
 
     RASSERTM( !mapped || sequential_write || random_access, "A mapped AUTO allocation requires a HOST_ACCESS flag." );
     RASSERTM( !( sequential_write && random_access ), "Specify either sequential write or random host access." );
-    
+
     BufferHandle handle = buffers_pool.obtain();
     if ( handle.is_invalid() ) {
         return handle;
@@ -3060,8 +3158,11 @@ BufferHandle GpuDevice::create_buffer( const BufferCreation& creation ) {
     allocation_create_info.flags = creation.allocation_flags | VMA_ALLOCATION_CREATE_STRATEGY_BEST_FIT_BIT;
 
     VmaAllocationInfo allocation_info{};
-    VkResult result = vmaCreateBuffer( vma_allocator, &buffer_info, &allocation_create_info,
-                                       &buffer->vk_buffer, &buffer->vma_allocation, &allocation_info );
+    VkResult result = creation.min_alignment ?
+        vmaCreateBufferWithAlignment( vma_allocator, &buffer_info, &allocation_create_info, creation.min_alignment,
+                                      &buffer->vk_buffer, &buffer->vma_allocation, &allocation_info ) :
+        vmaCreateBuffer( vma_allocator, &buffer_info, &allocation_create_info,
+                         &buffer->vk_buffer, &buffer->vma_allocation, &allocation_info );
 
     if ( result != VK_SUCCESS ) {
         resource_tracker.track_destroy_resource( ResourceUpdateType::Buffer, handle.index() );
@@ -3114,7 +3215,8 @@ SamplerHandle GpuDevice::create_sampler( const SamplerCreation& creation ) {
     create_info.magFilter = creation.mag_filter;
     create_info.mipmapMode = creation.mip_filter;
     create_info.anisotropyEnable = 0;
-    create_info.compareEnable = 0;
+    create_info.compareEnable = creation.compare_enable;
+    create_info.compareOp = creation.compare_op;
     create_info.unnormalizedCoordinates = 0;
     create_info.borderColor = VkBorderColor::VK_BORDER_COLOR_INT_OPAQUE_WHITE;
     create_info.minLod = 0;
@@ -3191,7 +3293,7 @@ DescriptorSetLayoutHandle GpuDevice::create_descriptor_set_layout( const Descrip
     }
 
     // Create the descriptor set layout
-    VkDescriptorSetLayoutCreateInfo layout_info = { 
+    VkDescriptorSetLayoutCreateInfo layout_info = {
         .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO,
         .bindingCount = used_bindings,
         .pBindings = vk_bindings.data };
@@ -4332,75 +4434,152 @@ PagePoolHandle GpuDevice::allocate_image_pool( ImageHandle image_handle, u32 poo
         return {};
     }
 
+    RASSERT( image->sparse );
+
     PagePoolHandle pool_handle = page_pools_pool.obtain();
     if ( pool_handle.is_invalid() ) {
         return pool_handle;
     }
 
     PagePool* page_pool = get_page_pool( pool_handle );
-    RASSERT( image->sparse );
 
-    // TODO(marco):
-    // VkSparseMemoryBind
-    // VkSparseImageMemoryBind
-    // vkQueueBindSparse
+    const VkImageAspectFlags aspect = TextureFormat::has_depth( image->vk_format ) ? VK_IMAGE_ASPECT_DEPTH_BIT : VK_IMAGE_ASPECT_COLOR_BIT;
 
-    u32 property_count = 0;
+    u32 sparse_requirement_count = 0;
+    vkGetImageSparseMemoryRequirements( vulkan_device, image->vk_image, &sparse_requirement_count, nullptr );
 
-    VkPhysicalDeviceSparseImageFormatInfo2 format_info{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SPARSE_IMAGE_FORMAT_INFO_2 };
-    format_info.format = image->vk_format;
-    format_info.type = to_vk_image_type( image->type );
-    format_info.samples = VK_SAMPLE_COUNT_1_BIT;
-    format_info.usage = image->vk_usage;
-    format_info.tiling = VK_IMAGE_TILING_OPTIMAL;
+    RASSERT( sparse_requirement_count > 0 );
 
-    vkGetPhysicalDeviceSparseImageFormatProperties2( vulkan_physical_device, &format_info, &property_count, nullptr );
+    Array<VkSparseImageMemoryRequirements> sparse_requirements;
+    sparse_requirements.init( allocator, sparse_requirement_count, sparse_requirement_count );
 
-    RASSERT( property_count > 0 );
+    vkGetImageSparseMemoryRequirements( vulkan_device, image->vk_image, &sparse_requirement_count, sparse_requirements.data );
 
-    Array<VkSparseImageFormatProperties2> properties;
-    properties.init( allocator, property_count, property_count );
-    memset( properties.data, 0, sizeof( VkSparseImageFormatProperties2 ) * property_count );
+    const VkSparseImageMemoryRequirements* sparse_requirement = nullptr;
 
-    for ( u32 p = 0; p < property_count; ++p ) {
-        properties[ p ].sType = VK_STRUCTURE_TYPE_SPARSE_IMAGE_FORMAT_PROPERTIES_2;
-        properties[ p ].pNext = nullptr;
+    for ( u32 i = 0; i < sparse_requirement_count; ++i ) {
+        if ( sparse_requirements[ i ].formatProperties.aspectMask & aspect ) {
+            sparse_requirement = &sparse_requirements[ i ];
+            break;
+        }
     }
 
-    vkGetPhysicalDeviceSparseImageFormatProperties2( vulkan_physical_device, &format_info, &property_count, properties.data );
+    RASSERT( sparse_requirement != nullptr );
 
-    u32 block_width = properties[ 0 ].properties.imageGranularity.width;
-    u32 block_height = properties[ 0 ].properties.imageGranularity.height;
-
-    properties.shutdown();
-
-    VkImageSparseMemoryRequirementsInfo2 sparse_memory_requirement_info{ VK_STRUCTURE_TYPE_IMAGE_SPARSE_MEMORY_REQUIREMENTS_INFO_2 };
-    sparse_memory_requirement_info.image = image->vk_image;
-
-    VkMemoryRequirements memory_requirements{ };
+    VkMemoryRequirements memory_requirements{};
     vkGetImageMemoryRequirements( vulkan_device, image->vk_image, &memory_requirements );
 
-    u32 block_count = pool_size / ( block_width * block_height );
+    const VkDeviceSize page_size = memory_requirements.alignment;
+    const VkExtent3D granularity = sparse_requirement->formatProperties.imageGranularity;
 
-    page_pool->block_width = block_width;
-    page_pool->block_height = block_height;
-    page_pool->block_size = ( u32 )memory_requirements.alignment; // NOTE(marco): alignment corresponds to block size for sparse textures
+    page_pool->block_width = granularity.width;
+    page_pool->block_height = granularity.height;
+    page_pool->block_size = page_size;
+
+    page_pool->mip_tail_first_lod = sparse_requirement->imageMipTailFirstLod;
+    page_pool->mip_tail_size = sparse_requirement->imageMipTailSize;
+    page_pool->mip_tail_offset = sparse_requirement->imageMipTailOffset;
+    page_pool->mip_tail_stride = sparse_requirement->imageMipTailStride;
+    page_pool->sparse_flags = sparse_requirement->formatProperties.flags;
+
     page_pool->used_pages = 0;
-    page_pool->free_list = nullptr;
     page_pool->size = pool_size;
 
-    page_pool->vma_allocations.init( allocator, block_count, block_count );
-    page_pool->allocations.init( allocator, block_count, block_count );
+    const bool has_mip_tail = page_pool->mip_tail_first_lod < image->mip_level_count;
+    const bool single_mip_tail = ( page_pool->sparse_flags & VK_SPARSE_IMAGE_FORMAT_SINGLE_MIPTAIL_BIT ) != 0;
+    const u32 tail_count = has_mip_tail ? ( single_mip_tail ? 1 : image->array_layer_count ) : 0;
+    const VkDeviceSize mip_tail_memory_size = page_pool->mip_tail_size * tail_count;
 
-    VmaAllocationCreateInfo allocation_create_info{ };
-    allocation_create_info.usage = VMA_MEMORY_USAGE_GPU_ONLY;
+    RASSERT( mip_tail_memory_size <= pool_size );
 
-    VkMemoryRequirements page_memory_requirements;
-    page_memory_requirements.memoryTypeBits = memory_requirements.memoryTypeBits;
-    page_memory_requirements.alignment = memory_requirements.alignment;
-    page_memory_requirements.size = memory_requirements.alignment;
+    const VkDeviceSize tiled_pool_size = pool_size - mip_tail_memory_size;
+    const u32 requested_page_count = ( u32 )( tiled_pool_size / page_size );
 
-    vmaAllocateMemoryPages( vma_allocator, &page_memory_requirements, &allocation_create_info, block_count, page_pool->vma_allocations.data, nullptr );
+    u32 virtual_page_count = 0;
+    // Calculate virtual pages count
+    for ( u32 mip = 0; mip < raptor::min( (u32)image->mip_level_count, page_pool->mip_tail_first_lod ); ++mip ) {
+
+        const u32 mip_width = raptor::max( 1, image->width >> mip );
+        const u32 mip_height = raptor::max( 1, image->height >> mip );
+
+        const u32 blocks_x = ( mip_width + page_pool->block_width - 1 ) / page_pool->block_width;
+        const u32 blocks_y = ( mip_height + page_pool->block_height - 1 ) / page_pool->block_height;
+
+        virtual_page_count += blocks_x * blocks_y * image->array_layer_count;
+    }
+
+    const u32 page_count = raptor::min( requested_page_count, virtual_page_count );
+    RASSERT( page_count > 0 );
+
+    page_pool->vma_allocations.init( allocator, page_count, page_count );
+
+    VmaAllocationCreateInfo allocation_create_info{
+        .usage = VMA_MEMORY_USAGE_GPU_ONLY
+    };
+
+    VkMemoryRequirements page_requirements{
+        .size = page_size,
+        .alignment = page_size,
+        .memoryTypeBits = memory_requirements.memoryTypeBits
+    };
+
+    check( vmaAllocateMemoryPages( vma_allocator, &page_requirements, &allocation_create_info, page_count, page_pool->vma_allocations.data, nullptr ) );
+
+    page_pool->page_bindings.init( allocator, virtual_page_count, virtual_page_count );
+    page_pool->free_pages.init( allocator, page_count );
+    page_pool->pending_free_pages.init( allocator, page_count );
+
+    for ( u32 i = 0; i < virtual_page_count; ++i ) {
+        page_pool->page_bindings[ i ] = u32_max;
+    }
+
+    if ( has_mip_tail ) {
+
+        RASSERT( page_pool->mip_tail_size > 0 );
+        RASSERT( ( page_pool->mip_tail_size % page_size ) == 0 );
+
+        page_pool->mip_tail_allocations.init( allocator, tail_count, tail_count );
+
+        VkMemoryRequirements tail_requirements{
+            .size = page_pool->mip_tail_size,
+            .alignment = page_size,
+            .memoryTypeBits = memory_requirements.memoryTypeBits
+        };
+
+        check( vmaAllocateMemoryPages( vma_allocator, &tail_requirements, &allocation_create_info, tail_count, page_pool->mip_tail_allocations.data, nullptr ) );
+
+        const u32 array_offset = pending_sparse_opaque_queue_binds.size;
+
+        for ( u32 tail = 0; tail < tail_count; ++tail ) {
+
+            VmaAllocationInfo allocation_info{};
+            vmaGetAllocationInfo( vma_allocator, page_pool->mip_tail_allocations[ tail ], &allocation_info );
+
+            VkSparseMemoryBind sparse_bind{
+                .resourceOffset = single_mip_tail ? page_pool->mip_tail_offset : page_pool->mip_tail_offset + tail * page_pool->mip_tail_stride,
+                .size = page_pool->mip_tail_size,
+                .memory = allocation_info.deviceMemory,
+                .memoryOffset = allocation_info.offset,
+                .flags = 0
+            };
+
+            pending_sparse_opaque_queue_binds.push( sparse_bind );
+        }
+
+        SparseMemoryBindInfo bind_info{
+            .image = image->vk_image,
+            .count = tail_count,
+            .binding_array_offset = array_offset
+        };
+
+        pending_sparse_opaque_memory_info.push( bind_info );
+    }
+
+    rprint( "Sparse image: block %ux%u, page %u, pages %u, tail first %u, tail size %llu, tail count %u\n",
+            page_pool->block_width, page_pool->block_height, page_pool->block_size, page_count,
+            page_pool->mip_tail_first_lod, page_pool->mip_tail_size, tail_count );
+
+    sparse_requirements.shutdown();
 
     return pool_handle;
 }
@@ -4412,10 +4591,35 @@ void GpuDevice::destroy_page_pool( PagePoolHandle pool_handle ) {
 
         //resource_tracker.track_destroy_resource( ResourceUpdateType::PagePool, pool_handle.index );
 
-        resource_deletion_queue.push( { ResourceUpdateType::PagePool, pool_handle.id, current_frame + k_max_frames, 1 } );
+        resource_deletion_queue.push( { ResourceUpdateType::PagePool, pool_handle.id, current_frame, 1 } );
     } else {
         rprint( "Graphics error: trying to free invalid PagePool %u\n", pool_handle.index() );
     }
+}
+
+static u32 sparse_page_index( const Image* image, const PagePool* pool, u32 mip, u32 layer, u32 x, u32 y ) {
+
+    u32 mip_offset = 0;
+
+    for ( u32 m = 0; m < mip; ++m ) {
+
+        const u32 w = raptor_max( 1, image->width >> m );
+        const u32 h = raptor_max( 1, image->height >> m );
+
+        const u32 blocks_x = ( w + pool->block_width - 1 ) / pool->block_width;
+        const u32 blocks_y = ( h + pool->block_height - 1 ) / pool->block_height;
+
+        mip_offset += blocks_x * blocks_y * image->array_layer_count;
+    }
+
+    const u32 mip_width = raptor_max( 1, image->width >> mip );
+    const u32 blocks_x = ( mip_width + pool->block_width - 1 ) / pool->block_width;
+
+    const u32 block_x = x / pool->block_width;
+    const u32 block_y = y / pool->block_height;
+
+    return mip_offset + layer * blocks_x * ( ( raptor_max( 1, image->height >> mip ) +
+                                             pool->block_height - 1 ) / pool->block_height ) + block_y * blocks_x + block_x;
 }
 
 void GpuDevice::destroy_page_pool_instant( ResourceHandle raw_handle ) {
@@ -4427,8 +4631,16 @@ void GpuDevice::destroy_page_pool_instant( ResourceHandle raw_handle ) {
     if ( page_pool ) {
         vmaFreeMemoryPages( vma_allocator, page_pool->vma_allocations.size, page_pool->vma_allocations.data );
 
+        if ( page_pool->mip_tail_allocations.size ) {
+            vmaFreeMemoryPages( vma_allocator, page_pool->mip_tail_allocations.size, page_pool->mip_tail_allocations.data );
+        }
+
         page_pool->vma_allocations.shutdown();
-        page_pool->allocations.shutdown();
+        page_pool->mip_tail_allocations.shutdown();
+
+        page_pool->page_bindings.shutdown();
+        page_pool->free_pages.shutdown();
+        page_pool->pending_free_pages.shutdown();
 
         page_pools_pool.destroy( handle );
     }
@@ -4442,10 +4654,9 @@ void GpuDevice::reset_pool( PagePoolHandle pool_handle ) {
     }
 
     page_pool->used_pages = 0;
-    page_pool->free_list = nullptr;
 }
 
-void GpuDevice::bind_image_pages( PagePoolHandle pool_handle, ImageHandle image_handle, u32 x, u32 y, u32 width, u32 height, u32 layer ) {
+void GpuDevice::bind_image_pages( PagePoolHandle pool_handle, ImageHandle image_handle, u32 x, u32 y, u32 width, u32 height, u32 layer, u32 mip_level ) {
     PagePool* page_pool = get_page_pool( pool_handle );
     if ( page_pool == nullptr ) {
         RASSERT( false );
@@ -4459,17 +4670,38 @@ void GpuDevice::bind_image_pages( PagePoolHandle pool_handle, ImageHandle image_
     }
 
     RASSERT( image->sparse );
+    RASSERT( mip_level < image->mip_level_count );
 
-    u32 block_width = page_pool->block_width;
-    u32 block_height = page_pool->block_height;
-    u32 num_blocks_x = width / block_width;
-    u32 num_blocks_y = height / block_height;
-    u32 num_blocks = num_blocks_x * num_blocks_y;
+    // Mip tail is permanently resident through opaque bindings.
+    if ( mip_level >= page_pool->mip_tail_first_lod ) {
+        return;
+    }
 
-    if ( page_pool->used_pages + num_blocks >= page_pool->allocations.size ) {
+    const u32 block_width = page_pool->block_width;
+    const u32 block_height = page_pool->block_height;
+
+    const u32 num_blocks_x = ( width + block_width - 1 ) / block_width;
+    const u32 num_blocks_y = ( height + block_height - 1 ) / block_height;
+    const u32 num_blocks = num_blocks_x * num_blocks_y;
+
+    // Checks for mip selection
+    RASSERT( mip_level < image->mip_level_count );
+    RASSERT( ( x % block_width ) == 0 );
+    RASSERT( ( y % block_height ) == 0 );
+
+    const u32 unused_pages = page_pool->vma_allocations.size - page_pool->used_pages;
+    const u32 available_pages = unused_pages + page_pool->free_pages.size;
+
+    if ( num_blocks > available_pages ) {
         RASSERT( false );
         return;
     }
+
+    const u32 mip_width = raptor_max( 1, image->width >> mip_level );
+    const u32 mip_height = raptor_max( 1, image->height >> mip_level );
+
+    RASSERT( x + width <= mip_width );
+    RASSERT( y + height <= mip_height );
 
     u32 array_offset = pending_sparse_queue_binds.size;
 
@@ -4478,17 +4710,39 @@ void GpuDevice::bind_image_pages( PagePoolHandle pool_handle, ImageHandle image_
         for ( u32 block_x = 0; block_x < num_blocks_x; ++block_x ) {
             VkSparseImageMemoryBind sparse_bind{ };
 
-            VmaAllocation allocation = page_pool->vma_allocations[ page_pool->used_pages++ ];
+            const u32 dest_x = block_x * block_width + x;
+            const u32 dest_y = block_y * block_height + y;
+
+            const u32 virtual_page_index = sparse_page_index( image, page_pool, mip_level, layer, dest_x, dest_y );
+
+            RASSERT( page_pool->page_bindings[ virtual_page_index ] == u32_max );
+
+            u32 page_index;
+
+            if ( page_pool->free_pages.size ) {
+                page_index = page_pool->free_pages.back();
+                page_pool->free_pages.pop();
+            } else {
+                RASSERT( page_pool->used_pages < page_pool->vma_allocations.size );
+                page_index = page_pool->used_pages++;
+            }
+
+            page_pool->page_bindings[ virtual_page_index ] = page_index;
+
+            VmaAllocation allocation = page_pool->vma_allocations[ page_index ];
+
             VmaAllocationInfo allocation_info{ };
             vmaGetAllocationInfo( vma_allocator, allocation, &allocation_info );
 
-            i32 dest_x = (i32)( block_x * block_width + x );
-            i32 dest_y = (i32)( block_y * block_height + y );
-
             sparse_bind.subresource.aspectMask = aspect;
             sparse_bind.subresource.arrayLayer = layer;
-            sparse_bind.offset = { dest_x, dest_y, 0 };
-            sparse_bind.extent = { block_width, block_height, 1 };
+            sparse_bind.subresource.mipLevel = mip_level;
+
+            sparse_bind.offset = { ( i32 )dest_x, ( i32 )dest_y, 0 };
+
+            sparse_bind.extent = { raptor_min( block_width, x + width - dest_x ),
+                                   raptor_min( block_height, y + height - dest_y ), 1 };
+
             sparse_bind.memory = allocation_info.deviceMemory;
             sparse_bind.memoryOffset = allocation_info.offset;
 
@@ -4498,33 +4752,114 @@ void GpuDevice::bind_image_pages( PagePoolHandle pool_handle, ImageHandle image_
 
     SparseMemoryBindInfo bind_info{ };
     bind_info.image = image->vk_image;
+    bind_info.page_pool = pool_handle;
     bind_info.binding_array_offset = array_offset;
     bind_info.count = num_blocks;
 
     pending_sparse_memory_info.push( bind_info );
 }
 
+void GpuDevice::unbind_image_pages( PagePoolHandle pool_handle, ImageHandle handle, u32 x, u32 y, u32 width, u32 height, u32 layer, u32 mip_level ) {
 
-//
-//
-//
-//void GpuDevice::fill_barrier( FramebufferHandle framebuffer, ExecutionBarrier& out_barrier ) {
-//
-//    Framebuffer* vk_framebuffer = access_framebuffer( framebuffer );
-//
-//    out_barrier.num_image_barriers = 0;
-//
-//    if ( vk_framebuffer ) {
-//        const u32 rts = vk_framebuffer->num_color_attachments;
-//        for ( u32 i = 0; i < rts; ++i ) {
-//            out_barrier.image_barriers[ out_barrier.num_image_barriers++ ].image = vk_framebuffer->color_attachments[ i ];
-//        }
-//
-//        if ( vk_framebuffer->depth_stencil_attachment.index != k_invalid_index ) {
-//            out_barrier.image_barriers[ out_barrier.num_image_barriers++ ].image = vk_framebuffer->depth_stencil_attachment;
-//        }
-//    }
-//}
+    PagePool* page_pool = get_page_pool( pool_handle );
+    Image* image = get_image( handle );
+
+    RASSERT( page_pool );
+    RASSERT( image );
+    RASSERT( image->sparse );
+
+    if ( mip_level >= page_pool->mip_tail_first_lod ) {
+        return;
+    }
+
+    const u32 block_x_begin = x / page_pool->block_width;
+    const u32 block_y_begin = y / page_pool->block_height;
+
+    const u32 block_x_end = ceilu32( ( x + width ) / float( page_pool->block_width ) );
+    const u32 block_y_end = ceilu32( ( y + height ) / float( page_pool->block_height ) );
+
+    SparseMemoryBindInfo& bind_info = pending_sparse_memory_info.push_use();
+
+    bind_info.image = image->vk_image;
+    bind_info.page_pool = pool_handle;
+    bind_info.binding_array_offset = pending_sparse_queue_binds.size;
+    bind_info.count = 0;
+
+    for ( u32 block_y = block_y_begin; block_y < block_y_end; ++block_y ) {
+        for ( u32 block_x = block_x_begin; block_x < block_x_end; ++block_x ) {
+
+            const u32 virtual_page_index = sparse_page_index( image, page_pool, mip_level, layer,
+                                                              block_x * page_pool->block_width,
+                                                              block_y * page_pool->block_height );
+
+            const u32 page_index = page_pool->page_bindings[ virtual_page_index ];
+
+            if ( page_index == u32_max ) {
+                continue;
+            }
+
+            VkSparseImageMemoryBind& bind = pending_sparse_queue_binds.push_use();
+
+            bind = {};
+            bind.subresource = {
+                .aspectMask = VK_IMAGE_ASPECT_DEPTH_BIT,
+                .mipLevel = mip_level,
+                .arrayLayer = layer
+            };
+
+            bind.offset = { i32( block_x * page_pool->block_width ), i32( block_y * page_pool->block_height ), 0 };
+
+            const u32 mip_width = raptor_max( 1, image->width >> mip_level );
+            const u32 mip_height = raptor_max( 1, image->height >> mip_level );
+
+            bind.extent = { raptor_min( page_pool->block_width, mip_width - block_x * page_pool->block_width ),
+                            raptor_min( page_pool->block_height, mip_height - block_y * page_pool->block_height ), 1 };
+
+            bind.memory = VK_NULL_HANDLE;
+            bind.memoryOffset = 0;
+            bind.flags = 0;
+
+            page_pool->page_bindings[ virtual_page_index ] = u32_max;
+            page_pool->pending_free_pages.push( page_index );
+
+            ++bind_info.count;
+        }
+    }
+}
+
+SparseImageMemoryStats GpuDevice::get_sparse_image_memory_stats( PagePoolHandle pool_handle, ImageHandle image_handle ) {
+    SparseImageMemoryStats stats{};
+
+    PagePool* pool = get_page_pool( pool_handle );
+    Image* image = get_image( image_handle );
+
+    if ( !pool || !image ) {
+        return stats;
+    }
+
+    // Count currently mapped tiled pages.
+    for ( u32 i = 0; i < pool->page_bindings.size; ++i ) {
+        if ( pool->page_bindings[ i ] != u32_max ) {
+            ++stats.resident_pages;
+        }
+    }
+
+    stats.allocated_pages = pool->vma_allocations.size;
+
+    const VkDeviceSize tail_bytes = pool->mip_tail_size * pool->mip_tail_allocations.size;
+
+    stats.resident_bytes = VkDeviceSize( stats.resident_pages ) * pool->block_size + tail_bytes;
+    stats.allocated_bytes = VkDeviceSize( stats.allocated_pages ) * pool->block_size + tail_bytes;
+
+    // Worst residency if every layer uses mip 0.
+    const u32 blocks_x = ( image->width + pool->block_width - 1 ) / pool->block_width;
+    const u32 blocks_y = ( image->height + pool->block_height - 1 ) / pool->block_height;
+
+    stats.max_mip0_pages = blocks_x * blocks_y * image->array_layer_count;
+    stats.max_mip0_bytes = VkDeviceSize( stats.max_mip0_pages ) * pool->block_size + tail_bytes;
+
+    return stats;
+}
 
 bool GpuDevice::buffer_ready( BufferHandle buffer_ ) {
     Buffer* buffer = get_buffer( buffer_ );
@@ -4586,7 +4921,7 @@ void GpuDevice::reset_pools() {
 
 void GpuDevice::update_bindless_resources() {
     DescriptorSetLayout* layout = get_descriptor_set_layout( bindless_descriptor_set_layout );
-    
+
     // Handle deferred writes to bindless image views.
     if ( image_views_to_update_bindless.size ) {
 
@@ -4747,41 +5082,107 @@ void GpuDevice::update_bindless_resources() {
 }
 
 bool GpuDevice::update_sparse_resources() {
-    bool has_pending_sparse_bindings = pending_sparse_memory_info.size > 0;
 
-    if ( has_pending_sparse_bindings ) {
-        // TODO(marco): use fence or semaphores
-        check( vkQueueWaitIdle( vulkan_main_queue ) );
+    const bool has_image_bindings = pending_sparse_memory_info.size > 0;
+    const bool has_opaque_bindings = pending_sparse_opaque_memory_info.size > 0;
 
-        Array<VkSparseImageMemoryBindInfo> sparse_binding_infos;
+    if ( !has_image_bindings && !has_opaque_bindings ) {
+        return false;
+    }
+
+    Array<VkSparseImageMemoryBindInfo> sparse_binding_infos;
+    Array<VkSparseImageOpaqueMemoryBindInfo> sparse_opaque_binding_infos;
+
+    if ( has_image_bindings ) {
         sparse_binding_infos.init( allocator, pending_sparse_memory_info.size, pending_sparse_memory_info.size );
 
         for ( u32 b = 0; b < pending_sparse_memory_info.size; ++b ) {
-            SparseMemoryBindInfo& internal_info = pending_sparse_memory_info[ b ];
+            const SparseMemoryBindInfo& internal_info = pending_sparse_memory_info[ b ];
 
-            VkSparseImageMemoryBindInfo& info = sparse_binding_infos[ b ];
-            info.image = internal_info.image;
-            info.bindCount = internal_info.count;
-            info.pBinds = pending_sparse_queue_binds.data + internal_info.binding_array_offset;
+            sparse_binding_infos[ b ] = {
+                .image = internal_info.image,
+                .bindCount = internal_info.count,
+                .pBinds = pending_sparse_queue_binds.data + internal_info.binding_array_offset
+            };
         }
-
-        VkBindSparseInfo sparse_info{ VK_STRUCTURE_TYPE_BIND_SPARSE_INFO };
-        sparse_info.imageBindCount = sparse_binding_infos.size;
-        sparse_info.pImageBinds = sparse_binding_infos.data;
-        sparse_info.signalSemaphoreCount = 1;
-        sparse_info.pSignalSemaphores = &vulkan_bind_binary_semaphore;
-
-        check( vkQueueBindSparse( vulkan_main_queue, 1, &sparse_info, VK_NULL_HANDLE ) );
-
-        sparse_binding_infos.shutdown();
-
-        pending_sparse_memory_info.clear();
-        pending_sparse_queue_binds.clear();
-
-        return true;
     }
 
-    return false;
+    if ( has_opaque_bindings ) {
+        sparse_opaque_binding_infos.init( allocator, pending_sparse_opaque_memory_info.size, pending_sparse_opaque_memory_info.size );
+
+        for ( u32 b = 0; b < pending_sparse_opaque_memory_info.size; ++b ) {
+            const SparseMemoryBindInfo& internal_info = pending_sparse_opaque_memory_info[ b ];
+
+            sparse_opaque_binding_infos[ b ] = {
+                .image = internal_info.image,
+                .bindCount = internal_info.count,
+                .pBinds = pending_sparse_opaque_queue_binds.data + internal_info.binding_array_offset
+            };
+        }
+    }
+
+    u64 wait_value = absolute_frame;
+
+    VkTimelineSemaphoreSubmitInfo timeline_info{
+        .sType = VK_STRUCTURE_TYPE_TIMELINE_SEMAPHORE_SUBMIT_INFO,
+        .waitSemaphoreValueCount = absolute_frame > 0 ? 1u : 0u,
+        .pWaitSemaphoreValues = absolute_frame > 0 ? &wait_value : nullptr
+    };
+
+    VkSemaphore wait_semaphore = vulkan_graphics_timeline_semaphore;
+
+    VkBindSparseInfo sparse_info{
+        .sType = VK_STRUCTURE_TYPE_BIND_SPARSE_INFO,
+        .pNext = &timeline_info,
+
+        .waitSemaphoreCount = absolute_frame > 0 ? 1u : 0u,
+        .pWaitSemaphores = absolute_frame > 0 ? &wait_semaphore : nullptr,
+
+        .imageOpaqueBindCount = has_opaque_bindings ? sparse_opaque_binding_infos.size : 0,
+        .pImageOpaqueBinds = has_opaque_bindings ? sparse_opaque_binding_infos.data : nullptr,
+
+        .imageBindCount = has_image_bindings ? sparse_binding_infos.size : 0,
+        .pImageBinds = has_image_bindings ? sparse_binding_infos.data : nullptr,
+
+        .signalSemaphoreCount = 1,
+        .pSignalSemaphores = &vulkan_bind_binary_semaphore
+    };
+
+    check( vkQueueBindSparse( vulkan_main_queue, 1, &sparse_info, VK_NULL_HANDLE ) );
+
+    if ( has_image_bindings ) {
+        sparse_binding_infos.shutdown();
+    }
+
+    if ( has_opaque_bindings ) {
+        sparse_opaque_binding_infos.shutdown();
+    }
+
+    // Free pages from page pools that have been unbound.
+    for ( u32 i = 0; i < pending_sparse_memory_info.size; ++i ) {
+
+        const SparseMemoryBindInfo& info = pending_sparse_memory_info[ i ];
+
+        if ( info.page_pool.is_invalid() ) {
+            continue;
+        }
+
+        PagePool* pool = get_page_pool( info.page_pool );
+        RASSERT( pool );
+
+        for ( u32 p = 0; p < pool->pending_free_pages.size; ++p ) {
+            pool->free_pages.push( pool->pending_free_pages[ p ] );
+        }
+
+        pool->pending_free_pages.clear();
+    }
+
+    pending_sparse_memory_info.clear();
+    pending_sparse_queue_binds.clear();
+    pending_sparse_opaque_memory_info.clear();
+    pending_sparse_opaque_queue_binds.clear();
+
+    return true;
 }
 
 CommandBuffer* GpuDevice::flush_acceleration_structure_builds() {
@@ -4984,17 +5385,19 @@ void GpuDevice::process_pending_resource_deletion() {
 void GpuDevice::present() {
     VkSemaphore render_complete_semaphore = get_current_render_complete_semaphore();
 
-    VkPresentInfoKHR present_info{ VK_STRUCTURE_TYPE_PRESENT_INFO_KHR };
-    present_info.waitSemaphoreCount = 1;
-    present_info.pWaitSemaphores = &render_complete_semaphore;
-
     VkSwapchainKHR swap_chains[] = { vulkan_swapchain };
-    present_info.swapchainCount = 1;
-    present_info.pSwapchains = swap_chains;
-    present_info.pImageIndices = &vulkan_image_index;
-    present_info.pResults = nullptr; // Optional
-    VkResult result = vkQueuePresentKHR( vulkan_main_queue, &present_info );
 
+    VkPresentInfoKHR present_info{
+       .sType = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR,
+       .waitSemaphoreCount = 1,
+       .pWaitSemaphores = &render_complete_semaphore,
+       .swapchainCount = 1,
+       .pSwapchains = swap_chains,
+       .pImageIndices = &vulkan_image_index,
+       .pResults = nullptr // Optional
+    };
+
+    VkResult result = vkQueuePresentKHR( vulkan_main_queue, &present_info );
     RASSERT( result != VK_ERROR_DEVICE_LOST );
 
     if ( result == VK_ERROR_OUT_OF_DATE_KHR || result == VK_SUBOPTIMAL_KHR || resized ) {
@@ -5062,7 +5465,7 @@ void GpuDevice::dump_device_fault() {
         .pAddressInfos = address_infos.data,
         .pVendorInfos = vendor_infos.data,
         .pVendorBinaryData = vendor_binary_data
-        
+
     };
     result = vkGetDeviceFaultInfoEXT( vulkan_device, &counts, &fault_info );
 
@@ -5096,13 +5499,15 @@ void GpuDevice::queue_submit( CommandQueueType queue_type, Span<CommandBuffer*> 
         cb_info.commandBuffer = cbs[ c ]->vk_command_buffer;
     }
 
-    VkSubmitInfo2KHR submit_info{ VK_STRUCTURE_TYPE_SUBMIT_INFO_2_KHR };
-    submit_info.waitSemaphoreInfoCount = (u32)waits.size;
-    submit_info.pWaitSemaphoreInfos = waits.data;
-    submit_info.commandBufferInfoCount = command_buffer_infos.size;
-    submit_info.pCommandBufferInfos = command_buffer_infos.data;
-    submit_info.signalSemaphoreInfoCount = (u32)signals.size;
-    submit_info.pSignalSemaphoreInfos = signals.data;
+    VkSubmitInfo2 submit_info{
+        .sType = VK_STRUCTURE_TYPE_SUBMIT_INFO_2_KHR,
+        .waitSemaphoreInfoCount = ( u32 )waits.size,
+        .pWaitSemaphoreInfos = waits.data,
+        .commandBufferInfoCount = command_buffer_infos.size,
+        .pCommandBufferInfos = command_buffer_infos.data,
+        .signalSemaphoreInfoCount = ( u32 )signals.size,
+        .pSignalSemaphoreInfos = signals.data,
+    };
 
     VkQueue queue = VK_NULL_HANDLE;
 
