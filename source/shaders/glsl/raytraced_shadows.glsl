@@ -21,7 +21,7 @@ layout ( std140, set = MATERIAL_SET, binding = 30 ) uniform ShadowVisibilityCons
 
 
 ivec2 shadow_visibility_resolution() {
-    return ivec2( frame.resolution * svc.resolution_scale );
+    return ivec2( ceil(frame.resolution * svc.resolution_scale) );
 }
 
 bool is_inside_uv( vec2 uv ) {
@@ -40,23 +40,6 @@ ivec2 cache_to_full_resolution_pixel( ivec2 cache_pixel ) {
 
 float sample_depth_point( uint depth_texture_index, ivec2 pos ) {
     return texelFetch( global_textures[ nonuniformEXT( depth_texture_index ) ], pos, 0 ).r;
-}
-
-vec3 world_position_from_depth_unjittered_approx(
-    vec2 unjittered_uv,
-    float raw_depth,
-    mat4 inverse_jittered_view_projection,
-    vec2 jitter_ndc ) {
-
-    // We want the world-space point corresponding to unjittered_uv.
-    // Since inverse_jittered_view_projection expects jittered NDC,
-    // convert the unjittered UV to the equivalent jittered UV.
-    vec2 uv_for_jittered_inverse =
-        unjittered_uv + vec2( jitter_ndc.x, -jitter_ndc.y ) * 0.5;
-
-    return world_position_from_depth( uv_for_jittered_inverse,
-                                      raw_depth,
-                                      inverse_jittered_view_projection );
 }
 
 ivec2 representative_full_resolution_pixel( ivec2 cache_pixel, uint depth_texture_index ) {
@@ -108,14 +91,8 @@ ivec2 representative_full_resolution_pixel( ivec2 cache_pixel, uint depth_textur
 // Reuse some ideas from TAA
 layout ( local_size_x = 8, local_size_y = 8, local_size_z = 1 ) in;
 
-
-vec2 reproject_uv_from_ndc_motion2( vec2 current_uv, vec2 motion_ndc ) {
-    return current_uv + vec2( -motion_ndc.x, -motion_ndc.y ) * 0.5;
-}
-
-
 void main() {
-    const ivec2 cache_resolution = ivec2( frame.resolution * svc.resolution_scale );
+    const ivec2 cache_resolution = shadow_visibility_resolution();
     const ivec2 cache_pixel = ivec2( gl_GlobalInvocationID.xy );
 
     if ( any( greaterThanEqual( cache_pixel, cache_resolution ) ) ) {
@@ -133,7 +110,6 @@ void main() {
 
     const float current_raw_depth = sample_depth_point( svc.current_depth_texture_index, motion_pixel );
     vec3 world_position = world_position_from_depth( current_uv, current_raw_depth, frame.inverse_view_projection );
-    //world_position = world_position_from_depth_unjittered_approx( current_uv, current_raw_depth, inverse_view_projection, jitter_xy );
     
     vec4 previous_position = frame.previous_view_projection * vec4( world_position, 1.0 );
     previous_position.xyz /= previous_position.w;
@@ -164,7 +140,7 @@ void main() {
     const bool valid_history = valid_motion && inside_screen && valid_depth;
     const ivec3 current_coord = ivec3( cache_pixel, gl_GlobalInvocationID.z );
 
-    vec4 visibility_history = vec4( 0.0 );
+    vec4 visibility_history = vec4( 0.0, 1.0, 0.0, 1.0 );
     vec4 variation_history = vec4( -1.0 );
     uvec4 sample_count_history = uvec4( svc.max_samples );
 
@@ -195,10 +171,10 @@ void main() {
 
     ivec3 tex_coord = ivec3( gl_GlobalInvocationID.xyz );
 
-    vec4 last_visibility_values = texelFetch( global_texture_arrays[ svc.current_visibility_cache_texture_index ], tex_coord, 0 );
+    vec4 visibility_history = texelFetch( global_texture_arrays[ svc.current_visibility_cache_texture_index ], tex_coord, 0 );
 
-    float max_v = max( max( max( last_visibility_values.x, last_visibility_values.y ), last_visibility_values.z ), last_visibility_values.w );
-    float min_v = min( min( min( last_visibility_values.x, last_visibility_values.y ), last_visibility_values.z ), last_visibility_values.w );
+    float max_v = max( max( max( visibility_history.x, visibility_history.y ), visibility_history.z ), visibility_history.w );
+    float min_v = min( min( min( visibility_history.x, visibility_history.y ), visibility_history.z ), visibility_history.w );
 
     float delta = max_v - min_v;
 
@@ -213,7 +189,7 @@ void main() {
 
 // NOTE(marco): thanks to https://github.com/bartwronski/PoissonSamplingGenerator
 #define SAMPLE_NUM 32
-vec2 POISSON_SAMPLES[SAMPLE_NUM] =
+const vec2 POISSON_SAMPLES[SAMPLE_NUM] =
 {
     vec2( 0.39963964752463255f, 0.8910925368990373f ),
     vec2( -0.4940572704167889f, -0.8620650241721987f ),
@@ -257,15 +233,18 @@ mat2 rotation_from_angle( float a ) {
                  s,  c );
 }
 
-float get_directional_light_visibility( vec3 light_position, uint sample_count, vec3 world_position, vec3 normal, uint frame_index, vec2 noise_value ) {
+float get_directional_light_visibility( vec3 light_direction, uint sample_count, vec3 world_position, vec3 normal, uint frame_index, vec2 noise_value ) {
 
-    const vec3 l = normalize( light_position );
+    const vec3 l = normalize( light_direction );
     const float NoL = dot(normal, l);
 
-    vec3 x_axis =  l.y == 1.0f ? normalize(cross(l, vec3(0.0f, 0.0f, 1.0f))) : normalize(cross(l, vec3(0.0f, 1.0f, 0.0f)));
-    vec3 y_axis = normalize(cross(x_axis, l));
+    // Choose a reference axis that is not nearly parallel to l.
+    const vec3 reference_axis = abs( l.y ) > 0.999f ? vec3( 0.0f, 0.0f, 1.0f ) : vec3( 0.0f, 1.0f, 0.0f );
 
-    float visiblity = 0.0;
+    vec3 x_axis = normalize( cross( l, reference_axis ) );
+    vec3 y_axis = normalize( cross( x_axis, l ) );
+
+    float visibility = 0.0;
 
     float nbias = mix( 0.04, 0.004, clamp( NoL, 0.0, 1.0 ) );
 
@@ -275,19 +254,18 @@ float get_directional_light_visibility( vec3 light_position, uint sample_count, 
     // Removing the if improves drastically the lane coherency
     //if ( NoL > 0.001f ) 
     {
-
-        const float k_poisson_size = 0.01;
         const vec3 ray_origin = world_position + normal * nbias;
+        const float k_cone = svc.light_angular_radius;
 
         for ( uint s = 0; s < sample_count; ++s ) {
 
 #if 1
             vec2 poisson_sample = POISSON_SAMPLES[ (s * FRAME_HISTORY_COUNT + frame_index) % SAMPLE_NUM ];
             //poisson_sample *= noise_value;
-            //poisson_sample *= poisson_rotation;
+            poisson_sample *= poisson_rotation;
 
-            vec3 random_x = x_axis * poisson_sample.x * k_poisson_size;
-            vec3 random_y = y_axis * poisson_sample.y * k_poisson_size;
+            vec3 random_x = x_axis * poisson_sample.x * k_cone;
+            vec3 random_y = y_axis * poisson_sample.y * k_cone;
             vec3 random_dir = normalize(l + random_x + random_y);
 #else
             vec3 random_dir = l;
@@ -305,39 +283,54 @@ float get_directional_light_visibility( vec3 light_position, uint sample_count, 
             rayQueryProceedEXT( rayQuery );
 
             if (rayQueryGetIntersectionTypeEXT(rayQuery, true) == gl_RayQueryCommittedIntersectionNoneEXT) {
-                visiblity += 1.0f;
+                visibility += 1.0f;
             }
 
         }
     }
 
-    return visiblity / float( sample_count );
+    return visibility / float( sample_count );
 }
 
 float get_point_light_visibility( uint light_index, uint sample_count, vec3 world_position, vec3 normal, uint frame_index ) {
+    
     const vec3 position_to_light = light_cb.raytraced_shadow_light_position - world_position;
-    const vec3 l = normalize( position_to_light );
-    const float NoL = dot(normal, l);
-    float d = sqrt( dot( position_to_light, position_to_light ) );
+    const float d = length( position_to_light );
 
-    vec3 x_axis = normalize(cross(l, vec3(0.0f, 1.0f, 0.0f)));
-    vec3 y_axis = normalize(cross(x_axis, l));
+    // The direction is undefined at the light center.
+    if ( d <= 0.0001f ) {
+        return 1.0f;
+    }
 
-    float visiblity = 0.0;
+    const vec3 l = position_to_light / d;
+    const float NoL = dot( normal, l );
+
+    const vec3 reference_axis = abs( l.y ) > 0.999f ? vec3( 0.0f, 0.0f, 1.0f ) : vec3( 0.0f, 1.0f, 0.0f );
+
+    const vec3 x_axis = normalize( cross( l, reference_axis ) );
+    const vec3 y_axis = normalize( cross( x_axis, l ) );
+
+    float visibility = 0.0;
 
     const float r = light_cb.raytraced_shadow_light_radius;
     float attenuation = attenuation_square_falloff(position_to_light, 1.0f / r);
 
-    const float scaled_distance = r / d;
     if ( (NoL > 0.001f) && (d <= r) && (attenuation > 0.001f) ) {
+
+        const float sr = max( svc.light_source_radius, 0.0f );
+        const float k_cone = sr / max( d, sr );
+
         for ( uint s = 0; s < sample_count; ++s ) {
 
 #if 1
             vec2 poisson_sample = POISSON_SAMPLES[ (s * FRAME_HISTORY_COUNT + frame_index) % SAMPLE_NUM ];
-            vec3 random_x = x_axis * poisson_sample.x * (scaled_distance) * 0.01;
-            vec3 random_y = y_axis * poisson_sample.y * (scaled_distance) * 0.01;
-            vec3 random_dir = normalize(l + random_x + random_y);
+            vec3 random_x = x_axis * poisson_sample.x * k_cone;
+            vec3 random_y = y_axis * poisson_sample.y * k_cone;
+            const vec3 sample_vector = l + random_x + random_y;
+            const float sample_distance = d * length( sample_vector );
+            const vec3 random_dir = normalize( sample_vector );
 #else
+            const float sample_distance = d * length( l );
             vec3 random_dir = l;
 #endif
 
@@ -349,19 +342,16 @@ float get_point_light_visibility( uint light_index, uint sample_count, vec3 worl
                                   world_position,
                                   0.01,
                                   random_dir,
-                                  d);
+                                  sample_distance);
             rayQueryProceedEXT( rayQuery );
 
-            if (rayQueryGetIntersectionTypeEXT(rayQuery, true) != gl_RayQueryCommittedIntersectionNoneEXT) {
-                visiblity += rayQueryGetIntersectionTEXT(rayQuery, true) < d ? 0.0f : 1.0f;
-            }
-            else {
-                visiblity += 1.0f;
+            if ( rayQueryGetIntersectionTypeEXT( rayQuery, true ) == gl_RayQueryCommittedIntersectionNoneEXT ) {
+                visibility += 1.0f;
             }
         }
     }
 
-    return visiblity / float( sample_count );
+    return visibility / float( sample_count );
 }
 
 #define GROUP_SIZE 8
@@ -375,8 +365,8 @@ float get_point_light_visibility( uint light_index, uint sample_count, vec3 worl
 
 layout ( local_size_x = GROUP_SIZE, local_size_y = GROUP_SIZE, local_size_z = 1 ) in;
 
-shared float local_image_data[ LOCAL_DATA_SIZE ][ LOCAL_DATA_SIZE ];
-shared float local_max_image_data[ LOCAL_DATA_SIZE ][ LOCAL_DATA_SIZE ];
+shared float shared_variation[ LOCAL_DATA_SIZE ][ LOCAL_DATA_SIZE ];
+shared float shared_max_variation[ LOCAL_DATA_SIZE ][ LOCAL_DATA_SIZE ];
 
 float read_variation_value( ivec3 index ) {
     const ivec2 image_resolution = shadow_visibility_resolution();
@@ -404,14 +394,19 @@ float max_filter( ivec2 shared_index ) {
 
             const ivec2 sample_index = shared_index + ivec2( x, y );
 
-            max_value = max( max_value, local_image_data[ sample_index.y ][ sample_index.x ] );
+            max_value = max( max_value, shared_variation[ sample_index.y ][ sample_index.x ] );
         }
     }
 
     return max_value;
 }
 
-float tent_kernel[ 13 ][ 13 ] = {
+const float tent_1d[ 13 ] = float[ 13 ](
+    1.0/49.0, 2.0/49.0, 3.0/49.0, 4.0/49.0, 5.0/49.0, 6.0/49.0, 7.0/49.0,
+    6.0/49.0, 5.0/49.0, 4.0/49.0, 3.0/49.0, 2.0/49.0, 1.0/49.0
+);
+
+const float tent_kernel[ 13 ][ 13 ] = {
     { 0.00041649, 0.00083299, 0.00124948, 0.00166597, 0.00208247, 0.00249896, 0.00291545, 0.00249896, 0.00208247, 0.00166597, 0.00124948, 0.00083299, 0.00041649 },
     { 0.00083299, 0.00166597, 0.00249896, 0.00333195, 0.00416493, 0.00499792, 0.00583090, 0.00499792, 0.00416493, 0.00333195, 0.00249896, 0.00166597, 0.00083299 },
     { 0.00124948, 0.00249896, 0.00374844, 0.00499792, 0.00624740, 0.00749688, 0.00874636, 0.00749688, 0.00624740, 0.00499792, 0.00374844, 0.00249896, 0.00124948 },
@@ -426,6 +421,8 @@ float tent_kernel[ 13 ][ 13 ] = {
     { 0.00083299, 0.00166597, 0.00249896, 0.00333195, 0.00416493, 0.00499792, 0.00583090, 0.00499792, 0.00416493, 0.00333195, 0.00249896, 0.00166597, 0.00083299 },
     { 0.00041649, 0.00083299, 0.00124948, 0.00166597, 0.00208247, 0.00249896, 0.00291545, 0.00249896, 0.00208247, 0.00166597, 0.00124948, 0.00083299, 0.00041649 }
 };
+
+#define SEPARABLE_TENT
 
 void main() {
     const ivec2 image_resolution = shadow_visibility_resolution();
@@ -446,82 +443,158 @@ void main() {
 
         const ivec2 source_pixel = group_origin + shared_coord - ivec2( TOTAL_FILTER_RADIUS );
 
-        local_image_data[ shared_coord.y ][ shared_coord.x ] = read_variation_value( ivec3( source_pixel, gl_GlobalInvocationID.z ) );
+        shared_variation[ shared_coord.y ][ shared_coord.x ] = read_variation_value( ivec3( source_pixel, gl_GlobalInvocationID.z ) );
+    }
+
+    barrier();
+
+#if defined (SEPARABLE_TENT)
+
+    // Max filter 5x5, separable: horizontal in shared_max_variation
+    // Used for y in [0, LOCAL_DATA_SIZE-1] and x in [MAX_FILTER_RADIUS, LOCAL_DATA_SIZE-1-MAX_FILTER_RADIUS].
+    const int MAX_H_W = LOCAL_DATA_SIZE - 2 * MAX_FILTER_RADIUS;
+    for ( uint i = local_thread_index; i < uint( LOCAL_DATA_SIZE * MAX_H_W ); i += local_thread_count ) {
+        const int x = int( i ) % MAX_H_W + MAX_FILTER_RADIUS;
+        const int y = int( i ) / MAX_H_W;
+
+        float m = 0.0;
+        for ( int dx = -MAX_FILTER_RADIUS; dx <= MAX_FILTER_RADIUS; ++dx ) {
+            m = max( m, shared_variation[ y ][ x + dx ] );
+        }
+        shared_max_variation[ y ][ x ] = m;
     }
 
     memoryBarrierShared();
     barrier();
+
+    // Vertical max filter: result is back into shared_variation
+    for ( uint i = local_thread_index; i < uint( MAX_H_W * MAX_H_W ); i += local_thread_count ) {
+        const int x = int( i ) % MAX_H_W + MAX_FILTER_RADIUS;
+        const int y = int( i ) / MAX_H_W + MAX_FILTER_RADIUS;
+
+        float m = 0.0;
+        for ( int dy = -MAX_FILTER_RADIUS; dy <= MAX_FILTER_RADIUS; ++dy ) {
+            m = max( m, shared_max_variation[ y + dy ][ x ] );
+        }
+        shared_variation[ y ][ x ] = m;
+    }
+
+    memoryBarrierShared();
+    barrier();
+
+    // Horizontal tent - used with y in [2,21] and x in [8,15]
+    for ( uint i = local_thread_index; i < uint( MAX_H_W * GROUP_SIZE ); i += local_thread_count ) {
+        const int x = int( i ) % GROUP_SIZE + TOTAL_FILTER_RADIUS;
+        const int y = int( i ) / GROUP_SIZE + MAX_FILTER_RADIUS;
+
+        float acc = 0.0;
+        for ( int dx = -TENT_FILTER_RADIUS; dx <= TENT_FILTER_RADIUS; ++dx ) {
+            acc += shared_variation[ y ][ x + dx ] * tent_1d[ dx + TENT_FILTER_RADIUS ];
+        }
+        shared_max_variation[ y ][ x ] = acc;
+    }
+
+#else
 
     // The tent filter needs max-filtered values in a region with
     // a six-pixel halo. Each of these values reads an additional
-    // two-pixel halo from local_image_data.
+    // two-pixel halo from shared_variation.
     for ( uint i = local_thread_index; i < LOCAL_MAX_DATA_SIZE * LOCAL_MAX_DATA_SIZE; i += local_thread_count ) {
-
+        
         const ivec2 max_region_coord = ivec2( i % LOCAL_MAX_DATA_SIZE, i / LOCAL_MAX_DATA_SIZE );
 
-        // local_image_data has an eight-pixel halo, while the
+        // shared_variation has an eight-pixel halo, while the
         // max-filtered region begins two pixels inside that tile.
         const ivec2 shared_coord = max_region_coord + ivec2( MAX_FILTER_RADIUS );
 
-        local_max_image_data[ shared_coord.y ][ shared_coord.x ] = max_filter( shared_coord );
+        shared_max_variation[ shared_coord.y ][ shared_coord.x ] = max_filter( shared_coord );
     }
 
-    memoryBarrierShared();
+
+#endif // SEPARABLE_TENT
+
     barrier();
 
-    // Every invocation must reach both barriers. Invalid invocations
+    // Every invocation must reach all barriers. Invalid invocations
     // can return only after the shared-memory work is complete.
     if ( !valid_pixel ) {
         return;
     }
 
     const ivec3 global_index = ivec3( gl_GlobalInvocationID.xyz );
-
     const ivec2 local_index = ivec2( gl_LocalInvocationID.xy ) + ivec2( TOTAL_FILTER_RADIUS );
 
-    // 13x13 tent filter over the max-filtered variation.
-    float spatial_filtered_value = 0.0;
+    // Vertical tent using LDS - 13 reads instead of 169!
+    float spatial_variation = 0.0;
 
+#if defined (SEPARABLE_TENT)
+    for ( int dy = -TENT_FILTER_RADIUS; dy <= TENT_FILTER_RADIUS; ++dy ) {
+        spatial_variation += shared_max_variation[ local_index.y + dy ][ local_index.x ]
+                                * tent_1d[ dy + TENT_FILTER_RADIUS ];
+    }
+#else
     for ( int y = -TENT_FILTER_RADIUS; y <= TENT_FILTER_RADIUS; ++y ) {
         for ( int x = -TENT_FILTER_RADIUS; x <= TENT_FILTER_RADIUS; ++x ) {
 
             const ivec2 sample_index = local_index + ivec2( x, y );
 
-            const float variation = local_max_image_data[ sample_index.y ][ sample_index.x ];
+            const float variation = shared_max_variation[ sample_index.y ][ sample_index.x ];
 
             const float weight = tent_kernel[ y + TENT_FILTER_RADIUS ][ x + TENT_FILTER_RADIUS ];
 
-            spatial_filtered_value += variation * weight;
+            spatial_variation += variation * weight;
         }
     }
+#endif // SEPARABLE_TENT
 
-    vec4 last_variation_values = texelFetch( global_texture_arrays[ svc.current_variation_cache_texture_index ], global_index, 0 );
+    vec4 variation_history = texelFetch( global_texture_arrays[ svc.current_variation_cache_texture_index ], global_index, 0 );
 
     // This value still contains the result of the reprojection pass.
     // If reprojection failed, the reprojection pass initialized it to -1.
-    const bool valid_history = last_variation_values.x >= 0.0;
-    const vec4 valid_variation_values = valid_history ? last_variation_values : vec4( 0.0 );
+    const bool valid_history = variation_history.x >= 0.0;
+    //const vec4 valid_variation_values = valid_history ? variation_history : vec4( 0.0 );
 
-    float filtered_value = 0.5 * ( spatial_filtered_value + 0.25 * ( valid_variation_values.x + valid_variation_values.y + valid_variation_values.z + valid_variation_values.w ) );
+    //float filtered_variation = 0.5 * ( spatial_variation + 0.25 * ( valid_variation_values.x + valid_variation_values.y + valid_variation_values.z + valid_variation_values.w ) );
+    // Filter only valid samples
+    vec4 valid_history_mask = step( vec4( 0.0 ), variation_history );
+    float valid_history_count = dot( valid_history_mask, vec4( 1.0 ) );
+
+    float temporal_variation = ( valid_history_count > 0.0 ) ? 
+                                dot( max( variation_history, vec4( 0.0 ) ), valid_history_mask ) / valid_history_count : 0.0;
+    float filtered_variation = 0.5 * ( spatial_variation + temporal_variation );
+    
     const ivec2 full_resolution_pixel = representative_full_resolution_pixel( global_index.xy, svc.current_depth_texture_index );
 
     uvec4 sample_count_history = texelFetch( global_utexture_arrays[ svc.current_samples_count_cache_texture_index ], global_index, 0 );
     const float raw_depth = sample_depth_point( svc.current_depth_texture_index, full_resolution_pixel );
 
     uint sample_count = 1;
+    
     if ( raw_depth == 1.0f ) {
         sample_count = 0;
     } else if ( valid_history ) {
-        sample_count = sample_count_history.x;
+        //sample_count = sample_count_history.x;
+        const uint k_baseline_samples = 2u;
+        sample_count = max( sample_count_history.x, k_baseline_samples );
 
         bool stable_sample_count = ( sample_count_history.x == sample_count_history.y ) && ( sample_count_history.x == sample_count_history.z ) && ( sample_count_history.x == sample_count_history.w );
 
+#if 0
         float delta = 0.3;
-        if ( filtered_value > delta && sample_count < svc.max_samples ) {
+        if ( filtered_variation > delta && sample_count < svc.max_samples ) {
             sample_count += 1;
-        } else if ( stable_sample_count && sample_count >= 1 && (filtered_value < delta) ) {
+        } else if ( stable_sample_count && sample_count >= 1 && (filtered_variation < delta) ) {
             sample_count -= 1;
         }
+#else
+        const float delta_up   = 0.35;
+        const float delta_down = 0.15;
+        if ( filtered_variation > delta_up && sample_count < svc.max_samples ) {
+            sample_count += 1;
+        } else if ( stable_sample_count && sample_count > 1 && filtered_variation < delta_down ) {
+            sample_count -= 1;
+        }
+#endif
 
 #if 0
         // NOTE(marco): this is the implementation described in the book. If we don't
@@ -539,6 +612,9 @@ void main() {
         }
 #endif
     }
+    else {
+        sample_count = svc.max_samples;
+    }
 
     sample_count = min( sample_count, svc.max_samples );
 
@@ -546,12 +622,11 @@ void main() {
     if ( sample_count > 0 ) {
         const vec2 screen_uv = uv_nearest( full_resolution_pixel, frame.resolution );
         vec3 pixel_world_position = world_position_from_depth( screen_uv, raw_depth, frame.inverse_view_projection );
-        //pixel_world_position = world_position_from_depth_unjittered_approx( screen_uv, raw_depth, inverse_view_projection, jitter_xy );
 
         vec2 encoded_normal = texelFetch( global_textures[ svc.normals_texture_index ], full_resolution_pixel, 0 ).rg;
         vec3 normal = octahedral_decode( encoded_normal );
 
-        vec2 blue_noise_value = animated_blue_noise(uvec2(global_pixel), uint(frame.current_frame), frame.blue_noise_128_rg_texture_index);
+        vec2 blue_noise_value = animated_blue_noise(uvec2(global_pixel), uint(frame.current_frame) * 0u, frame.blue_noise_128_rg_texture_index);
 
         // Point light
         if ( is_raytrace_shadow_point_light() ) {
@@ -563,30 +638,39 @@ void main() {
         }
     }
 
-    vec4 last_visibility_values = vec4( visibility );
+    vec4 visibility_history ;//= vec4( visibility );
 
     if ( valid_history ) {
-        last_visibility_values = texelFetch( global_texture_arrays[ svc.current_visibility_cache_texture_index ], global_index, 0 );
+        visibility_history = texelFetch( global_texture_arrays[ svc.current_visibility_cache_texture_index ], global_index, 0 );
 
-        last_visibility_values.w = last_visibility_values.z;
-        last_visibility_values.z = last_visibility_values.y;
-        last_visibility_values.y = last_visibility_values.x;
+        if ( sample_count > 0 ) {
+            visibility_history.w = visibility_history.z;
+            visibility_history.z = visibility_history.y;
+            visibility_history.y = visibility_history.x;
+            visibility_history.x = visibility;
+        }
+        //visibility_history.w = visibility_history.z;
+        //visibility_history.z = visibility_history.y;
+        //visibility_history.y = visibility_history.x;
 
-        float temporal_visibility = 0.25 * ( last_visibility_values.x + last_visibility_values.y + last_visibility_values.z + last_visibility_values.w );
+        //float temporal_visibility = 0.25 * ( visibility_history.x + visibility_history.y + visibility_history.z + visibility_history.w );
 
         // Conservative injection of the new stochastic sample.
         //visibility = mix( visibility, temporal_visibility, 0.25 );
 
-        float max_delta = 0.25;
+        //float max_delta = 0.25;
 
         //visibility = clamp( visibility, temporal_visibility - max_delta, temporal_visibility + max_delta );
     }
+    else {
+        visibility_history = vec4( visibility );
+    }
 
-    last_visibility_values.x = visibility;
+    //visibility_history.x = visibility;
 
     // Disable history option
     if ( svc.disable_history == 1 ) {
-        last_visibility_values = vec4( visibility );
+        visibility_history = vec4( visibility );
     }    
 
     sample_count_history.w = sample_count_history.z;
@@ -595,15 +679,15 @@ void main() {
     sample_count_history.x = sample_count;
 
 
-    last_variation_values.w = last_variation_values.z;
-    last_variation_values.z = last_variation_values.y;
-    last_variation_values.y = last_variation_values.x;
-    last_variation_values.x = texelFetch( global_texture_arrays[ svc.variation_texture_index ], global_index, 0 ).r;
+    variation_history.w = variation_history.z;
+    variation_history.z = variation_history.y;
+    variation_history.y = variation_history.x;
+    variation_history.x = texelFetch( global_texture_arrays[ svc.variation_texture_index ], global_index, 0 ).r;
 
 
-    imageStore( global_image_arrays_2d[ svc.current_visibility_cache_texture_index ], global_index, last_visibility_values );
-    imageStore( global_image_arrays_2d[ svc.filtered_variation_texture ], global_index, vec4( spatial_filtered_value, 0, 0, 0 ) );
-    imageStore( global_image_arrays_2d[ svc.current_variation_cache_texture_index ], global_index, last_variation_values );
+    imageStore( global_image_arrays_2d[ svc.current_visibility_cache_texture_index ], global_index, visibility_history );
+    imageStore( global_image_arrays_2d[ svc.filtered_variation_texture ], global_index, vec4( spatial_variation, 0, 0, 0 ) );
+    imageStore( global_image_arrays_2d[ svc.current_variation_cache_texture_index ], global_index, variation_history );
     imageStore( global_uimages_arrays_2d[ svc.current_samples_count_cache_texture_index ], global_index, sample_count_history );
 }
 
@@ -617,8 +701,8 @@ void main() {
 
 layout ( local_size_x = GROUP_SIZE, local_size_y = GROUP_SIZE, local_size_z = 1 ) in;
 
-shared float local_image_data[ LOCAL_DATA_SIZE ][ LOCAL_DATA_SIZE ];
-shared vec4 local_normal_data[ LOCAL_DATA_SIZE ][ LOCAL_DATA_SIZE ];
+shared float shared_visibility[ LOCAL_DATA_SIZE ][ LOCAL_DATA_SIZE ];
+shared vec4 shared_normal_depth[ LOCAL_DATA_SIZE ][ LOCAL_DATA_SIZE ];
 
 
 // NOTE(marco): computed with script from https://stackoverflow.com/questions/29731726/how-to-calculate-a-gaussian-kernel-matrix-efficiently-in-numpy
@@ -678,7 +762,6 @@ void main() {
     const ivec2 image_resolution = shadow_visibility_resolution();
 
     const ivec2 global_pixel = ivec2( gl_GlobalInvocationID.xy );
-
     const bool valid_pixel = all( lessThan( global_pixel, image_resolution ) );
 
     const uint local_thread_index = gl_LocalInvocationID.y * GROUP_SIZE + gl_LocalInvocationID.x;
@@ -690,12 +773,11 @@ void main() {
     for ( uint i = local_thread_index; i < LOCAL_DATA_SIZE * LOCAL_DATA_SIZE; i += local_thread_count ) {
 
         const ivec2 shared_coord = ivec2( i % LOCAL_DATA_SIZE, i / LOCAL_DATA_SIZE );
-
         const ivec2 source_pixel = group_origin + shared_coord - ivec2( FILTER_RADIUS );
         const ivec3 source_index = ivec3( source_pixel, gl_GlobalInvocationID.z );
 
-        local_image_data[ shared_coord.y ][ shared_coord.x ] = visibility_temporal_filter_orig( source_index );
-        local_normal_data[ shared_coord.y ][ shared_coord.x ] = get_normal( source_index );
+        shared_visibility[ shared_coord.y ][ shared_coord.x ] = visibility_temporal_filter_orig( source_index );
+        shared_normal_depth[ shared_coord.y ][ shared_coord.x ] = get_normal( source_index );
     }
 
     memoryBarrierShared();
@@ -709,9 +791,8 @@ void main() {
     const ivec2 local_index = ivec2( gl_LocalInvocationID.xy ) + ivec2( FILTER_RADIUS );
     const ivec3 global_index = ivec3( gl_GlobalInvocationID.xyz ); 
 
-    const float center_visibility = local_image_data[ local_index.y ][ local_index.x ];
-
-    const vec4 center_normal_depth = local_normal_data[ local_index.y ][ local_index.x ];
+    const float center_visibility = shared_visibility[ local_index.y ][ local_index.x ];
+    const vec4 center_normal_depth = shared_normal_depth[ local_index.y ][ local_index.x ];
 
     float filtered_visibility = 0.0;
     float total_weight = 0.0;
@@ -728,7 +809,7 @@ void main() {
 
             const ivec2 sample_index = local_index + ivec2( x, y );
 
-            const vec4 sample_normal_depth = local_normal_data[ sample_index.y ][ sample_index.x ];
+            const vec4 sample_normal_depth = shared_normal_depth[ sample_index.y ][ sample_index.x ];
 
             const float normal_weight = dot( center_normal_depth.xyz, sample_normal_depth.xyz ) > 0.9 ? 1.0 : 0.0;
             const float depth_delta = abs( center_normal_depth.w - sample_normal_depth.w );
@@ -737,7 +818,7 @@ void main() {
 
             const float weight = kernel_weight * normal_weight * depth_weight;
 
-            const float visibility = local_image_data[ sample_index.y ][ sample_index.x ];
+            const float visibility = shared_visibility[ sample_index.y ][ sample_index.x ];
 
             filtered_visibility += visibility * weight;
 
@@ -745,7 +826,7 @@ void main() {
         }
     }
 
-    if ( total_weight > 1e-6 ) {
+    if ( total_weight > 0.00001f ) {
         filtered_visibility /= total_weight;
     } else {
         filtered_visibility = center_visibility;
@@ -777,26 +858,6 @@ uint min_index4( vec4 values ) {
     return y_wins ? 1u : 3u;
 }
 
-float select_component( vec4 values, uint index ) {
-    switch ( index ) {
-        case 0u: {
-            return values.x;
-        }
-
-        case 1u: {
-            return values.y;
-        }
-
-        case 2u: {
-            return values.z;
-        }
-
-        default: {
-            return values.w;
-        }
-    }
-}
-
 #define GROUP_SIZE 8
 
 layout (local_size_x = GROUP_SIZE, local_size_y = GROUP_SIZE, local_size_z = 1 ) in;
@@ -804,7 +865,7 @@ layout (local_size_x = GROUP_SIZE, local_size_y = GROUP_SIZE, local_size_z = 1 )
 void main() {
     const ivec2 full_resolution = ivec2( frame.resolution );
     const ivec2 full_pixel = ivec2( gl_GlobalInvocationID.xy );
-    const int shadow_layer = int( gl_GlobalInvocationID.z );
+    //const int shadow_layer = int( gl_GlobalInvocationID.z );
 
     if ( any( greaterThanEqual( full_pixel, full_resolution ) ) ) {
         return;
@@ -813,14 +874,14 @@ void main() {
     const float raw_depth = sample_depth_point( svc.current_depth_texture_index, full_pixel );
 
     if ( raw_depth == 1.0 ) {
-        imageStore( global_image_arrays_2d[ nonuniformEXT( svc.upscaled_visibility_texture ) ], ivec3( full_pixel, shadow_layer ), vec4( 1.0, 0.0, 0.0, 0.0 ) );
+        imageStore( global_image_arrays_2d[ nonuniformEXT( svc.upscaled_visibility_texture ) ], ivec3( full_pixel, 0 ), vec4( 1.0, 0.0, 0.0, 0.0 ) );
 
         return;
     }
 
     const float current_linear_depth = raw_depth_to_linear_depth( raw_depth, frame.z_near, frame.z_far );
     const vec2 full_uv = ( vec2( full_pixel ) + vec2( 0.5 ) ) / vec2( full_resolution );
-    const vec3 shadow_uv_layer = vec3( full_uv, float( shadow_layer ) );
+    const vec3 shadow_uv_layer = vec3( full_uv, float( 0 ) );
 
     // R channel: filtered visibility.
     const vec4 visibility_samples = textureGather( global_texture_arrays[ nonuniformEXT( svc.filtered_visibility_texture ) ], shadow_uv_layer, 0 );
@@ -829,10 +890,9 @@ void main() {
     const vec4 guide_depth_samples = textureGather( global_texture_arrays[ nonuniformEXT( svc.filtered_visibility_texture ) ], shadow_uv_layer, 1 );
     const vec4 depth_delta = abs( guide_depth_samples - vec4( current_linear_depth ) );
     const uint best_index = min_index4( depth_delta );
-    const float visibility = select_component( visibility_samples, best_index );
+    const float visibility = visibility_samples[ best_index ];
 
-    imageStore( global_image_arrays_2d[ nonuniformEXT( svc.upscaled_visibility_texture ) ], ivec3( full_pixel, shadow_layer ), vec4( visibility, 0.0, 0.0, 0.0 ) );
+    imageStore( global_image_arrays_2d[ nonuniformEXT( svc.upscaled_visibility_texture ) ], ivec3( full_pixel, 0 ), vec4( visibility, 0.0, 0.0, 0.0 ) );
 }
 
 #endif // COMPUTE_SHADOW_VISIBILITY_UPSCALING
-

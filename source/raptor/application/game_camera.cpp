@@ -51,7 +51,7 @@ void GameCamera::update( InputService* input, u32 window_width, u32 window_heigh
 
     // Ignore first dragging frames for mouse movement waiting the cursor to be placed at the center of the screen.
 
-    if ( input->is_mouse_dragging( MOUSE_BUTTONS_RIGHT ) && !ImGui::IsAnyItemHovered() ) {
+    if ( input->is_mouse_dragging( MOUSE_BUTTONS_RIGHT ) && !ImGui::GetIO().WantCaptureMouse ) {
 
         if ( ignore_dragging_frames == 0 ) {
             target_yaw -= ( input->mouse_position.x - roundu32(window_width / 2.f) ) * mouse_sensitivity * delta_time;
@@ -100,6 +100,11 @@ void GameCamera::update( InputService* input, u32 window_width, u32 window_heigh
         camera_movement = camera_movement + camera.direction * -camera_movement_delta;
     }
 
+    // Do not navigate while editing ImGui fields.
+    if ( ImGui::GetIO().WantCaptureKeyboard ) {
+        camera_movement = glm::vec3( 0.0f );
+    }
+
     target_movement = target_movement + camera_movement;
 
 
@@ -131,6 +136,175 @@ void GameCamera::apply_jittering( f32 x, f32 y ) {
     }
 
     camera.calculate_view_projection();
+}
+
+bool GameCamera::draw_debug_ui() {
+
+    if ( !ImGui::Begin( "Camera" ) ) {
+        ImGui::End();
+        return false;
+    }
+
+    Camera& c = camera;
+    bool changed = false;
+
+    // Freeze navigation while keeping rendering and temporal accumulation active.
+    bool lock_controls = !enabled;
+    const bool controls_changed = ImGui::Checkbox( "Lock controls", &lock_controls );
+
+    if ( controls_changed ) {
+        enabled = !lock_controls;
+    }
+
+    ImGui::Separator();
+
+    // Position ////////////////////////////////////////////////////////////////
+
+    changed |= ImGui::DragFloat3(
+        "Position", &c.position.x, 0.05f, 0.0f, 0.0f, "%.3f" );
+
+    if ( ImGui::Button( "Position = 0" ) ) {
+        c.position = glm::vec3( 0.0f );
+        changed = true;
+    }
+
+    ImGui::SameLine();
+
+    if ( ImGui::Button( "Reset pose" ) ) {
+        c.position = glm::vec3( 0.0f );
+        c.yaw = 0.0f;
+        c.pitch = 0.0f;
+        changed = true;
+    }
+
+    // Orientation /////////////////////////////////////////////////////////////
+
+    float angles[ 2 ] = { glm::degrees( c.yaw ), glm::degrees( c.pitch ) };
+
+    if ( ImGui::DragFloat2( "Yaw / Pitch (deg)", angles, 0.25f, 0.0f, 0.0f, "%.2f" ) ) {
+
+        c.yaw = glm::radians( angles[ 0 ] );
+        c.pitch = glm::radians( glm::clamp( angles[ 1 ], -90.0f, 90.0f ) );
+
+        changed = true;
+    }
+
+    const auto set_angles = [ & ]( float yaw_degrees,
+                                   float pitch_degrees ) {
+       c.yaw = glm::radians( yaw_degrees );
+       c.pitch = glm::radians( pitch_degrees );
+       changed = true;
+    };
+
+    ImGui::TextUnformatted( "Look along world axis" );
+
+    if ( ImGui::Button( "+X" ) ) set_angles( -90.0f, 0.0f );
+    ImGui::SameLine();
+    if ( ImGui::Button( "-X" ) ) set_angles( 90.0f, 0.0f );
+    ImGui::SameLine();
+    if ( ImGui::Button( "+Y" ) ) set_angles( 0.0f, 90.0f );
+    ImGui::SameLine();
+    if ( ImGui::Button( "-Y" ) ) set_angles( 0.0f, -90.0f );
+    ImGui::SameLine();
+    if ( ImGui::Button( "+Z" ) ) set_angles( 180.0f, 0.0f );
+    ImGui::SameLine();
+    if ( ImGui::Button( "-Z" ) ) set_angles( 0.0f, 0.0f );
+
+    if ( ImGui::Button( "Level pitch" ) ) {
+        c.pitch = 0.0f;
+        changed = true;
+    }
+
+    ImGui::SameLine();
+
+    if ( ImGui::Button( "Turn 180" ) ) {
+        c.yaw += glm::radians( 180.0f );
+        changed = true;
+    }
+
+    if ( ImGui::Button( "Look at origin" ) ) {
+        const glm::vec3 to_origin = -c.position;
+        const float distance_squared = glm::dot( to_origin, to_origin );
+
+        // Looking at our own position has no defined direction.
+        if ( distance_squared > 1e-12f ) {
+            const glm::vec3 d =
+                to_origin / std::sqrt( distance_squared );
+
+            // Camera::update() uses:
+            // forward = (-sin(yaw)*cos(pitch),
+            //             sin(pitch),
+            //            -cos(yaw)*cos(pitch)).
+            //
+            // Preserve yaw when looking exactly vertically.
+            if ( d.x * d.x + d.z * d.z > 1e-12f ) {
+                c.yaw = std::atan2( -d.x, -d.z );
+            }
+
+            c.pitch = std::asin(
+                glm::clamp( d.y, -1.0f, 1.0f ) );
+
+            changed = true;
+        }
+    }
+
+    // Projection //////////////////////////////////////////////////////////////
+
+    ImGui::Separator();
+
+    if ( c.perspective ) {
+        float fov = c.field_of_view_y;
+
+        if ( ImGui::SliderFloat( "Vertical FOV", &fov, 10.0f, 120.0f, "%.1f deg" ) ) {
+            c.set_fov_y( glm::clamp( fov, 10.0f, 120.0f ) );
+            changed = true;
+        }
+    } else {
+        float zoom = c.zoom;
+
+        if ( ImGui::DragFloat( "Zoom", &zoom, 0.01f, 0.001f, 1000.0f ) ) {
+            c.set_zoom( glm::clamp( zoom, 0.001f, 1000.0f ) );
+            changed = true;
+        }
+    }
+
+    // Navigation //////////////////////////////////////////////////////////////
+    if ( ImGui::TreeNode( "Navigation" ) ) {
+
+        // movement_delta controls translation increments in this controller.
+        // movement_speed controls how quickly position follows its target.
+        if ( ImGui::DragFloat( "Movement step", &movement_delta, 0.001f, 0.0001f, 100.0f, "%.4f" ) ) {
+            movement_delta = glm::clamp( movement_delta, 0.0001f, 100.0f );
+        }
+
+        if ( ImGui::DragFloat( "Mouse sensitivity", &mouse_sensitivity, 0.01f, 0.01f, 10.0f, "%.2f" ) ) {
+            mouse_sensitivity = glm::clamp( mouse_sensitivity, 0.01f, 10.0f );
+        }
+
+        ImGui::TextUnformatted( "Shift: x10 | Alt: x100 | Ctrl: x0.1" );
+
+        ImGui::TreePop();
+    }
+
+    // Keep controller targets aligned with direct camera edits.
+    // Also discard pending movement when locking/unlocking navigation.
+    if ( changed || controls_changed ) {
+        target_movement = c.position;
+        target_yaw = c.yaw;
+        target_pitch = c.pitch;
+
+        mouse_dragging = false;
+        ignore_dragging_frames = 3;
+
+        // Rebuild an unjittered projection.
+        // FrameRenderer::upload_gpu_data() applies this frame's jitter later.
+        c.update_projection = true;
+        c.update();
+    }
+
+    ImGui::End();
+
+    return changed;
 }
 
 } // namespace raptor

@@ -197,8 +197,17 @@ void ImGuiService::init( void* configuration ) {
     // consider calling GetTexDataAsAlpha8() instead to save on GPU memory.
     io.Fonts->GetTexDataAsRGBA32( &pixels, &width, &height );
 
-    ImageCreation texture_creation;
-    texture_creation.set_format_type( VK_FORMAT_R8G8B8A8_UNORM, TextureType::Texture2D ).set_data( pixels ).set_size( width, height, 1 ).set_name( "ImGui_Font" );
+    ImageCreation texture_creation{
+        .image_type   = VK_IMAGE_TYPE_2D,
+        .format       = VK_FORMAT_R8G8B8A8_UNORM,
+        .width        = (u32)width,
+        .height       = (u32)height,
+        .depth        = 1,
+        .usage        = VK_IMAGE_USAGE_SAMPLED_BIT |
+                        VK_IMAGE_USAGE_TRANSFER_DST_BIT |
+                        VK_IMAGE_USAGE_TRANSFER_SRC_BIT,
+        .initial_data = pixels,
+        .name         = "ImGui_Font" };
     g_font_image = gpu->create_image( texture_creation );
 
     g_font_image_view = gpu->create_image_view( {
@@ -217,6 +226,7 @@ void ImGuiService::init( void* configuration ) {
 
     ShaderCompilationStage vs_stage, ps_stage;
     bool slang_input = false;
+    ShaderLanguage language = ShaderLanguage::Glsl;
 
     vs_stage.type = VK_SHADER_STAGE_VERTEX_BIT;
     ps_stage.type = VK_SHADER_STAGE_FRAGMENT_BIT;
@@ -229,6 +239,8 @@ void ImGuiService::init( void* configuration ) {
             ps_stage.source_code = g_fragment_shader_code_bindless_slang;
 
             slang_input = true;
+
+            language = ShaderLanguage::Slang;
         }
         else {
             vs_stage.source_code = g_vertex_shader_code_bindless;
@@ -247,11 +259,11 @@ void ImGuiService::init( void* configuration ) {
     bool shader_changed = false; // TODO(marco): ignored for now
     bool result = ShaderCompiler::compile_and_cache_shader( vs_stage, vs, nullptr, temp_allocator,
                                                             "imgui", "imgui", nullptr, nullptr, false,
-                                                            slang_input, true, shader_changed );
+                                                            language, true, shader_changed );
 
     ShaderCompiler::compile_and_cache_shader( ps_stage, ps, nullptr, temp_allocator,
                                               "imgui", "imgui", nullptr, nullptr,
-                                              false, slang_input, true, shader_changed );
+                                              false, language, true, shader_changed );
 
     // Create pipeline
     ShaderStateCreation shader_creation;

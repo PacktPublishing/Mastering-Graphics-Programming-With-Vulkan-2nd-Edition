@@ -544,7 +544,7 @@ CommandBuffer* RenderScene::update_physics( f32 delta_time, f32 air_density, f32
                 const u64 cloth_hashed_name = hash_calculate( "cloth" );
                 GpuTechnique* cloth_technique = renderer->resource_cache.techniques.get( cloth_hashed_name );
 
-                cb->bind_pipeline( cloth_technique->passes[ 0 ].pipeline );
+                cb->bind_pipeline( cloth_technique->passes[ 0 ].active() );
             }
 
             cb->bind_descriptor_set( &physics_mesh->descriptor_set, 1, nullptr, 0 );

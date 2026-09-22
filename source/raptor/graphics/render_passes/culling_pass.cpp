@@ -9,6 +9,7 @@ namespace raptor {
 
 // CullingEarlyPass /////////////////////////////////////////////////////////
 void CullingEarlyPass::render( FrameGraphRenderContext& context ) {
+    const ShaderLanguage language = context.render_config->shader_language();
 
     if ( !enabled )
         return;
@@ -74,7 +75,7 @@ void CullingEarlyPass::render( FrameGraphRenderContext& context ) {
 
     cb->flush_barriers();
 
-    cb->bind_pipeline( cull_pipeline.pipeline );
+    cb->bind_pipeline( cull_pipeline.active( language ) );
 
     cb->bind_descriptor_set(
         { renderer->gpu->bindless_descriptor_set, cull_descriptor_set[ current_frame_index ] },
@@ -144,24 +145,22 @@ void CullingEarlyPass::declare_frame_graph_node( FrameGraphResourceContext& cont
 ShaderCompilationCreation scc_culling_early = {
     .stages = {
         {
-            .source_file_path = "glsl/culling.glsl",
+            .source = { .glsl = "glsl/culling.glsl" },
             .type = VK_SHADER_STAGE_COMPUTE_BIT,
         },
     },
     .name = "mesh_culling_early",
-    .slang_input = 0,
 };
 
 
 ShaderCompilationCreation scc_culling_late = {
     .stages = {
         {
-            .source_file_path = "glsl/culling.glsl",
+            .source = { .glsl = "glsl/culling.glsl" },
             .type = VK_SHADER_STAGE_COMPUTE_BIT,
         },
     },
     .name = "mesh_culling_late",
-    .slang_input = 0,
 };
 
 void CullingEarlyPass::update_psos( FrameGraphResourceContext& context, PipelineUpdatePhase phase ) {
@@ -208,10 +207,10 @@ void CullingEarlyPass::create_gpu_resources( FrameGraphResourceContext& context 
     GpuCullingRuntimeData& gpu_culling = render_blackboard.gpu_culling;
 
     // Cache frustum cull shader
-    DescriptorSetLayoutHandle layout = gpu.get_descriptor_set_layout( cull_pipeline.pipeline, k_material_descriptor_set_index );
+    DescriptorSetLayoutHandle layout = gpu.get_descriptor_set_layout( cull_pipeline.any(), k_material_descriptor_set_index );
     DescriptorSetBinder descriptors;
 
-    ShaderReflectionInfo* shader_reflection = renderer->get_shader_reflection( cull_pipeline.pipeline );
+    ShaderReflectionInfo* shader_reflection = renderer->get_shader_reflection( cull_pipeline.any() );
 
     for ( u32 i = 0; i < k_max_frames; ++i ) {
         descriptors.reset();
@@ -221,7 +220,7 @@ void CullingEarlyPass::create_gpu_resources( FrameGraphResourceContext& context 
         descriptors.ssbos.push( { gpu_culling.meshlet_indirect_early_commands_sb[ i ], 1 } );
         descriptors.ssbos.push( { gpu_culling.meshlet_culled_mesh_instance_ids_sb[ i ], 3 } );
 
-        cull_descriptor_set[ i ] = renderer->create_descriptor_set( descriptors, shader_reflection, cull_pipeline.pipeline, i, render_blackboard );
+        cull_descriptor_set[ i ] = renderer->create_descriptor_set( descriptors, shader_reflection, cull_pipeline.any(), i, render_blackboard );
     }
 }
 
@@ -236,6 +235,7 @@ void CullingEarlyPass::destroy_gpu_resources( FrameGraphResourceContext& context
 
 // CullingLatePass /////////////////////////////////////////////////////////
 void CullingLatePass::render( FrameGraphRenderContext& context ) {
+    const ShaderLanguage language = context.render_config->shader_language();
 
     if ( !enabled )
         return;
@@ -262,7 +262,7 @@ void CullingLatePass::render( FrameGraphRenderContext& context ) {
 
     cb->update_buffer( gpu_culling.meshlet_indirect_late_count_sb[ current_frame_index ], 0, sizeof( GpuMeshDrawCounts ), &mesh_draw_counts );
 
-    cb->bind_pipeline( cull_pipeline.pipeline );
+    cb->bind_pipeline( cull_pipeline.active( language ) );
 
     const Buffer* visible_commands_sb = renderer->gpu->get_buffer( gpu_culling.meshlet_indirect_late_commands_sb[ current_frame_index ] );
     const Buffer* count_sb = renderer->gpu->get_buffer( gpu_culling.meshlet_indirect_late_count_sb[ current_frame_index ] );
@@ -372,7 +372,7 @@ void CullingLatePass::create_gpu_resources( FrameGraphResourceContext& context )
 
     DescriptorSetBinder descriptors;
 
-    ShaderReflectionInfo* shader_reflection = renderer->get_shader_reflection( cull_pipeline.pipeline );
+    ShaderReflectionInfo* shader_reflection = renderer->get_shader_reflection( cull_pipeline.any() );
 
     for ( u32 i = 0; i < k_max_frames; ++i ) {
         descriptors.reset();
@@ -383,7 +383,7 @@ void CullingLatePass::create_gpu_resources( FrameGraphResourceContext& context )
         descriptors.ssbos.push( { gpu_culling.meshlet_culled_mesh_instance_ids_sb[ i ], 3 } );
 
         descriptors.name = "culling_late_ds";
-        cull_descriptor_set[ i ] = renderer->create_descriptor_set( descriptors, shader_reflection, cull_pipeline.pipeline, i, render_blackboard );
+        cull_descriptor_set[ i ] = renderer->create_descriptor_set( descriptors, shader_reflection, cull_pipeline.any(), i, render_blackboard );
     }
 }
 

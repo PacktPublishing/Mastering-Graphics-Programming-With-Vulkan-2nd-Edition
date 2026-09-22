@@ -193,8 +193,8 @@ void FbxModel::load_model( cstring filename, cstring path, ArenaAllocator* temp_
             // NOTE(marco): we don't support animated meshes that don't have a skeleton
             RASSERT( has_skin && skin->clusters.count > 0 );
 
-            for ( u32 face = 0; face < fbx_mesh->faces.count; ++face ) {
-                ufbx_face& fbx_face = fbx_mesh->faces.data[ face ];
+            for ( u32 face = 0; face < mesh_part.num_faces; ++face ) {
+                ufbx_face& fbx_face = fbx_mesh->faces.data[ mesh_part.face_indices.data[ face ] ];
 
                 u32 num_triangles = ufbx_triangulate_face( face_indices.data, face_indices.size, fbx_mesh, fbx_face );
                 for ( u32 t = 0; t < num_triangles * 3; ++t ) {

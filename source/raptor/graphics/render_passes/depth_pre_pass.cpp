@@ -9,13 +9,12 @@ namespace raptor {
 ShaderCompilationCreation scc_mesh_depth_pre = {
     .stages = {
         ShaderCompilationStage{
-            .source_file_path = "depth.glsl",
+            .source = { .glsl = "depth.glsl" },
             .headers = { "platform.h", "scene.h", "mesh.h" },
             .type = VK_SHADER_STAGE_VERTEX_BIT,
         },
     },
     .name = "mesh_depth_pre",
-    .slang_input = 0,
 };
 
 PipelineCreation pc_mesh_depth_pre = {
@@ -55,18 +54,17 @@ PipelineCreation pc_mesh_depth_pre = {
 ShaderCompilationCreation scc_mesh_depth_pre_skinning = {
     .stages = {
         ShaderCompilationStage{
-            .source_file_path = "depth_skinned.vert",
+            .source = { .glsl = "depth_skinned.vert" },
             .headers = { "platform.h", "scene.h", "mesh.h" },
             .type = VK_SHADER_STAGE_VERTEX_BIT,
         },
         ShaderCompilationStage{
-            .source_file_path = "depth.glsl",
+            .source = { .glsl = "depth.glsl" },
             .headers = { "platform.h", "scene.h", "mesh.h" },
             .type = VK_SHADER_STAGE_FRAGMENT_BIT,
         },
     },
     .name = "mesh_depth_pre_skinning",
-    .slang_input = 0,
 };
 
 PipelineCreation pc_mesh_depth_pre_skinning = {

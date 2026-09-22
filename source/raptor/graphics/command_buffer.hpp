@@ -147,9 +147,9 @@ struct CommandBuffer {
     ResourceHandle          resource_handle     = u32_max;
 
     // Barrier management
-    StaticArray<VkMemoryBarrier2, 4>    global_barriers;
-    StaticArray<VkBufferMemoryBarrier2, 8> buffer_barriers;
-    StaticArray<VkImageMemoryBarrier2, 8> image_barriers;
+    StaticArray<VkMemoryBarrier2, 8>    global_barriers;
+    StaticArray<VkBufferMemoryBarrier2, 12> buffer_barriers;
+    StaticArray<VkImageMemoryBarrier2, 12> image_barriers;
 
 #if defined (RAPTOR_CB_MARKER_DEBUG)
     StaticArray<cstring, 64> markers;

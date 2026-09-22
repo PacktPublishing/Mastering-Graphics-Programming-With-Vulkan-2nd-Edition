@@ -165,7 +165,7 @@ namespace chapter4 {
             depth_prepass_shader = renderer->create_shader_state( {
                 .stages = {
                     {
-                        .source_file_path = "glsl/chapter4/mesh_depth.glsl",
+                        .source = { .glsl = "glsl/chapter4/mesh_depth.glsl" },
                         .headers = {
                             "glsl/platform.h", "glsl/chapter4/scene_mesh_data.h"
                         },
@@ -173,7 +173,7 @@ namespace chapter4 {
                     },
                 },
                 .name = "depth_prepass" },
-                "depth_prepass", &depth_prepass_reflection );
+                "depth_prepass", ShaderLanguage::Glsl, &depth_prepass_reflection );
 
             pipeline_layout = renderer->create_pipeline_layout( depth_prepass_reflection );
 
@@ -326,7 +326,7 @@ namespace chapter4 {
             gbuffer_shader = renderer->create_shader_state( {
                 .stages = {
                     {
-                        .source_file_path = "glsl/chapter4/mesh_gbuffer.glsl",
+                        .source = { .glsl = "glsl/chapter4/mesh_gbuffer.glsl" },
                         .headers = {
                             "glsl/platform.h",
                             "glsl/chapter4/common.h",
@@ -335,7 +335,7 @@ namespace chapter4 {
                         .type = VK_SHADER_STAGE_VERTEX_BIT,
                     },
                     {
-                        .source_file_path = "glsl/chapter4/mesh_gbuffer.glsl",
+                        .source = { .glsl = "glsl/chapter4/mesh_gbuffer.glsl" },
                         .headers = {
                             "glsl/platform.h",
                             "glsl/chapter4/common.h",
@@ -345,7 +345,7 @@ namespace chapter4 {
                     },
                 },
                 .name = "gbuffer" },
-                "gbuffer", &gbuffer_reflection );
+                "gbuffer", ShaderLanguage::Glsl, &gbuffer_reflection );
 
             pipeline_layout = renderer->create_pipeline_layout( gbuffer_reflection );
 
@@ -504,7 +504,7 @@ namespace chapter4 {
             pbr_lighting_shader = renderer->create_shader_state( {
                 .stages = {
                     {
-                        .source_file_path = "glsl/chapter4/post_pbr_lighting.glsl",
+                        .source = { .glsl = "glsl/chapter4/post_pbr_lighting.glsl" },
                         .headers = {
                             "glsl/platform.h",
                             "glsl/chapter4/common.h",
@@ -512,7 +512,7 @@ namespace chapter4 {
                         .type = VK_SHADER_STAGE_VERTEX_BIT,
                     },
                     {
-                        .source_file_path = "glsl/chapter4/post_pbr_lighting.glsl",
+                        .source = { .glsl = "glsl/chapter4/post_pbr_lighting.glsl" },
                         .headers = {
                             "glsl/platform.h",
                             "glsl/chapter4/common.h",
@@ -521,7 +521,7 @@ namespace chapter4 {
                     },
                 },
                 .name = "pbr_lighting" },
-                "pbr_lighting", &pbr_lighting_reflection );
+                "pbr_lighting", ShaderLanguage::Glsl, &pbr_lighting_reflection );
 
             pipeline_layout = renderer->create_pipeline_layout( pbr_lighting_reflection );
             PipelineCreation pbr_lighting_creation = {
@@ -690,7 +690,7 @@ namespace chapter4 {
             transparent_shader = renderer->create_shader_state( {
                 .stages = {
                     {
-                        .source_file_path = "glsl/chapter4/mesh_transparent.glsl",
+                        .source = { .glsl = "glsl/chapter4/mesh_transparent.glsl" },
                         .headers = {
                             "glsl/platform.h",
                             "glsl/chapter4/common.h",
@@ -699,7 +699,7 @@ namespace chapter4 {
                         .type = VK_SHADER_STAGE_VERTEX_BIT,
                     },
                     {
-                        .source_file_path = "glsl/chapter4/mesh_transparent.glsl",
+                        .source = { .glsl = "glsl/chapter4/mesh_transparent.glsl" },
                         .headers = {
                             "glsl/platform.h",
                             "glsl/chapter4/common.h",
@@ -709,7 +709,7 @@ namespace chapter4 {
                     },
                 },
                 .name = "transparent" },
-                "transparent", &transparent_reflection );
+                "transparent", ShaderLanguage::Glsl, &transparent_reflection );
 
             pipeline_layout = renderer->create_pipeline_layout( transparent_reflection );
             PipelineCreation transparent_creation = {
@@ -953,7 +953,7 @@ namespace chapter4 {
             bloom_downsample_shader = renderer->create_shader_state( {
                 .stages = {
                     {
-                        .source_file_path = "glsl/chapter4/post_bloom.glsl",
+                        .source = { .glsl = "glsl/chapter4/post_bloom.glsl" },
                         .headers = {
                             "glsl/platform.h"
                         },
@@ -961,12 +961,12 @@ namespace chapter4 {
                     }
                 },
                 .name = "bloom_downsample" },
-                "bloom_downsample", &shader_reflection );
+                "bloom_downsample", ShaderLanguage::Glsl, &shader_reflection );
 
             bloom_upsample_shader = renderer->create_shader_state( {
                 .stages = {
                     {
-                        .source_file_path = "glsl/chapter4/post_bloom.glsl",
+                        .source = { .glsl = "glsl/chapter4/post_bloom.glsl" },
                         .headers = {
                             "glsl/platform.h"
                         },
@@ -974,7 +974,7 @@ namespace chapter4 {
                     }
                 },
                 .name = "bloom_upsample" },
-                "bloom_upsample", &shader_reflection );
+                "bloom_upsample", ShaderLanguage::Glsl, &shader_reflection );
 
             pipeline_layout = renderer->create_pipeline_layout( shader_reflection );
             PipelineCreation pipeline_creation = {
@@ -1190,11 +1190,18 @@ namespace chapter4 {
             u32 mip_levels = calculate_mip_levels( gpu.swapchain_width / 2, gpu.swapchain_height / 2 );
 
             // Create image
-            ImageCreation image_creation{ };
-            image_creation.set_format_type( VK_FORMAT_R16G16B16A16_SFLOAT, TextureType::Enum::Texture2D )
-                .set_flags( TextureFlags::Compute_mask )
-                .set_size( gpu.swapchain_width / 2, gpu.swapchain_height / 2, 1 )
-                .set_name( "bloom" ).set_mips( mip_levels );
+            ImageCreation image_creation{
+                .image_type      = VK_IMAGE_TYPE_2D,
+                .format          = VK_FORMAT_R16G16B16A16_SFLOAT,
+                .width           = ( u32 )( gpu.swapchain_width / 2 ),
+                .height          = ( u32 )( gpu.swapchain_height / 2 ),
+                .depth           = 1,
+                .mip_level_count = mip_levels,
+                .usage           = VK_IMAGE_USAGE_SAMPLED_BIT |
+                                   VK_IMAGE_USAGE_STORAGE_BIT |
+                                   VK_IMAGE_USAGE_TRANSFER_DST_BIT |
+                                   VK_IMAGE_USAGE_TRANSFER_SRC_BIT,
+                .name            = "bloom" };
 
             bloom_image = gpu.create_image( image_creation );
 
@@ -1305,7 +1312,7 @@ int main( int argc, char** argv ) {
     imgui->init( &imgui_config );
 
     GameCamera game_camera;
-    game_camera.camera.init_perpective( 0.1f, 1000.f, 60.f, wconf.width * 1.f / wconf.height );
+    game_camera.camera.init_perpective( 0.1f, 100.f, 60.f, wconf.width * 1.f / wconf.height );
     game_camera.init( true, 20.f, 6.f, 0.1f );
 
     time_service_init();

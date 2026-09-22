@@ -223,9 +223,18 @@ TextureResource* Renderer::create_texture_from_file( cstring full_filename, bool
 
 
     // Create texture
-    ImageCreation tc;
-    tc.set_data( nullptr ).set_format_type( VK_FORMAT_R8G8B8A8_UNORM, TextureType::Texture2D ).set_flags( 0 )
-      .set_size( ( u16 )width, ( u16 )height, 1 ).set_name( path ).set_mips( mip_levels );
+    ImageCreation tc{
+        .image_type      = VK_IMAGE_TYPE_2D,
+        .format          = VK_FORMAT_R8G8B8A8_UNORM,
+        .width           = ( u32 )width,
+        .height          = ( u32 )height,
+        .depth           = 1,
+        .mip_level_count = mip_levels,
+        .usage           = VK_IMAGE_USAGE_SAMPLED_BIT |
+                           VK_IMAGE_USAGE_TRANSFER_DST_BIT |
+                           VK_IMAGE_USAGE_TRANSFER_SRC_BIT,
+        .initial_data    = nullptr,
+        .name            = path };
     TextureResource* tr = create_texture( tc );
     // Request async loading
     async_loader->request_texture_load_from_file( path, tr->image );
@@ -251,34 +260,180 @@ SamplerResource* Renderer::create_sampler( const SamplerCreation& creation ) {
     return nullptr;
 }
 
-bool Renderer::create_graphics_pipeline_state( const ShaderCompilationCreation& shader_creation,
-                                               const PipelineCreation& pipeline_creation, cstring name,
-                                               FrameGraph* frame_graph,
-                                               GraphicsPipelineState& out_pipeline_state ) {
+static const DescriptorSetReflection* find_descriptor_set( const ShaderReflection& reflection, u32 set_index ) {
 
-    ShaderReflection shader_reflection;
+    for ( u32 s = 0; s < reflection.sets.size; ++s ) {
+        if ( reflection.sets[ s ].set_index == set_index ) {
+            return &reflection.sets[ s ];
+        }
+    }
 
-    out_pipeline_state.shader = create_shader_state( shader_creation, name, &shader_reflection );
-    if ( out_pipeline_state.shader.is_invalid() ) {
+    return nullptr;
+}
+
+static u32 compare_shader_reflections( const ShaderReflection& glsl, const ShaderReflection& slang,
+                                       cstring technique_name, cstring pipeline_name ) {
+
+    u32 structural = 0;
+
+    if ( glsl.push_constants_stride != slang.push_constants_stride ) {
+        rprint( "[reference] %s/%s: push constant stride %u (glsl) vs %u (slang)\n",
+                technique_name, pipeline_name, glsl.push_constants_stride, slang.push_constants_stride );
+        ++structural;
+    }
+
+    if ( glsl.sets.size != slang.sets.size ) {
+        rprint( "[reference] %s/%s: %u descriptor set (glsl) vs %u (slang)\n", 
+                technique_name, pipeline_name, glsl.sets.size, slang.sets.size );
+        ++structural;
+    }
+
+    for ( u32 s = 0; s < glsl.sets.size; ++s ) {
+
+        const DescriptorSetReflection& glsl_set = glsl.sets[ s ];
+        const DescriptorSetReflection* slang_set = find_descriptor_set( slang, glsl_set.set_index );
+
+        if ( slang_set == nullptr ) {
+            rprint( "[reference] %s/%s: set %u present in glsl, missing in slang\n",
+                    technique_name, pipeline_name, glsl_set.set_index );
+            ++structural;
+            continue;
+        }
+
+        if ( glsl_set.bindings.size != slang_set->bindings.size ) {
+            rprint( "[reference] %s/%s: set %u has %u bindings (glsl) vs %u (slang)\n",
+                    technique_name, pipeline_name, glsl_set.set_index, glsl_set.bindings.size, slang_set->bindings.size );
+            ++structural;
+        }
+
+        // Bindings are already sorted by index at the end of create_shader_state.
+        const u32 count = glsl_set.bindings.size < slang_set->bindings.size ? glsl_set.bindings.size : slang_set->bindings.size;
+
+        for ( u32 b = 0; b < count; ++b ) {
+
+            const DescriptorBinding2& glsl_binding = glsl_set.bindings[ b ];
+            const DescriptorBinding2& slang_binding = slang_set->bindings[ b ];
+
+            if ( glsl_binding.index != slang_binding.index || glsl_binding.type != slang_binding.type ||
+                 glsl_binding.count != slang_binding.count ) {
+
+                rprint( "[reference] %s/%s: set %u, binding %u of %u: glsl (index %u, type %u, count %u) '%s' "
+                        "vs slang (index %u, type %u, count %u) '%s'\n",
+                        technique_name, pipeline_name, glsl_set.set_index, b, count,
+                        glsl_binding.index, ( u32 )glsl_binding.type, glsl_binding.count,
+                        glsl_binding.name ? glsl_binding.name : "?",
+                        slang_binding.index, ( u32 )slang_binding.type, slang_binding.count,
+                        slang_binding.name ? slang_binding.name : "?" );
+                ++structural;
+                continue;
+            }
+
+            const bool same_name = glsl_binding.name && slang_binding.name && strcmp( glsl_binding.name, slang_binding.name ) == 0;
+            if ( !same_name ) {
+                rprint( "[reference] %s/%s: set %u binding %u is called '%s' in glsl and '%s' in slang. "
+                        "The binding is fine, but lookup by name only sees the glsl one.\n",
+                        technique_name, pipeline_name, glsl_set.set_index, glsl_binding.index,
+                        glsl_binding.name ? glsl_binding.name : "?",
+                        slang_binding.name ? slang_binding.name : "?" );
+            }
+        }
+    }
+
+    return structural;
+}
+
+template <typename Tag>
+static bool reference_pair_matches( const PipelineState<Tag>& state, const ShaderReflection* reflections,
+                                    cstring technique_name, cstring pipeline_name ) {
+
+    const u32 glsl_index = ( u32 )ShaderLanguage::Glsl;
+    const u32 slang_index = ( u32 )ShaderLanguage::Slang;
+
+    if ( state.pipelines.variants[ glsl_index ].pipeline.is_invalid() ||
+         state.pipelines.variants[ slang_index ].pipeline.is_invalid() ) {
+        return true;
+    }
+
+    const u32 differences = compare_shader_reflections( reflections[ glsl_index ], reflections[ slang_index ],
+                                                        technique_name, pipeline_name );
+    if ( differences == 0 ) {
+        return true;
+    }
+
+    RASSERTM( false, "Reflection divergence between glsl and slang for '%s': not a reference.", technique_name );
+    return false;
+}
+
+static bool create_pipeline_state_variant( Renderer* renderer, const ShaderCompilationCreation& shader_creation,
+                                           const PipelineCreation& pipeline_creation, cstring name,
+                                           FrameGraph* frame_graph, bool compute_node,
+                                           ShaderLanguage language, PipelineVariant& out_variant,
+                                           ShaderReflection& out_shader_reflection ) {
+
+    out_variant.shader = renderer->create_shader_state( shader_creation, name, language, &out_shader_reflection );
+
+    if ( out_variant.shader.is_invalid() ) {
         rprint( "Error creating shader state %s\n", name );
         return false;
     }
 
-    out_pipeline_state.layout = create_pipeline_layout( shader_reflection );
-    if ( out_pipeline_state.layout.is_invalid() ) {
+    out_variant.layout = renderer->create_pipeline_layout( out_shader_reflection );
+    if ( out_variant.layout.is_invalid() ) {
         rprint( "Error creating pipeline layout %s\n", name );
         return false;
     }
 
     PipelineCreation pipeline_creation_write = pipeline_creation;
-    pipeline_creation_write.shader = out_pipeline_state.shader;
-    pipeline_creation_write.layout = out_pipeline_state.layout;
+    pipeline_creation_write.shader = out_variant.shader;
+    pipeline_creation_write.layout = out_variant.layout;
 
-    frame_graph->cache_render_pass_output( pipeline_creation_write.render_pass_name, gpu, pipeline_creation_write.render_pass_output, false );
-    out_pipeline_state.pipeline = create_pipeline( shader_reflection, pipeline_creation_write );
+    frame_graph->cache_render_pass_output( pipeline_creation_write.render_pass_name, renderer->gpu, pipeline_creation_write.render_pass_output, compute_node );
+    out_variant.pipeline = renderer->create_pipeline( out_shader_reflection, pipeline_creation_write, language );
 
-    if ( out_pipeline_state.pipeline.is_invalid() ) {
+    if ( out_variant.pipeline.is_invalid() ) {
         rprint( "Error creating pipeline %s\n", name );
+        // Remove pipeline from cache
+        if ( pipeline_creation_write.name != nullptr ) {
+            renderer->resource_cache.pipelines.remove( hash_calculate( pipeline_creation_write.name ) );
+        }
+
+        return false;
+    }
+
+    return true;
+}
+
+bool Renderer::create_graphics_pipeline_state( const ShaderCompilationCreation& shader_creation,
+                                               const PipelineCreation& pipeline_creation, cstring name,
+                                               FrameGraph* frame_graph,
+                                               GraphicsPipelineState& out_pipeline_state ) {
+
+    out_pipeline_state.name = pipeline_creation.name;
+
+    ShaderReflection shader_reflections[ ( u32 )ShaderLanguage::Count ];
+
+    for ( u32 l = 0; l < ( u32 )ShaderLanguage::Count; ++l ) {
+
+        const ShaderLanguage language = ( ShaderLanguage )l;
+
+        // A missing language is not an error for now.
+        if ( !shader_creation.has( language ) ) {
+            continue;
+        }
+
+        if ( !create_pipeline_state_variant( this, shader_creation, pipeline_creation, name, frame_graph,
+                                             false, language, out_pipeline_state.pipelines.variants[ l ],
+                                             shader_reflections[ l ] ) ) {
+            return false;
+        }
+    }
+
+    if ( !out_pipeline_state.pipelines.is_valid() ) {
+        rprint( "Error: no shader source declared for pipeline %s\n", name );
+        return false;
+    }
+
+    if ( !reference_pair_matches( out_pipeline_state, shader_reflections, name, pipeline_creation.name ) ) {
         return false;
     }
 
@@ -288,29 +443,32 @@ bool Renderer::create_graphics_pipeline_state( const ShaderCompilationCreation& 
 bool Renderer::create_compute_pipeline_state( const ShaderCompilationCreation& shader_creation,
                                               const PipelineCreation& pipeline_creation, cstring name,
                                               FrameGraph* frame_graph, ComputePipelineState& out_pipeline_state ) {
-    ShaderReflection shader_reflection;
+    out_pipeline_state.name = pipeline_creation.name;
 
-    out_pipeline_state.shader = create_shader_state( shader_creation, name, &shader_reflection );
-    if ( out_pipeline_state.shader.is_invalid() ) {
-        rprint( "Error creating shader state %s\n", name );
+    ShaderReflection shader_reflections[ ( u32 )ShaderLanguage::Count ];
+
+    for ( u32 l = 0; l < ( u32 )ShaderLanguage::Count; ++l ) {
+
+        const ShaderLanguage language = ( ShaderLanguage )l;
+
+        // A missing language is not an error for now.
+        if ( !shader_creation.has( language ) ) {
+            continue;
+        }
+
+        if ( !create_pipeline_state_variant( this, shader_creation, pipeline_creation, name, frame_graph,
+                                             true, language, out_pipeline_state.pipelines.variants[ l ],
+                                             shader_reflections[ l ] ) ) {
+            return false;
+        }
+    }
+
+    if ( !out_pipeline_state.pipelines.is_valid() ) {
+        rprint( "Error: no shader source declared for pipeline %s\n", name );
         return false;
     }
 
-    out_pipeline_state.layout = create_pipeline_layout( shader_reflection );
-    if ( out_pipeline_state.layout.is_invalid() ) {
-        rprint( "Error creating pipeline layout %s\n", name );
-        return false;
-    }
-
-    PipelineCreation pipeline_creation_write = pipeline_creation;
-    pipeline_creation_write.shader = out_pipeline_state.shader;
-    pipeline_creation_write.layout = out_pipeline_state.layout;
-
-    frame_graph->cache_render_pass_output( pipeline_creation_write.render_pass_name, gpu, pipeline_creation_write.render_pass_output, true );
-    out_pipeline_state.pipeline = create_pipeline( shader_reflection, pipeline_creation_write );
-
-    if ( out_pipeline_state.pipeline.is_invalid() ) {
-        rprint( "Error creating pipeline %s\n", name );
+    if ( !reference_pair_matches( out_pipeline_state, shader_reflections, name, pipeline_creation.name ) ) {
         return false;
     }
 
@@ -319,37 +477,40 @@ bool Renderer::create_compute_pipeline_state( const ShaderCompilationCreation& s
 
 bool Renderer::create_raytracing_pipeline_state( const ShaderCompilationCreation& shader_creation, const PipelineCreation& pipeline_creation, cstring name, FrameGraph* frame_graph, RayTracingPipelineState& out_pipeline_state ) {
     
-    ShaderReflection shader_reflection;
+    out_pipeline_state.name = pipeline_creation.name;
 
-    out_pipeline_state.shader = create_shader_state( shader_creation, name, &shader_reflection );
-    if ( out_pipeline_state.shader.is_invalid() ) {
-        rprint( "Error creating shader state %s\n", name );
+    ShaderReflection shader_reflections[ ( u32 )ShaderLanguage::Count ];
+
+    for ( u32 l = 0; l < ( u32 )ShaderLanguage::Count; ++l ) {
+
+        const ShaderLanguage language = ( ShaderLanguage )l;
+
+        // A missing language is not an error for now.
+        if ( !shader_creation.has( language ) ) {
+            continue;
+        }
+
+        if ( !create_pipeline_state_variant( this, shader_creation, pipeline_creation, name, frame_graph,
+                                             true, language, out_pipeline_state.pipelines.variants[ l ],
+                                             shader_reflections[ l ] ) ) {
+            return false;
+        }
+    }
+
+    if ( !out_pipeline_state.pipelines.is_valid() ) {
+        rprint( "Error: no shader source declared for pipeline %s\n", name );
         return false;
     }
 
-    out_pipeline_state.layout = create_pipeline_layout( shader_reflection );
-    if ( out_pipeline_state.layout.is_invalid() ) {
-        rprint( "Error creating pipeline layout %s\n", name );
-        return false;
-    }
-
-    PipelineCreation pipeline_creation_write = pipeline_creation;
-    pipeline_creation_write.shader = out_pipeline_state.shader;
-    pipeline_creation_write.layout = out_pipeline_state.layout;
-
-    frame_graph->cache_render_pass_output( pipeline_creation_write.render_pass_name, gpu, pipeline_creation_write.render_pass_output, true );
-    out_pipeline_state.pipeline = create_pipeline( shader_reflection, pipeline_creation_write );
-
-    if ( out_pipeline_state.pipeline.is_invalid() ) {
-        rprint( "Error creating pipeline %s\n", name );
+    if ( !reference_pair_matches( out_pipeline_state, shader_reflections, name, pipeline_creation.name ) ) {
         return false;
     }
 
     return true;
 }
 
-ShaderStateHandle Renderer::create_shader_state( const ShaderCompilationCreation& creation,
-                                                 cstring technique_name, ShaderReflection* out_reflection ) {
+ShaderStateHandle Renderer::create_shader_state( const ShaderCompilationCreation& creation, cstring technique_name,
+                                                 ShaderLanguage language, ShaderReflection* out_reflection ) {
 
     ArenaScope marker( &temporary_allocator );
 
@@ -384,7 +545,7 @@ ShaderStateHandle Renderer::create_shader_state( const ShaderCompilationCreation
         shader_code_buffer.data[ 0 ] = 0;
 
         if ( shader_compilation_stage.source_code.size == 0 ) {
-            ShaderCompiler::read_source_from_file_and_add_hashes( shader_compilation_stage, shader_code_buffer, &temporary_allocator );
+            ShaderCompiler::read_source_from_file_and_add_hashes( shader_compilation_stage, language, shader_code_buffer, &temporary_allocator );
         }
         else if ( shader_compilation_stage.shader_file_hashes.size == 0 ) {
             ShaderCompiler::calculate_shader_hash( shader_compilation_stage );
@@ -396,7 +557,7 @@ ShaderStateHandle Renderer::create_shader_state( const ShaderCompilationCreation
         bool result = ShaderCompiler::compile_and_cache_shader( shader_compilation_stage, spirv_bytecode, resource_cache.binary_data_folder,
                                                                 &temporary_allocator, technique_name,
                                                                 shader_compilation.name.data, out_reflection, ssc.names_buffer,
-                                                                use_cache, shader_compilation.slang_input, false, shader_changed );
+                                                                use_cache, language, false, shader_changed );
         if ( !result ) {
             valid = false;
             break;
@@ -519,7 +680,7 @@ PipelineLayoutHandle Renderer::create_pipeline_layout( const ShaderReflection& r
     return pipeline_layout;
 }
 
-PipelineHandle Renderer::create_pipeline( const ShaderReflection& reflection, PipelineCreation& creation ) {
+PipelineHandle Renderer::create_pipeline( const ShaderReflection& reflection, PipelineCreation& creation, ShaderLanguage language ) {
 
     RASSERT( creation.layout.is_valid() );
     RASSERT( creation.shader.is_valid() );
@@ -544,7 +705,18 @@ PipelineHandle Renderer::create_pipeline( const ShaderReflection& reflection, Pi
     PipelineHandle pipeline = gpu->create_pipeline( creation );
 
     if ( creation.name != nullptr ) {
-        resource_cache.pipelines.insert( hash_calculate( creation.name ), pipeline );
+
+        // One entry per logical shader, with the language as index inside the variant.
+        const u64 name_hash = hash_calculate( creation.name );
+
+        PipelineVariants variants = {};
+        FlatHashMapIterator it = resource_cache.pipelines.find( name_hash );
+        if ( it.is_valid() ) {
+            variants = resource_cache.pipelines.get( it );
+        }
+
+        variants.variants[ ( u32 )language ] = { creation.shader, creation.layout, pipeline };
+        resource_cache.pipelines.insert( name_hash, variants );
     }
 
     return pipeline;
@@ -898,49 +1070,39 @@ void Renderer::destroy_sampler( SamplerResource* sampler ) {
     samplers.release( sampler );
 }
 
+template <typename Tag>
+static void destroy_pipeline_state( Renderer* renderer, PipelineState<Tag>& state ) {
+
+    for ( u32 l = 0; l < ( u32 )ShaderLanguage::Count; ++l ) {
+        PipelineVariant& variant = state.pipelines.variants[ l ];
+
+        if ( variant.shader.is_valid() ) {
+            renderer->destroy_shader_state( variant.shader );
+        }
+
+        if ( variant.layout.is_valid() ) {
+            renderer->gpu->destroy_pipeline_layout( variant.layout );
+        }
+
+        if ( variant.pipeline.is_valid() ) {
+            renderer->gpu->destroy_pipeline( variant.pipeline );
+        }
+    }
+}
+
 void Renderer::destroy_graphics_pipeline_state( GraphicsPipelineState& state ) {
 
-    if ( state.shader.is_valid() ) {
-        destroy_shader_state( state.shader );
-    }
-
-    if ( state.layout.is_valid() ) {
-        gpu->destroy_pipeline_layout( state.layout );
-    }
-
-    if ( state.pipeline.is_valid() ) {
-        gpu->destroy_pipeline( state.pipeline );
-    }
+    destroy_pipeline_state( this, state );
 }
 
 void Renderer::destroy_compute_pipeline_state( ComputePipelineState& state ) {
 
-    if ( state.shader.is_valid() ) {
-        destroy_shader_state( state.shader );
-    }
-
-    if ( state.layout.is_valid() ) {
-        gpu->destroy_pipeline_layout( state.layout );
-    }
-
-    if ( state.pipeline.is_valid() ) {
-        gpu->destroy_pipeline( state.pipeline );
-    }
+    destroy_pipeline_state( this, state );
 }
 
 void Renderer::destroy_ray_tracing_pipeline_state( RayTracingPipelineState& state ) {
 
-    if ( state.shader.is_valid() ) {
-        destroy_shader_state( state.shader );
-    }
-
-    if ( state.layout.is_valid() ) {
-        gpu->destroy_pipeline_layout( state.layout );
-    }
-
-    if ( state.pipeline.is_valid() ) {
-        gpu->destroy_pipeline( state.pipeline );
-    }
+    destroy_pipeline_state( this, state );
 }
 
 void Renderer::destroy_shader_state( ShaderStateHandle shader_state ) {
@@ -1209,8 +1371,14 @@ void ResourceCache::shutdown( Renderer* renderer ) {
     it = pipelines.iterator_begin();
 
     while ( it.is_valid() ) {
-        raptor::PipelineHandle pipeline_handle = pipelines.get( it );
-        renderer->gpu->destroy_pipeline( pipeline_handle );
+        const raptor::PipelineVariants& variants = pipelines.get( it );
+
+        for ( u32 l = 0; l < ( u32 )raptor::ShaderLanguage::Count; ++l ) {
+            const raptor::PipelineHandle pipeline_handle = variants.variants[ l ].pipeline;
+            if ( pipeline_handle.is_valid() ) {
+                renderer->gpu->destroy_pipeline( pipeline_handle );
+            }
+        }
 
         pipelines.iterator_advance( it );
     }
@@ -1296,6 +1464,38 @@ void ImageViewDebugger::debug_ui() {
 
 
 // GraphicsPipelineTransaction ///////////////////////////////////////////
+
+template <typename Tag, u32 Capacity>
+static void rollback_pipeline_transaction( Renderer* renderer,
+                                           StaticArray<PipelineState<Tag>*, Capacity>& current_states,
+                                           StaticArray<PipelineState<Tag>, Capacity>& pending_states ) {
+
+    for ( u32 i = 0; i < pending_states.size; i++ ) {
+
+        PipelineState<Tag>& pending = pending_states[ i ];
+
+        destroy_pipeline_state( renderer, pending );
+
+        if ( pending.name == nullptr ) {
+            continue;
+        }
+
+        const u64 name_hash = hash_calculate( pending.name );
+
+        if ( ( i < current_states.size ) && current_states[ i ]->pipelines.is_valid() ) {
+            // Restore the previous pipeline state in the cache if it was valid.
+            renderer->resource_cache.pipelines.insert( name_hash, current_states[ i ]->pipelines );
+        } else {
+            // Remove the pipeline from the cache if there was no valid previous state.
+            renderer->resource_cache.pipelines.remove( name_hash );
+        }
+    }
+
+    pending_states.clear();
+    current_states.clear();
+}
+
+
 GraphicsPipelineTransaction::GraphicsPipelineTransaction( Renderer* renderer_ ) {
     renderer = renderer_;
 }
@@ -1305,12 +1505,7 @@ GraphicsPipelineTransaction::~GraphicsPipelineTransaction() {
         return;
     }
 
-    for ( u32 i = 0; i < pending_states.size; i++ ) {
-        renderer->destroy_graphics_pipeline_state( pending_states[ i ] );
-    }
-
-    pending_states.clear();
-    current_states.clear();
+    rollback_pipeline_transaction( renderer, current_states, pending_states );
 }
 
 GraphicsPipelineState& GraphicsPipelineTransaction::add( GraphicsPipelineState& current ) {
@@ -1329,9 +1524,25 @@ void GraphicsPipelineTransaction::commit_or_rollback() {
     // Check for invalid handles, return if found one
     for ( u32 i = 0; i < pending_states.size; i++ ) {
         GraphicsPipelineState& p = pending_states[ i ];
-
-        if ( p.shader.is_invalid() || p.layout.is_invalid() || p.pipeline.is_invalid() ) {
+        if ( !p.pipelines.is_valid() ) {
+            rprint( "Pipeline transaction rolled back on '%s': no valid variant. None of the %u pipelines in this transaction will be updated.\n",
+                    p.name ? p.name : "<unnamed>", pending_states.size );
             return;
+        }
+
+        for ( u32 l = 0; l < ( u32 )ShaderLanguage::Count; ++l ) {
+
+            const PipelineVariant& variant = p.pipelines.variants[ l ];
+            if ( variant.pipeline.is_invalid() ) {
+                continue;
+            }
+
+            if ( variant.shader.is_invalid() || variant.layout.is_invalid() ) {
+                rprint( "Pipeline transaction rolled back on '%s': the %s variant is half built. None of the %u pipelines in this transaction will be updated.\n",
+                        p.name ? p.name : "<unnamed>", to_shader_language_name( ( ShaderLanguage )l ),
+                        pending_states.size );
+                return;
+            }
         }
     }
 
@@ -1358,12 +1569,7 @@ ComputePipelineTransaction::~ComputePipelineTransaction() {
         return;
     }
 
-    for ( u32 i = 0; i < pending_states.size; i++ ) {
-        renderer->destroy_compute_pipeline_state( pending_states[ i ] );
-    }
-
-    pending_states.clear();
-    current_states.clear();
+    rollback_pipeline_transaction( renderer, current_states, pending_states );
 }
 
 ComputePipelineState& ComputePipelineTransaction::add( ComputePipelineState& current ) {
@@ -1382,9 +1588,25 @@ void ComputePipelineTransaction::commit_or_rollback() {
     // Check for invalid handles, return if found one
     for ( u32 i = 0; i < pending_states.size; i++ ) {
         ComputePipelineState& p = pending_states[ i ];
-
-        if ( p.shader.is_invalid() || p.layout.is_invalid() || p.pipeline.is_invalid() ) {
+        if ( !p.pipelines.is_valid() ) {
+            rprint( "Pipeline transaction rolled back on '%s': no valid variant. None of the %u pipelines in this transaction will be updated.\n",
+                    p.name ? p.name : "<unnamed>", pending_states.size );
             return;
+        }
+
+        for ( u32 l = 0; l < ( u32 )ShaderLanguage::Count; ++l ) {
+
+            const PipelineVariant& variant = p.pipelines.variants[ l ];
+            if ( variant.pipeline.is_invalid() ) {
+                continue;
+            }
+
+            if ( variant.shader.is_invalid() || variant.layout.is_invalid() ) {
+                rprint( "Pipeline transaction rolled back on '%s': the %s variant is half built. None of the %u pipelines in this transaction will be updated.\n",
+                        p.name ? p.name : "<unnamed>", to_shader_language_name( ( ShaderLanguage )l ),
+                        pending_states.size );
+                return;
+            }
         }
     }
 
@@ -1410,11 +1632,8 @@ RayTracingPipelineTransaction::~RayTracingPipelineTransaction() {
     if ( committed ) {
         return;
     }
-    for ( u32 i = 0; i < pending_states.size; i++ ) {
-        renderer->destroy_ray_tracing_pipeline_state( pending_states[ i ] );
-    }
-    pending_states.clear();
-    current_states.clear();
+
+    rollback_pipeline_transaction( renderer, current_states, pending_states );
 }
 
 RayTracingPipelineState& RayTracingPipelineTransaction::add( RayTracingPipelineState& current ) {
@@ -1432,9 +1651,25 @@ void RayTracingPipelineTransaction::commit_or_rollback() {
     // Check for invalid handles, return if found one
     for ( u32 i = 0; i < pending_states.size; i++ ) {
         RayTracingPipelineState& p = pending_states[ i ];
-
-        if ( p.shader.is_invalid() || p.layout.is_invalid() || p.pipeline.is_invalid() ) {
+        if ( !p.pipelines.is_valid() ) {
+            rprint( "Pipeline transaction rolled back on '%s': no valid variant. None of the %u pipelines in this transaction will be updated.\n",
+                    p.name ? p.name : "<unnamed>", pending_states.size );
             return;
+        }
+
+        for ( u32 l = 0; l < ( u32 )ShaderLanguage::Count; ++l ) {
+
+            const PipelineVariant& variant = p.pipelines.variants[ l ];
+            if ( variant.pipeline.is_invalid() ) {
+                continue;
+            }
+
+            if ( variant.shader.is_invalid() || variant.layout.is_invalid() ) {
+                rprint( "Pipeline transaction rolled back on '%s': the %s variant is half built. None of the %u pipelines in this transaction will be updated.\n",
+                        p.name ? p.name : "<unnamed>", to_shader_language_name( ( ShaderLanguage )l ),
+                        pending_states.size );
+                return;
+            }
         }
     }
 
@@ -1474,6 +1709,32 @@ void ShaderReflectionInfo::dump_bindings() {
     }
 
     rprint( "\n" );
+}
+
+
+// The fallback to Slang is what keeps this working while most pipelines are
+// declared in one language only: without it reference() would hand an invalid
+// handle to get_shader_reflection for every Slang-only pipeline.
+const PipelineVariant& PipelineVariants::active_variant( ShaderLanguage language ) const {
+    const PipelineVariant& wanted = variants[ ( u32 )language ];
+    return wanted.pipeline.is_valid() ? wanted : any_variant();
+}
+
+PipelineHandle PipelineVariants::active( ShaderLanguage language ) const {
+    return active_variant( language ).pipeline;
+}
+
+const PipelineVariant& PipelineVariants::any_variant() const {
+    const PipelineVariant& glsl = variants[ ( u32 )ShaderLanguage::Glsl ];
+    return glsl.pipeline.is_valid() ? glsl : variants[ ( u32 )ShaderLanguage::Slang ];
+}
+
+PipelineHandle PipelineVariants::any() const {
+    return any_variant().pipeline;
+}
+
+bool PipelineVariants::is_valid() const {
+    return any().is_valid();
 }
 
 } // namespace raptor

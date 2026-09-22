@@ -23,7 +23,6 @@ namespace raptor {
         void                    destroy_gpu_resources( FrameGraphResourceContext& context ) override;
 
         GraphicsPipelineState   meshlet_draw_pipeline;
-        GraphicsPipelineState   meshlet_draw_pipeline_slang;
         GraphicsPipelineState   skinning_pipeline;
 
         PipelineHandle          meshlet_emulation_draw_pipeline;
@@ -51,9 +50,6 @@ namespace raptor {
         void                    create_gpu_resources( FrameGraphResourceContext& context ) override;
         void                    destroy_gpu_resources( FrameGraphResourceContext& context ) override;
 
-        // Array<MeshInstanceDraw> mesh_instance_draws;
-        u32                     meshlet_technique_index;
-        u32                     meshlet_technique_slang_index;
     }; // struct LateGBufferPass
 
 

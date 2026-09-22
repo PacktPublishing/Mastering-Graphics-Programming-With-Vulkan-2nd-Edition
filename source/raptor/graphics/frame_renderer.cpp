@@ -286,6 +286,11 @@ void FrameRenderer::upload_gpu_data( GameCamera& game_camera, glm::vec2 last_cli
     RenderScene& render_scene = *scene;
     GpuDevice& gpu = *renderer->gpu;
 
+    // Finalize the current camera after navigation and UI edits.
+    // Start from an unjittered projection every frame.
+    game_camera.camera.update_projection = true;
+    game_camera.camera.update();
+
     // Scene update
     if ( lighting ) {
         lighting->update_scene( *scene, render_config.lighting );
@@ -711,6 +716,7 @@ void DrawTask::ExecuteRange( enki::TaskSetPartition range_, uint32_t threadnum_ 
 
     RenderConfig& render_config = frame_renderer->render_config;
     RenderBlackboard& render_blackboard = frame_renderer->render_blackboard;
+    const ShaderLanguage language = render_config.shader_language();
 
     ImageViewHandle final_image_view = texture->resource_info.texture.image_view;
     if ( render_config.taa.enabled && render_blackboard.taa_output_image_view.is_valid() ) {
@@ -746,9 +752,7 @@ void DrawTask::ExecuteRange( enki::TaskSetPartition range_, uint32_t threadnum_ 
 
     // Apply fullscreen material
 
-    gfx_cb->bind_pipeline( frame_renderer->render_config.use_slang_shaders ?
-                           frame_renderer->post->main_post_pipeline_slang.pipeline :
-                           frame_renderer->post->main_post_pipeline.pipeline );
+    gfx_cb->bind_pipeline( frame_renderer->post->main_post_pipeline.active( language ) );
     gfx_cb->bind_descriptor_set(
         { gpu->bindless_descriptor_set, frame_renderer->post->fullscreen_ds },
         { frame_renderer->post->post_cb_offset } );
@@ -1998,7 +2002,7 @@ void MeshletsRenderingFeature::create_gpu_resources( Renderer* renderer, RenderB
     DescriptorSetBinder descriptors;
 
     GpuCullingRuntimeData& culling = render_blackboard->gpu_culling;
-    PipelineHandle meshlet_cull_pipeline = renderer->resource_cache.pipelines.get( hash_calculate( "gbuffer_culling" ) );
+    PipelineHandle meshlet_cull_pipeline = renderer->resource_cache.pipelines.get( hash_calculate( "gbuffer_culling" ) ).any();
     ShaderReflectionInfo* shader_reflection = renderer->get_shader_reflection( meshlet_cull_pipeline );
 
     for ( u32 i = 0; i < k_max_frames; ++i ) {
@@ -2019,27 +2023,6 @@ void MeshletsRenderingFeature::create_gpu_resources( Renderer* renderer, RenderB
         meshlets.meshlets_late_draw_descriptor_set[ i ] = renderer->create_descriptor_set( descriptors, shader_reflection, meshlet_cull_pipeline, i, *render_blackboard );
     }
 
-    meshlet_cull_pipeline = renderer->resource_cache.pipelines.get( hash_calculate( "gbuffer_culling_slang" ) );
-    shader_reflection = renderer->get_shader_reflection( meshlet_cull_pipeline );
-
-    for ( u32 i = 0; i < k_max_frames; ++i ) {
-
-        descriptors.reset();
-        descriptors.ssbos.push( { culling.meshlet_indirect_early_commands_sb[ i ], 6 } );
-        //descriptors.ssbos.push( { meshlet_indirect_early_count_sb[ i ], 7 } );
-        descriptors.name = "gbuffer_meshlet_early_slang_ds";
-
-        meshlets.meshlets_early_draw_descriptor_set_slang[ i ] = renderer->create_descriptor_set( descriptors, shader_reflection, meshlet_cull_pipeline, i, *render_blackboard );
-
-        descriptors.reset();
-
-        descriptors.ssbos.push( { culling.meshlet_indirect_late_commands_sb[ i ], 6 } );
-        //descriptors.ssbos.push( { meshlet_indirect_late_count_sb[ i ], 7 } );
-        descriptors.name = "gbuffer_meshlet_late_slang_ds";
-
-        meshlets.meshlets_late_draw_descriptor_set_slang[ i ] = renderer->create_descriptor_set( descriptors, shader_reflection, meshlet_cull_pipeline, i, *render_blackboard );
-    }
-
     // TODO:
     //u32 meshlet_emulation_index = meshlet_technique->get_pass_index( "emulation_gbuffer_culling" );
     //GpuTechniquePass& meshlet_emulation_pass = meshlet_technique->passes[ meshlet_emulation_index ];
@@ -2058,7 +2041,7 @@ void MeshletsRenderingFeature::create_gpu_resources( Renderer* renderer, RenderB
     //    render_blackboard.meshlets_emulation_draw_descriptor_set[ i ] = create_descriptor_set( descriptors, meshlet_emulation_pass, meshlet_emulation_layout, i );
     //}
 
-    PipelineHandle meshlet_transparent_pipeline = renderer->resource_cache.pipelines.get( hash_calculate( "transparent_no_cull" ) );
+    PipelineHandle meshlet_transparent_pipeline = renderer->resource_cache.pipelines.get( hash_calculate( "transparent_no_cull" ) ).any();
     shader_reflection = renderer->get_shader_reflection( meshlet_transparent_pipeline );
 
     for ( u32 i = 0; i < k_max_frames; ++i ) {
@@ -2076,15 +2059,13 @@ void MeshletsRenderingFeature::create_gpu_resources( Renderer* renderer, RenderB
     }
 
     if ( scene->skins.size > 0 ) {
-        PipelineHandle skinning_pipeline = renderer->resource_cache.pipelines.get( hash_calculate( "gbuffer_skinning" ) );
+        PipelineHandle skinning_pipeline = renderer->resource_cache.pipelines.get( hash_calculate( "gbuffer_skinning" ) ).any();
         shader_reflection = renderer->get_shader_reflection( skinning_pipeline );
 
         for ( u32 i = 0; i < k_max_frames; ++i ) {
             meshlets.skinning_descriptor_set[ i ].init( renderer->resident_allocator, scene->skins.size, scene->skins.size );
 
             for ( u32 s = 0; s < scene->skins.size; ++s ) {
-                renderer->gpu->destroy_descriptor_set( meshlets.skinning_descriptor_set[ i ][ s ] );
-
                 descriptors.reset();
 
                 descriptors.ssbos.push( { scene->skins[ s ].joint_transforms[ i ], 3 } );
@@ -2116,9 +2097,7 @@ void MeshletsRenderingFeature::destroy_gpu_resources( Renderer* renderer, Render
         gpu->destroy_buffer( meshlets.meshlets_emulation_visible_instances_sb[ i ] );
 
         gpu->destroy_descriptor_set( meshlets.meshlets_early_draw_descriptor_set[ i ] );
-        gpu->destroy_descriptor_set( meshlets.meshlets_early_draw_descriptor_set_slang[ i ] );
         gpu->destroy_descriptor_set( meshlets.meshlets_late_draw_descriptor_set[ i ] );
-        gpu->destroy_descriptor_set( meshlets.meshlets_late_draw_descriptor_set_slang[ i ] );
         gpu->destroy_descriptor_set( meshlets.meshlets_transparent_draw_descriptor_set[ i ] );
         gpu->destroy_descriptor_set( meshlets.meshlets_emulation_draw_descriptor_set[ i ] );
 
@@ -2130,7 +2109,7 @@ void MeshletsRenderingFeature::destroy_gpu_resources( Renderer* renderer, Render
 }
 
 void MeshletsRenderingFeature::on_resize( Renderer* renderer, RenderBlackboard* render_blackboard, u32 new_width, u32 new_height ) {
-    PipelineHandle meshlet_transparent_pipeline = renderer->resource_cache.pipelines.get( hash_calculate( "transparent_no_cull" ) );
+    PipelineHandle meshlet_transparent_pipeline = renderer->resource_cache.pipelines.get( hash_calculate( "transparent_no_cull" ) ).any();
     ShaderReflectionInfo* shader_reflection = renderer->get_shader_reflection( meshlet_transparent_pipeline );
     DescriptorSetBinder descriptors;
 
@@ -2591,7 +2570,7 @@ void LightingRenderingFeature::upload_gpu_data( UploadGpuDataContext& context ) 
             gpu_light.radius = light.radius;
             gpu_light.color = light.color;
             gpu_light.intensity = light.intensity;
-            gpu_light.shadow_mip_level = light.shadow_mip_level;
+            gpu_light.shadow_mip_level = ( f32 )light.shadow_mip_level;
             // NOTE: calculation used to retrieve depth for cubemaps.
             // near = 0.01f as a static value, if you change here change also
             // method vector_to_depth_value in lighting.h in the shaders!
@@ -2654,7 +2633,7 @@ void LightingRenderingFeature::update_scene( RenderScene& scene, LightingRenderC
         config.load_shadow_test_lights_adv = false;
         return;
     }
-    
+
 }
 
 // TODO - integrate
@@ -3074,7 +3053,6 @@ void PostProcessRenderingFeature::update_psos( Renderer* renderer, FrameGraph* f
     if ( phase == PipelineUpdatePhase::Destroy ) {
         renderer->destroy_graphics_pipeline_state( passthrough_pipeline );
         renderer->destroy_graphics_pipeline_state( main_post_pipeline );
-        renderer->destroy_graphics_pipeline_state( main_post_pipeline_slang );
 
         return;
     }
@@ -3082,18 +3060,17 @@ void PostProcessRenderingFeature::update_psos( Renderer* renderer, FrameGraph* f
     GraphicsPipelineTransaction transaction( renderer );
 
     GraphicsPipelineState& new_pipeline = transaction.add( main_post_pipeline );
-    GraphicsPipelineState& new_pipeline_slang = transaction.add( main_post_pipeline_slang );
     GraphicsPipelineState& new_pipeline_pass = transaction.add( passthrough_pipeline );
 
     renderer->create_graphics_pipeline_state(
         {
         .stages = {
             {
-                .source_file_path = "glsl/postprocess.glsl",
+                .source = { .glsl = "glsl/postprocess.glsl" },
                 .type = VK_SHADER_STAGE_VERTEX_BIT,
             },
             {
-                .source_file_path = "glsl/postprocess.glsl",
+                .source = { .glsl = "glsl/postprocess.glsl" },
                 .type = VK_SHADER_STAGE_FRAGMENT_BIT,
             },
         },
@@ -3108,11 +3085,11 @@ void PostProcessRenderingFeature::update_psos( Renderer* renderer, FrameGraph* f
         {
         .stages = {
             {
-                .source_file_path = "glsl/postprocess.glsl",
+                .source = { .glsl = "glsl/postprocess.glsl" },
                 .type = VK_SHADER_STAGE_VERTEX_BIT,
             },
             {
-                .source_file_path = "glsl/postprocess.glsl",
+                .source = { .glsl = "glsl/postprocess.glsl" },
                 .type = VK_SHADER_STAGE_FRAGMENT_BIT,
             },
         },
@@ -3123,31 +3100,12 @@ void PostProcessRenderingFeature::update_psos( Renderer* renderer, FrameGraph* f
         },
         "main_post", frame_graph, new_pipeline );
 
-    renderer->create_graphics_pipeline_state(
-        {
-        .stages = {
-            {
-                .source_file_path = "slang/postprocess.slang",
-                .type = VK_SHADER_STAGE_VERTEX_BIT,
-            },
-            {
-                .source_file_path = "slang/postprocess.slang",
-                .type = VK_SHADER_STAGE_FRAGMENT_BIT,
-            },
-        },
-        .name = "main_post_slang", .slang_input = 1 },
-        {
-            .name = "main_post_slang",
-            .render_pass_name = "swapchain",
-        },
-        "main_post_slang", frame_graph, new_pipeline_slang );
-
     transaction.commit_or_rollback();
 }
 
 void PostProcessRenderingFeature::create_gpu_resources( Renderer* renderer, RenderBlackboard* render_blackboard, FrameGraph* frame_graph ) {
 
-    DescriptorSetLayoutHandle descriptor_set_layout = renderer->gpu->get_descriptor_set_layout( main_post_pipeline.pipeline, k_material_descriptor_set_index );
+    DescriptorSetLayoutHandle descriptor_set_layout = renderer->gpu->get_descriptor_set_layout( main_post_pipeline.any(), k_material_descriptor_set_index );
     fullscreen_ds = renderer->gpu->create_descriptor_set( {
         .dynamic_buffers = {{11, sizeof( GpuPostProcessConstants )}},
         .layout = descriptor_set_layout, .name = "post_process_ds" });
@@ -3283,7 +3241,7 @@ void PointlightShadowsRenderingFeature::upload_gpu_data( UploadGpuDataContext& c
 
         if ( resolutions ) {
             for ( u32 i = 0; i < active_lights; ++i ) {
-                context.scene->lights[ i ].shadow_map_resolution = ( f32 )resolutions[ i ];
+                context.scene->lights[ i ].shadow_map_resolution = resolutions[ i ];
             }
 
             gpu.unmap_buffer( { readback } );

@@ -55,6 +55,8 @@ void TransparentPass::update_psos( FrameGraphResourceContext& context, PipelineU
 }
 
 void TransparentPass::render( FrameGraphRenderContext& context ) {
+    const ShaderLanguage language = context.render_config->shader_language();
+
     if ( !enabled )
         return;
 
@@ -68,7 +70,7 @@ void TransparentPass::render( FrameGraphRenderContext& context ) {
         // TODO:
     } else if ( context.render_config->meshlets.use_meshlets ) {
         gpu_commands->set_depth_bias_enabled( false );
-        gpu_commands->bind_pipeline( meshlet_draw_pipeline.pipeline );
+        gpu_commands->bind_pipeline( meshlet_draw_pipeline.active( language ) );
 
         gpu_commands->bind_descriptor_set(
             { renderer->gpu->bindless_descriptor_set, render_blackboard.meshlets.meshlets_transparent_draw_descriptor_set[ current_frame_index ] },

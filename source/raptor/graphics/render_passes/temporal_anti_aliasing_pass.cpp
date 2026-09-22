@@ -14,12 +14,11 @@ namespace raptor {
 static ShaderCompilationCreation scc_temporal_anti_aliasing = {
     .stages = {
         {
-            .source_file_path = "glsl/temporal_anti_aliasing.glsl",
+            .source = { .glsl = "glsl/temporal_anti_aliasing.glsl" },
             .type = VK_SHADER_STAGE_COMPUTE_BIT,
         },
     },
     .name = "temporal_aa",
-    .slang_input = 0,
 };
 
 void TemporalAntiAliasingPass::declare_frame_graph_node( FrameGraphResourceContext& context ) {
@@ -98,12 +97,17 @@ void TemporalAntiAliasingPass::create_gpu_resources( FrameGraphResourceContext& 
     GpuDevice& gpu = *renderer->gpu;
     RenderBlackboard& render_blackboard = *context.render_blackboard;
 
-    ImageCreation texture_creation;
-    texture_creation.reset()
-        .set_name( "taa_history_texture_0" )
-        .set_size( render_blackboard.swapchain_width, render_blackboard.swapchain_height, 1 )
-        .set_flags( TextureFlags::Compute_mask )
-        .set_format_type( VK_FORMAT_R16G16B16A16_SFLOAT, TextureType::Texture2D );
+    ImageCreation texture_creation{
+        .image_type = VK_IMAGE_TYPE_2D,
+        .format     = VK_FORMAT_R16G16B16A16_SFLOAT,
+        .width      = render_blackboard.swapchain_width,
+        .height     = render_blackboard.swapchain_height,
+        .depth      = 1,
+        .usage      = VK_IMAGE_USAGE_SAMPLED_BIT |
+                      VK_IMAGE_USAGE_STORAGE_BIT |
+                      VK_IMAGE_USAGE_TRANSFER_DST_BIT |
+                      VK_IMAGE_USAGE_TRANSFER_SRC_BIT,
+        .name       = "taa_history_texture_0" };
 
     history_textures[ 0 ] = gpu.create_image( texture_creation );
     history_image_views[ 0 ] = gpu.create_image_view( {
@@ -112,7 +116,7 @@ void TemporalAntiAliasingPass::create_gpu_resources( FrameGraphResourceContext& 
         .sub_resource = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1 },
         .name = "taa_history_texture_view_0" } );
 
-    texture_creation.set_name( "taa_history_texture_1" );
+    texture_creation.name = "taa_history_texture_1";
 
     history_textures[ 1 ] = gpu.create_image( texture_creation );
     history_image_views[ 1 ] = gpu.create_image_view( {
@@ -124,7 +128,7 @@ void TemporalAntiAliasingPass::create_gpu_resources( FrameGraphResourceContext& 
     gpu.add_image_view_to_bindless( history_image_views[ 0 ] );
     gpu.add_image_view_to_bindless( history_image_views[ 1 ] );
 
-    ShaderReflectionInfo* shader_reflection = renderer->get_shader_reflection( taa_pipeline.pipeline );
+    ShaderReflectionInfo* shader_reflection = renderer->get_shader_reflection( taa_pipeline.any() );
 
     DescriptorSetBinder descriptors;
     descriptors.reset();
@@ -136,7 +140,7 @@ void TemporalAntiAliasingPass::create_gpu_resources( FrameGraphResourceContext& 
     descriptors.dynamic_buffers.push( { constants_index, sizeof( GpuTaaConstants ) } );
 
     taa_descriptor_set = renderer->create_descriptor_set( descriptors, shader_reflection, 
-                                                          taa_pipeline.pipeline, 0, *context.render_blackboard );
+                                                          taa_pipeline.any(), 0, *context.render_blackboard );
 
     current_history_texture_index = 0;
     previous_history_texture_index = 1;
@@ -241,6 +245,7 @@ void TemporalAntiAliasingPass::pre_render( FrameGraphRenderContext& context ) {
 }
 
 void TemporalAntiAliasingPass::render( FrameGraphRenderContext& context ) {
+    const ShaderLanguage language = context.render_config->shader_language();
 
     if ( !enabled ) {
         return;
@@ -277,7 +282,7 @@ void TemporalAntiAliasingPass::render( FrameGraphRenderContext& context ) {
 
     cb->flush_barriers();
 
-    cb->bind_pipeline( taa_pipeline.pipeline );
+    cb->bind_pipeline( taa_pipeline.active( language ) );
     cb->bind_descriptor_set(
         { renderer->gpu->bindless_descriptor_set, taa_descriptor_set },
         { render_blackboard.scene_cb_offset, taa_constants_offset } );

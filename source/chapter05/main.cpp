@@ -272,7 +272,7 @@ namespace chapter5 {
             renderer->create_compute_pipeline_state( {
                 .stages = {
                     {
-                        .source_file_path = "glsl/chapter5/post_bloom.glsl",
+                        .source = { .glsl = "glsl/chapter5/post_bloom.glsl" },
                         .type = VK_SHADER_STAGE_COMPUTE_BIT,
                     }
                 },
@@ -286,7 +286,7 @@ namespace chapter5 {
             renderer->create_compute_pipeline_state( {
                 .stages = {
                     {
-                        .source_file_path = "glsl/chapter5/post_bloom.glsl",
+                        .source = { .glsl = "glsl/chapter5/post_bloom.glsl" },
                         .type = VK_SHADER_STAGE_COMPUTE_BIT,
                     }
                 },
@@ -313,6 +313,7 @@ namespace chapter5 {
         };
 
         void post_render( FrameGraphRenderContext& context ) override {
+    const ShaderLanguage language = context.render_config->shader_language();
 
             // Avoid copying first frame as source image is not ready
             Renderer* renderer = context.renderer;
@@ -331,7 +332,7 @@ namespace chapter5 {
             u32 height = bloom_image_data->height;
 
             // Downsample
-            gpu_commands->bind_pipeline( downsample_pipeline.pipeline );
+            gpu_commands->bind_pipeline( downsample_pipeline.active( language ) );
 
             for ( u32 i = 0; i < bloom_image_views.size; i++ ) {
 
@@ -362,7 +363,7 @@ namespace chapter5 {
             }
 
             // Upsample
-            gpu_commands->bind_pipeline( upsample_pipeline.pipeline );
+            gpu_commands->bind_pipeline( upsample_pipeline.active( language ) );
 
             for ( i32 i = bloom_image_views.size - 1; i > 0; i-- ) {
 
@@ -473,7 +474,7 @@ namespace chapter5 {
             FlatHashMapIterator it = renderer->resource_cache.pipelines.find( hash_calculate( "bloom_downsample" ) );
             RASSERT( it.is_valid() );
 
-            PipelineHandle pipeline = renderer->resource_cache.pipelines.get( it );
+            PipelineHandle pipeline = renderer->resource_cache.pipelines.get( it ).any();
             DescriptorSetLayoutHandle layout_handle = gpu.get_descriptor_set_layout( pipeline, k_material_descriptor_set_index );
             ShaderReflectionInfo* reflection_info = renderer->get_shader_reflection( pipeline );
 
@@ -482,11 +483,18 @@ namespace chapter5 {
             u32 mip_levels = calculate_mip_levels( render_blackboard.render_width / 2, render_blackboard.render_height / 2 );
 
             // Create image
-            ImageCreation image_creation{ };
-            image_creation.set_format_type( VK_FORMAT_R16G16B16A16_SFLOAT, TextureType::Enum::Texture2D )
-                .set_flags( TextureFlags::Compute_mask )
-                .set_size( render_blackboard.render_width / 2, render_blackboard.render_height / 2, 1 )
-                .set_name( "bloom" ).set_mips( mip_levels );
+            ImageCreation image_creation{
+                .image_type      = VK_IMAGE_TYPE_2D,
+                .format          = VK_FORMAT_R16G16B16A16_SFLOAT,
+                .width           = ( u32 )( render_blackboard.render_width / 2 ),
+                .height          = ( u32 )( render_blackboard.render_height / 2 ),
+                .depth           = 1,
+                .mip_level_count = mip_levels,
+                .usage           = VK_IMAGE_USAGE_SAMPLED_BIT |
+                                   VK_IMAGE_USAGE_STORAGE_BIT |
+                                   VK_IMAGE_USAGE_TRANSFER_DST_BIT |
+                                   VK_IMAGE_USAGE_TRANSFER_SRC_BIT,
+                .name            = "bloom" };
 
             bloom_image = gpu.create_image( image_creation );
 
@@ -592,7 +600,7 @@ int main( int argc, char** argv ) {
     imgui->init( &imgui_config );
 
     GameCamera game_camera;
-    game_camera.camera.init_perpective( 0.1f, 1000.f, 60.f, wconf.width * 1.f / wconf.height );
+    game_camera.camera.init_perpective( 0.1f, 100.f, 60.f, wconf.width * 1.f / wconf.height );
     game_camera.init( true, 20.f, 6.f, 0.1f );
 
     time_service_init();
@@ -723,7 +731,7 @@ int main( int argc, char** argv ) {
         FlatHashMapIterator it = renderer.resource_cache.pipelines.find( hash_calculate( "gbuffer_culling" ) );
         RASSERT( it.is_valid() );
 
-        PipelineHandle gbuffer_pipeline = renderer.resource_cache.pipelines.get( it );
+        PipelineHandle gbuffer_pipeline = renderer.resource_cache.pipelines.get( it ).any();
         DescriptorSetLayoutHandle gbuffer_layout_handle = gpu.get_descriptor_set_layout( gbuffer_pipeline, k_material_descriptor_set_index );
         ShaderReflectionInfo* gbuffer_reflection_info = renderer.get_shader_reflection( gbuffer_pipeline );
 

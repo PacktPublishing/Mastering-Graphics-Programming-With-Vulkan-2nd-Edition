@@ -474,6 +474,7 @@ struct GpuDevice : public Service {
     VkPhysicalDeviceRayQueryFeaturesKHR             ray_query_features;
     VkPhysicalDeviceRayTracingPipelinePropertiesKHR ray_tracing_pipeline_properties;
     VkPhysicalDeviceAccelerationStructureFeaturesKHR acceleration_structure_features;
+    VkPhysicalDeviceAccelerationStructurePropertiesKHR acceleration_structure_properties;
 
     ShaderState*                    get_shader_state( ShaderStateHandle shader );
     const ShaderState*              get_shader_state( ShaderStateHandle shader ) const;

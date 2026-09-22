@@ -9,12 +9,9 @@
 #include "debug_rendering.h"
 #include "../shared_structs.h"
 
-#if defined( COMPUTE_SVGF_ACCUMULATION ) || defined( COMPUTE_SVGF_VARIANCE ) || defined( COMPUTE_SVGF_WAVELET ) || defined(COMPUTE_SVGF_DOWNSAMPLE)
+#if defined( COMPUTE_SVGF_ACCUMULATION ) || defined( COMPUTE_SVGF_VARIANCE ) || defined( COMPUTE_SVGF_WAVELET ) || defined( COMPUTE_SVGF_DOWNSAMPLE )
 
-//#define DEBUG_ACCUMULATION 0
-
-
-#if defined(COMPUTE_SVGF_DOWNSAMPLE)
+#if defined( COMPUTE_SVGF_DOWNSAMPLE )
 layout( set = MATERIAL_SET, binding = 40 ) uniform SVGFAccumulationConstants {
     SVGFConstants svgf;
 };
@@ -30,37 +27,33 @@ layout( push_constant ) uniform SVGFPushConstantsBlock {
     SVGFPushConstants svgf_push;
 };
 
+// Resource allocation and both input signals must use a resolution scale of 0.5.
 ivec2 svgf_resolution( SVGFConstants constants ) {
     return ivec2( ceil( vec2( frame.resolution ) * constants.output_resolution_scale ) );
 }
 
+bool outside_svgf_resolution( ivec2 p, ivec2 resolution ) {
+    return any( lessThan( p, ivec2( 0 ) ) ) || any( greaterThanEqual( p, resolution ) );
+}
+
 bool outside_svgf_resolution( SVGFConstants constants, ivec2 p ) {
-    return any( lessThan( p, ivec2( 0 ) ) ) || any( greaterThanEqual( p, svgf_resolution( constants ) ) );
+    return outside_svgf_resolution( p, svgf_resolution( constants ) );
 }
 
-ivec2 halfres_to_fullres( SVGFConstants constants, ivec2 p ) {
-    ivec2 xy = ivec2( ( vec2( p ) + 0.5 ) * constants.output_resolution_scale_rcp );
-    return clamp( xy, ivec2( 0 ), ivec2( frame.resolution ) - ivec2( 1 ) );
-}
-
-ivec2 choose_svgf_representative_fullres_pixel( SVGFConstants constants, ivec2 denoiser_xy, out float representative_depth ) {
-    int scale_rcp = max( 1, int( round( constants.output_resolution_scale_rcp ) ) );
-
-    if ( scale_rcp == 1 ) {
-        return clamp( denoiser_xy, ivec2( 0 ), ivec2( frame.resolution ) - ivec2( 1 ) );
-    }
-
-    ivec2 base_fullres = ivec2( vec2( denoiser_xy ) * constants.output_resolution_scale_rcp );
+// Half-resolution guides select the nearest sample in a 2x2 full-resolution block.
+// Depth uses the conventional range: near = 0, far = 1.
+ivec2 choose_svgf_representative_fullres_pixel( ivec2 denoiser_xy, out float representative_depth ) {
+    ivec2 base_fullres = denoiser_xy * 2;
 
     ivec2 best_fullres_xy = clamp( base_fullres, ivec2( 0 ), ivec2( frame.resolution ) - ivec2( 1 ) );
     float best_depth = 1.0;
 
-    for ( int y = 0; y < scale_rcp; ++y ) {
-        for ( int x = 0; x < scale_rcp; ++x ) {
+    for ( int y = 0; y < 2; ++y ) {
+        for ( int x = 0; x < 2; ++x ) {
             ivec2 fullres_xy = clamp( base_fullres + ivec2( x, y ), ivec2( 0 ), ivec2( frame.resolution ) - ivec2( 1 ) );
-            float depth = texelFetch( global_textures[ nonuniformEXT( frame.depth_texture_index ) ], fullres_xy, 0 ).r;
+            float depth = texelFetch( global_textures[ ( frame.depth_texture_index ) ], fullres_xy, 0 ).r;
 
-            if ( depth < best_depth ) {
+            if ( depth_is_closer( depth, best_depth ) ) {
                 best_depth = depth;
                 best_fullres_xy = fullres_xy;
             }
@@ -72,72 +65,44 @@ ivec2 choose_svgf_representative_fullres_pixel( SVGFConstants constants, ivec2 d
     return best_fullres_xy;
 }
 
-float blur_variance_3x3( SVGFConstants constants, SVGFOutputs outputs, ivec2 p ) {
-    const float kernel[2][2] = {
-        { 1.0 / 4.0, 1.0 / 8.0  },
-        { 1.0 / 8.0, 1.0 / 16.0 }
-    };
-
-    float g = 0.0;
-    float sum = 0.0;
-
-    for ( int yy = -1; yy <= 1; ++yy ) {
-        for ( int xx = -1; xx <= 1; ++xx ) {
-            ivec2 s = p + ivec2( xx, yy );
-
-            if ( outside_svgf_resolution( constants, s ) ) {
-                continue;
-            }
-
-            float k = kernel[ abs( xx ) ][ abs( yy ) ];
-            float v = texelFetch( global_textures[ outputs.variance_texture_index ], s, 0 ).r;
-
-            g += v * k;
-            sum += k;
-        }
-    }
-
-    return sum > 0.0 ? g / sum : 0.0;
-}
-
-float compute_normal_depth_weight( SVGFConstants constants, vec3 n_p, vec2 linear_z_dd, ivec2 q, float phi_depth ) {
-    // q is already in SVGF/denoiser-resolution space.
-    vec2 encoded_normal_q = texelFetch( global_textures[ nonuniformEXT( constants.current_normals_texture_index ) ], q, 0 ).rg;
+// Return the normal weight and depth exponent separately for the combined luminance/depth weight.
+void compute_normal_depth_weight( SVGFConstants constants, vec3 n_p, vec2 linear_z_dd, ivec2 q, float phi_depth,
+    out float w_n, out float w_z ) {
+    vec2 encoded_normal_q = texelFetch( global_textures[ ( constants.current_normals_texture_index ) ], q, 0 ).rg;
     vec3 n_q = octahedral_decode( encoded_normal_q );
 
-    float w_n = pow( clamp( dot( n_p, n_q ), 0.0, 1.0 ), svgf_push.sigma_n );
+    w_n = pow( clamp( dot( n_p, n_q ), 0.0, 1.0 ), svgf_push.sigma_n );
 
-    float z_q = texelFetch( global_textures[ nonuniformEXT( constants.current_linear_z_dd_texture_index ) ], q, 0 ).r;
+    float z_q = texelFetch( global_textures[ ( constants.current_linear_z_dd_texture_index ) ], q, 0 ).r;
 
-    float w_z = 0.0;
+    w_z = 0.0;
     if ( phi_depth > 0.0 ) {
-        w_z = abs( linear_z_dd.x - z_q ) / phi_depth;
+        w_z = max( abs( linear_z_dd.x - z_q ) / phi_depth, 0.0 );
     }
-
-    return exp( -max( w_z, 0.0 ) ) * w_n;
 }
 
 #endif
 
 #if defined( COMPUTE_SVGF_ACCUMULATION )
 
+// Accept history taps whose mesh ID, depth and normal match the current guide.
 bool temporal_sample_is_consistent( ivec2 frag_coord, ivec2 prev_frag_coord_offset, uint mesh_id, vec2 depth_normal_fwidth, float z, vec3 normal ) {
     if ( outside_svgf_resolution( svgf, prev_frag_coord_offset ) ) {
         return false;
     }
 
-    uint prev_mesh_id = texelFetch( global_utextures[ nonuniformEXT( svgf.history_mesh_id_texture_index ) ], prev_frag_coord_offset, 0 ).r;
+    uint prev_mesh_id = texelFetch( global_utextures[ ( svgf.history_mesh_id_texture_index ) ], prev_frag_coord_offset, 0 ).r;
     if ( mesh_id != prev_mesh_id ) {
         return false;
     }
 
-    float prev_z = texelFetch( global_textures[ nonuniformEXT( svgf.history_linear_depth_texture ) ], prev_frag_coord_offset, 0 ).r;
+    float prev_z = texelFetch( global_textures[ ( svgf.history_linear_depth_texture ) ], prev_frag_coord_offset, 0 ).r;
     float depth_diff = abs( prev_z - z ) / ( depth_normal_fwidth.x + 1e-2 );
     if ( depth_diff > svgf.temporal_depth_difference ) {
         return false;
     }
 
-    vec2 prev_encoded_normal = texelFetch( global_textures[ nonuniformEXT( svgf.history_normals_texture_index ) ], prev_frag_coord_offset, 0 ).rg;
+    vec2 prev_encoded_normal = texelFetch( global_textures[ ( svgf.history_normals_texture_index ) ], prev_frag_coord_offset, 0 ).rg;
     vec3 prev_normal = octahedral_decode( prev_encoded_normal );
 
     float normal_diff = distance( normal, prev_normal ) / ( depth_normal_fwidth.y + 1e-2 );
@@ -151,12 +116,23 @@ bool temporal_sample_is_consistent( ivec2 frag_coord, ivec2 prev_frag_coord_offs
 void accumulate_history_sample( SVGFOutputs outputs, ivec2 prev_frag_coord_offset, float weight,
                                 inout vec3 color_sum, inout vec2 moments_sum, inout float weight_sum,
                                 inout uint count, inout float best_count_weight, inout uint best_history_count ) {
-    vec4 history_output_color = texelFetch( global_textures[ nonuniformEXT( outputs.history_output_texture_index ) ], prev_frag_coord_offset, 0 );
-    if ( any( isnan( history_output_color.rgb ) ) || any( isinf( history_output_color.rgb ) ) ) {
+
+    if ( weight <= 0.0 ) {
         return;
     }
 
-    vec2 moment = texelFetch( global_textures[ nonuniformEXT( outputs.history_moments_texture_index ) ], prev_frag_coord_offset, 0 ).rg;
+    vec4 history_output_color = texelFetch( global_textures[ ( outputs.history_output_texture_index ) ], prev_frag_coord_offset, 0 );
+
+    if ( any( isnan( history_output_color ) ) ||
+        any( isinf( history_output_color ) ) ) {
+        return;
+    }
+
+    vec2 moment = texelFetch( global_textures[ ( outputs.history_moments_texture_index ) ], prev_frag_coord_offset, 0 ).rg;
+
+    if ( any( isnan( moment ) ) || any( isinf( moment ) ) ) {
+        return;
+    }
 
     color_sum += history_output_color.rgb * weight;
     moments_sum += moment * weight;
@@ -181,9 +157,11 @@ void resolve_history( bool used_fallback, vec3 color_sum, vec2 moments_sum, floa
     }
 }
 
-void check_temporal_consistency( ivec2 frag_coord, vec2 prev_frag_coord,
-                                 out bool is_consistent_reflections, out vec3 history_color_reflections, out vec2 history_moments_reflections, out uint history_count_reflections,
-                                 out bool is_consistent_restirgi, out vec3 history_color_restirgi, out vec2 history_moments_restirgi, out uint history_count_restirgi ) {
+void check_temporal_consistency( ivec2 frag_coord, vec2 prev_frag_coord, out bool is_consistent_reflections, 
+                                 out vec3 history_color_reflections, out vec2 history_moments_reflections, out uint history_count_reflections,
+                                 out bool is_consistent_restirgi, out vec3 history_color_restirgi, out vec2 history_moments_restirgi,
+                                 out uint history_count_restirgi ) {
+
     is_consistent_reflections = false;
     is_consistent_restirgi = false;
     history_color_reflections = vec3( 0 );
@@ -193,15 +171,17 @@ void check_temporal_consistency( ivec2 frag_coord, vec2 prev_frag_coord,
     history_count_reflections = 1;
     history_count_restirgi = 1;
 
-    ivec2 base = ivec2( floor( prev_frag_coord ) );
-    if ( outside_svgf_resolution( svgf, base ) ) {
+    if ( any( isnan( prev_frag_coord ) ) ||
+        any( isinf( prev_frag_coord ) ) ) {
         return;
     }
 
-    uint mesh_id = texelFetch( global_utextures[ nonuniformEXT( svgf.current_mesh_id_texture_index ) ], frag_coord, 0 ).r;
-    vec2 depth_normal_fwidth = texelFetch( global_textures[ nonuniformEXT( svgf.current_depth_normal_fwidth_texture_index ) ], frag_coord, 0 ).rg;
-    float z = texelFetch( global_textures[ nonuniformEXT( svgf.current_linear_z_dd_texture_index ) ], frag_coord, 0 ).r;
-    vec2 encoded_normal = texelFetch( global_textures[ nonuniformEXT( svgf.current_normals_texture_index ) ], frag_coord, 0 ).rg;
+    ivec2 base = ivec2( floor( prev_frag_coord ) );
+
+    uint mesh_id = texelFetch( global_utextures[ ( svgf.current_mesh_id_texture_index ) ], frag_coord, 0 ).r;
+    vec2 depth_normal_fwidth = texelFetch( global_textures[ ( svgf.current_depth_normal_fwidth_texture_index ) ], frag_coord, 0 ).rg;
+    float z = texelFetch( global_textures[ ( svgf.current_linear_z_dd_texture_index ) ], frag_coord, 0 ).r;
+    vec2 encoded_normal = texelFetch( global_textures[ ( svgf.current_normals_texture_index ) ], frag_coord, 0 ).rg;
     vec3 normal = octahedral_decode( encoded_normal );
 
     vec3 color_sum_reflections = vec3( 0 );
@@ -235,6 +215,7 @@ void check_temporal_consistency( ivec2 frag_coord, vec2 prev_frag_coord,
         }
     }
 
+    // Use a 3x3 fallback if the valid bilinear taps have insufficient total weight.
     bool fallback_reflections = count_reflections == 0 || weight_sum_reflections < 0.25;
     bool fallback_restirgi = count_restirgi == 0 || weight_sum_restirgi < 0.25;
 
@@ -280,53 +261,13 @@ void check_temporal_consistency( ivec2 frag_coord, vec2 prev_frag_coord,
     resolve_history( fallback_restirgi, color_sum_restirgi, moments_sum_restirgi, weight_sum_restirgi, count_restirgi, best_history_count_restirgi,
                      is_consistent_restirgi, history_color_restirgi, history_moments_restirgi, history_count_restirgi );
 
-#if defined (DEBUG_SVGF)
-    // Enalble this to see convergence of history
-    history_count_restirgi = fallback_restirgi ? 1u : 32u;
-#endif // DEBUG_SVGF
 }
 
-void validate_checkerboard( SVGFConstants constants, SVGFOutputs outputs, ivec2 input_xy, ivec2 offset, inout vec3 color, inout float sum ) {
-    vec2 encoded_normal = texelFetch( global_textures[ constants.normals_texture_index ], input_xy, 0 ).rg;
-    vec3 n = octahedral_decode( encoded_normal );
-
-    encoded_normal = texelFetch( global_textures[ constants.normals_texture_index ], input_xy + offset, 0 ).rg;
-    vec3 other_n = octahedral_decode( encoded_normal );
-
-    if ( dot( n, other_n ) < 0.95 ) {
-        return;
-    }
-
-    float z = texelFetch( global_textures[ constants.linear_z_dd_texture_index ], input_xy, 0 ).r;
-    float other_z = texelFetch( global_textures[ constants.linear_z_dd_texture_index ], input_xy + offset, 0 ).r;
-
-    if ( abs( z - other_z ) >= 0.05 ) {
-        return;
-    }
-
-    color += texelFetch( global_textures[ outputs.output_texture_index ], input_xy + offset, 0 ).rgb;
-    sum += 1.0;
-}
-
-vec3 checkerboard_color( SVGFConstants constants, SVGFOutputs outputs, ivec2 input_xy ) {
-    if ( constants.output_resolution_scale == constants.input_resolution_scale ) {
-        return texelFetch( global_textures[ outputs.output_texture_index ], input_xy, 0 ).rgb;
-    } else {
-        ivec2 scaled_xy = input_xy * 2;
-
-        vec3 color = texelFetch( global_textures[ outputs.output_texture_index ], scaled_xy, 0 ).rgb;
-        float sum = 1;
-
-        validate_checkerboard( constants, outputs, scaled_xy, ivec2( 0, 1 ), color, sum );
-        validate_checkerboard( constants, outputs, scaled_xy, ivec2( 1, 0 ), color, sum );
-        validate_checkerboard( constants, outputs, scaled_xy, ivec2( 1, 1 ), color, sum );
-
-        return color / sum;
-    }
-}
-
+// Accumulate radiance and luminance moments; radiance alpha stores the history count.
+// During accumulation, step_size is the CPU-provided history-reset flag.
 void accumulate_signal( SVGFOutputs outputs, ivec2 frag_coord, vec3 output_color, bool is_consistent,
                         vec3 history_output_color, vec2 history_moments, uint moment_history_count ) {
+
     if ( any( isnan( output_color.rgb ) ) || any( isinf( output_color.rgb ) ) ) {
         output_color = vec3( 0 );
     }
@@ -337,22 +278,13 @@ void accumulate_signal( SVGFOutputs outputs, ivec2 frag_coord, vec3 output_color
     vec3 integrated_color_out = vec3( 0 );
     vec2 integrated_moments_out = vec2( 0 );
 
-    // vec2 history_moments = texelFetch( global_textures[ svgf.history_moments_texture_index ], ivec2( prev_frag_coord ), 0 ).rg;
-    // uint moment_history_count = uint ( texelFetch( global_textures[ svgf.history_output_texture_index ], ivec2( prev_frag_coord ), 0 ).a );
-    
-#if DEBUG_ACCUMULATION
-    if ( is_consistent && frame.current_frame > 250 ) {
-#else
-    if ( is_consistent && !( svgf_push.step_size == 1 ) ) {
-#endif
+    if ( is_consistent && svgf_push.step_size != 1u ) {
         moment_history_count = min( moment_history_count + 1u, 32u );
 
         float alpha = max( 1.0 / float( moment_history_count ), 0.05 );
-#if DEBUG_ACCUMULATION
-        integrated_color_out = history_output_color;
-#else
+
         integrated_color_out = output_color * alpha + ( 1 - alpha ) * history_output_color;
-#endif
+
         integrated_moments_out = moments * alpha + ( 1 - alpha ) * history_moments;
     } else {
         integrated_color_out = output_color;
@@ -364,7 +296,7 @@ void accumulate_signal( SVGFOutputs outputs, ivec2 frag_coord, vec3 output_color
     imageStore( global_images_2d[ outputs.integrated_moments_texture_index ], frag_coord, vec4( integrated_moments_out, 0, 0 ) );
 }
 
-layout (local_size_x = 8, local_size_y = 8, local_size_z = 1) in;
+layout( local_size_x = 8, local_size_y = 8, local_size_z = 1 ) in;
 void main() {
     ivec2 frag_coord = ivec2( gl_GlobalInvocationID.xy );
 
@@ -372,11 +304,11 @@ void main() {
         return;
     }
 
-    vec2 motion_vector = texelFetch( global_textures[ nonuniformEXT( svgf.current_motion_vectors_texture_index ) ], frag_coord, 0 ).rg;
+    vec2 motion_vector = texelFetch( global_textures[ ( svgf.current_motion_vectors_texture_index ) ], frag_coord, 0 ).rg;
 
     vec2 history_resolution = vec2( svgf_resolution( svgf ) );
     vec2 current_uv = ( vec2( frag_coord ) + 0.5 ) / history_resolution;
-    vec2 prev_uv = reproject_uv_from_ndc_motion(current_uv, motion_vector);
+    vec2 prev_uv = reproject_uv_from_ndc_motion( current_uv, motion_vector );
     vec2 prev_frag_coord = prev_uv * history_resolution - 0.5;
 
     bool is_consistent_reflections = false;
@@ -388,42 +320,48 @@ void main() {
     uint history_count_reflections = 1;
     uint history_count_restirgi = 1;
 
-    check_temporal_consistency( frag_coord, prev_frag_coord,
-                                is_consistent_reflections, history_color_reflections, history_moments_reflections, history_count_reflections,
-                                is_consistent_restirgi, history_color_restirgi, history_moments_restirgi, history_count_restirgi );
+    check_temporal_consistency( frag_coord, prev_frag_coord, is_consistent_reflections, history_color_reflections, 
+                                history_moments_reflections, history_count_reflections, is_consistent_restirgi,
+                                history_color_restirgi, history_moments_restirgi, history_count_restirgi );
 
-    accumulate_signal( svgf_reflections, frag_coord, checkerboard_color( svgf, svgf_reflections, frag_coord ), is_consistent_reflections, history_color_reflections, history_moments_reflections, history_count_reflections );
-    accumulate_signal( svgf_restirgi, frag_coord, checkerboard_color( svgf, svgf_restirgi, frag_coord ), is_consistent_restirgi, history_color_restirgi, history_moments_restirgi, history_count_restirgi );
+    // Raw signals and SVGF guides use the same resolution (see svgf_set_common_constants).
+    vec3 output_color_reflections = texelFetch( global_textures[ svgf_reflections.output_texture_index ], frag_coord, 0 ).rgb;
+    vec3 output_color_restirgi = texelFetch( global_textures[ svgf_restirgi.output_texture_index ], frag_coord, 0 ).rgb;
+
+    accumulate_signal( svgf_reflections, frag_coord, output_color_reflections, is_consistent_reflections, history_color_reflections, history_moments_reflections, history_count_reflections );
+    accumulate_signal( svgf_restirgi, frag_coord, output_color_restirgi, is_consistent_restirgi, history_color_restirgi, history_moments_restirgi, history_count_restirgi );
 }
 
 #endif // COMPUTE_SVGF_ACCUMULATION
 
 #if defined( COMPUTE_SVGF_VARIANCE )
 
+// Estimate variance from spatially filtered moments for short histories, otherwise temporal moments.
 void write_signal_variance( SVGFOutputs outputs, ivec2 frag_coord, bool needs_filtering, vec2 moments_sum, float sum_weights ) {
     float variance = 0.0;
 
     if ( needs_filtering ) {
         if ( sum_weights > 0.0 ) {
             vec2 moments = moments_sum / sum_weights;
-            variance = max( moments.y - pow( moments.x, 2.0 ), 0.0 );
+            variance = max( moments.y - moments.x * moments.x, 0.0 );
         }
     } else {
-        vec2 moments = texelFetch( global_textures[ nonuniformEXT( outputs.integrated_moments_texture_index ) ], frag_coord, 0 ).rg;
-        variance = max( moments.y - pow( moments.x, 2.0 ), 0.0 );
+        vec2 moments = texelFetch( global_textures[ ( outputs.integrated_moments_texture_index ) ], frag_coord, 0 ).rg;
+        variance = max( moments.y - moments.x * moments.x, 0.0 );
     }
 
-    imageStore( global_images_2d[ nonuniformEXT( outputs.variance_texture_index ) ], frag_coord, vec4( variance, 0, 0, 0 ) );
+    imageStore( global_images_2d[ ( outputs.variance_texture_index ) ], frag_coord, vec4( variance, 0, 0, 0 ) );
 }
 
-layout (local_size_x = 8, local_size_y = 8, local_size_z = 1) in;
+layout( local_size_x = 8, local_size_y = 8, local_size_z = 1 ) in;
 void main() {
     ivec2 frag_coord = ivec2( gl_GlobalInvocationID.xy );
 
-    if ( outside_svgf_resolution( svgf, frag_coord ) ) return;
+    ivec2 resolution = svgf_resolution( svgf );
+    if ( outside_svgf_resolution( frag_coord, resolution ) ) return;
 
-    uint reflection_history_count = uint( texelFetch( global_textures[ nonuniformEXT( svgf_reflections.integrated_color_texture_index ) ], frag_coord, 0 ).a );
-    uint restirgi_history_count = uint( texelFetch( global_textures[ nonuniformEXT( svgf_restirgi.integrated_color_texture_index ) ], frag_coord, 0 ).a );
+    uint reflection_history_count = uint( texelFetch( global_textures[ ( svgf_reflections.integrated_color_texture_index ) ], frag_coord, 0 ).a );
+    uint restirgi_history_count = uint( texelFetch( global_textures[ ( svgf_restirgi.integrated_color_texture_index ) ], frag_coord, 0 ).a );
 
     bool filter_reflections = reflection_history_count < 4;
     bool filter_restirgi = restirgi_history_count < 4;
@@ -434,11 +372,11 @@ void main() {
     float sum_weights_restirgi = 0.0;
 
     if ( filter_reflections || filter_restirgi ) {
-        vec2 encoded_normal_p = texelFetch( global_textures[ nonuniformEXT( svgf.current_normals_texture_index ) ], frag_coord, 0 ).rg;
+        vec2 encoded_normal_p = texelFetch( global_textures[ ( svgf.current_normals_texture_index ) ], frag_coord, 0 ).rg;
         vec3 normal_p = octahedral_decode( encoded_normal_p );
 
-        vec2 linear_z_dd = texelFetch( global_textures[ nonuniformEXT( svgf.current_linear_z_dd_texture_index ) ], frag_coord, 0 ).rg;
-        uint mesh_id_p = texelFetch( global_utextures[ nonuniformEXT( svgf.current_mesh_id_texture_index ) ], frag_coord, 0 ).r;
+        vec2 linear_z_dd = texelFetch( global_textures[ ( svgf.current_linear_z_dd_texture_index ) ], frag_coord, 0 ).rg;
+        uint mesh_id_p = texelFetch( global_utextures[ ( svgf.current_mesh_id_texture_index ) ], frag_coord, 0 ).r;
 
         int filter_size = 3;
         float phi_depth = svgf_push.sigma_z * max( linear_z_dd.y, 1e-8 ) * filter_size;
@@ -447,24 +385,26 @@ void main() {
             for ( int x = -filter_size; x <= filter_size; ++x ) {
                 ivec2 q = frag_coord + ivec2( x, y );
 
-                if ( outside_svgf_resolution( svgf, q ) ) {
+                if ( outside_svgf_resolution( q, resolution ) ) {
                     continue;
                 }
 
-                uint mesh_id_q = texelFetch( global_utextures[ nonuniformEXT( svgf.current_mesh_id_texture_index ) ], q, 0 ).r;
+                uint mesh_id_q = texelFetch( global_utextures[ ( svgf.current_mesh_id_texture_index ) ], q, 0 ).r;
                 if ( mesh_id_p != mesh_id_q ) {
                     continue;
                 }
 
-                float w_pq = compute_normal_depth_weight( svgf, normal_p, linear_z_dd, q, phi_depth );
+                float w_n, w_z;
+                compute_normal_depth_weight( svgf, normal_p, linear_z_dd, q, phi_depth, w_n, w_z );
+                float w_pq = exp( -w_z ) * w_n;
 
                 if ( filter_reflections ) {
-                    moments_sum_reflections += w_pq * texelFetch( global_textures[ nonuniformEXT( svgf_reflections.integrated_moments_texture_index ) ], q, 0 ).rg;
+                    moments_sum_reflections += w_pq * texelFetch( global_textures[ ( svgf_reflections.integrated_moments_texture_index ) ], q, 0 ).rg;
                     sum_weights_reflections += w_pq;
                 }
 
                 if ( filter_restirgi ) {
-                    moments_sum_restirgi += w_pq * texelFetch( global_textures[ nonuniformEXT( svgf_restirgi.integrated_moments_texture_index ) ], q, 0 ).rg;
+                    moments_sum_restirgi += w_pq * texelFetch( global_textures[ ( svgf_restirgi.integrated_moments_texture_index ) ], q, 0 ).rg;
                     sum_weights_restirgi += w_pq;
                 }
             }
@@ -479,72 +419,151 @@ void main() {
 
 #if defined( COMPUTE_SVGF_WAVELET )
 
-// Weights are different from the paper and reflect the falcor implementation
-float h[ 3 ] = {
+// Relative 5-tap binomial weights, with a center weight of one.
+const float kernel_weights[ 3 ] = {
     1.0,
     2.0 / 3.0,
     1.0 / 6.0
 };
 
-//#define DEBUG_SVGF
+// Five wavelet iterations use steps 1, 2, 4, 8 and 16. Keep in sync with k_num_passes.
+const uint k_svgf_last_wavelet_step = 16u;
 
-void filter_signal_sample( SVGFOutputs outputs, ivec2 q, float h_q, float normal_depth_weight,
-                           float variance_p, float luminance_p, inout vec3 filtered_color,
+bool svgf_propagate_variance() {
+    return svgf_push.step_size != k_svgf_last_wavelet_step;
+}
+
+void filter_signal_sample( SVGFOutputs outputs, ivec2 q, float h_q, float w_n, float w_z,
+                           float rcp_sigma_l_variance, float luminance_p, inout vec3 filtered_color,
                            inout float color_weight, inout float updated_variance ) {
-    vec3 c_q = texelFetch( global_textures[ nonuniformEXT( outputs.integrated_color_texture_index ) ], q, 0 ).rgb;
+    
+    vec3 c_q = texelFetch( global_textures[ ( outputs.integrated_color_texture_index ) ], q, 0 ).rgb;
     float l_q = luminance( c_q );
 
-    // Luminance/variance weight.
-    // variance_p should already be a small blurred variance around p.
-    float sigma_l_variance = svgf_push.sigma_l * sqrt( max( variance_p, 0.0 ) ) + 1e-5;
-    float w_l = abs( luminance_p - l_q ) / sigma_l_variance;
-    float w_pq = exp( -max( w_l, 0.0 ) ) * normal_depth_weight;
+    float w_l = abs( luminance_p - l_q ) * rcp_sigma_l_variance;
+    float w_pq = exp( -w_z - max( w_l, 0.0 ) ) * w_n;
 
-    float prev_variance = texelFetch( global_textures[ nonuniformEXT( outputs.variance_texture_index ) ], q, 0 ).r;
     float sample_weight = h_q * w_pq;
 
     filtered_color += sample_weight * c_q;
     color_weight += sample_weight;
-    updated_variance += pow( h_q, 2.0 ) * pow( w_pq, 2.0 ) * prev_variance;
-}
 
-void store_filtered_signal( SVGFOutputs outputs, ivec2 frag_coord, vec3 filtered_color, float color_weight, float updated_variance ) {
-    filtered_color /= color_weight;
-    updated_variance /= pow( color_weight, 2.0 );
+    if ( svgf_propagate_variance() ) {
+        float prev_variance = texelFetch( global_textures[ outputs.variance_texture_index ], q, 0 ).r;
 
-    uint moment_history_count = uint( texelFetch( global_textures[ nonuniformEXT( outputs.integrated_color_texture_index ) ], frag_coord, 0 ).a );
-
-#if defined (DEBUG_SVGF)
-    if ( svgf_push.step_size == 16u ) {
-        filtered_color = vec3( float( moment_history_count ) / 32.0 );
+        updated_variance += pow( h_q, 2.0 ) * pow( w_pq, 2.0 ) * prev_variance;
     }
-#endif // DEBUG_SVGF
-
-    imageStore( global_images_2d[ nonuniformEXT( outputs.filtered_color_texture_index ) ], frag_coord, vec4( filtered_color, moment_history_count ) );
-    imageStore( global_images_2d[ nonuniformEXT( outputs.updated_variance_texture_index ) ], frag_coord, vec4( updated_variance, 0, 0, 0 ) );
 }
 
-layout (local_size_x = 8, local_size_y = 8, local_size_z = 1) in;
+void store_filtered_signal( SVGFOutputs outputs, ivec2 frag_coord, vec3 filtered_color,
+                            float color_weight, float updated_variance, uint moment_history_count ) {
+
+    filtered_color /= color_weight;
+
+    imageStore( global_images_2d[ ( outputs.filtered_color_texture_index ) ], frag_coord, vec4( filtered_color, float( moment_history_count ) ) );
+
+    if ( svgf_propagate_variance() ) {
+        updated_variance /= pow( color_weight, 2.0 );
+
+        imageStore( global_images_2d[ ( outputs.updated_variance_texture_index ) ], frag_coord, vec4( updated_variance, 0, 0, 0 ) );
+    }
+}
+
+// An 8x8 workgroup plus a one-texel halo: 10x10 pairs of variances (800 bytes).
+shared vec2 svgf_variance_tile[100];
+
+// Every invocation participates in the cooperative load and barrier, including out-of-bounds lanes.
+void load_svgf_variance_tile() {
+    ivec2 resolution = svgf_resolution( svgf );
+    ivec2 origin = ivec2( gl_WorkGroupID.xy ) * 8 - ivec2( 1 );
+
+    for ( uint i = gl_LocalInvocationIndex; i < 100u; i += 64u ) {
+        ivec2 tile_xy = ivec2( int( i % 10u ), int( i / 10u ) );
+        ivec2 q = origin + tile_xy;
+
+        vec2 value = vec2( 0.0 );
+
+        if ( all( greaterThanEqual( q, ivec2( 0 ) ) ) &&
+            all( lessThan( q, resolution ) ) ) {
+            value.x = texelFetch( global_textures[ ( svgf_reflections.variance_texture_index ) ], q, 0 ).r;
+
+            value.y = texelFetch( global_textures[ ( svgf_restirgi.variance_texture_index ) ], q, 0 ).r;
+        }
+
+        svgf_variance_tile[i] = value;
+    }
+
+    barrier();
+}
+
+vec2 svgf_center_variance_shared() {
+    ivec2 local_xy = ivec2( gl_LocalInvocationID.xy ) + ivec2( 1 );
+    return svgf_variance_tile[local_xy.y * 10 + local_xy.x];
+}
+
+// Gaussian 3x3 variance blur, renormalized over valid image pixels.
+vec2 blur_svgf_variance_shared( ivec2 p ) {
+    ivec2 resolution = svgf_resolution( svgf );
+    ivec2 local_xy = ivec2( gl_LocalInvocationID.xy ) + ivec2( 1 );
+
+    vec2 result = vec2( 0.0 );
+    float weight_sum = 0.0;
+
+    for ( int y = -1; y <= 1; ++y ) {
+        for ( int x = -1; x <= 1; ++x ) {
+            ivec2 q = p + ivec2( x, y );
+
+            if ( any( lessThan( q, ivec2( 0 ) ) ) ||
+                any( greaterThanEqual( q, resolution ) ) ) {
+                continue;
+            }
+
+            float wx = ( x == 0 ) ? 0.5 : 0.25;
+            float wy = ( y == 0 ) ? 0.5 : 0.25;
+            float weight = wx * wy;
+
+            ivec2 s = local_xy + ivec2( x, y );
+
+            result += svgf_variance_tile[s.y * 10 + s.x] * weight;
+            weight_sum += weight;
+        }
+    }
+
+    return result / weight_sum;
+}
+
+layout( local_size_x = 8, local_size_y = 8, local_size_z = 1 ) in;
 void main() {
     ivec2 frag_coord = ivec2( gl_GlobalInvocationID.xy );
 
-    if ( outside_svgf_resolution( svgf, frag_coord ) ) return;
+    load_svgf_variance_tile();
 
-    float new_variance_reflections = texelFetch( global_textures[ svgf_reflections.variance_texture_index ], frag_coord, 0 ).r;
-    float new_variance_restirgi = texelFetch( global_textures[ svgf_restirgi.variance_texture_index ], frag_coord, 0 ).r;
+    if ( outside_svgf_resolution( svgf, frag_coord ) ) {
+        return;
+    }
 
-    vec2 encoded_normal_p = texelFetch( global_textures[ nonuniformEXT( svgf.current_normals_texture_index ) ], frag_coord, 0 ).rg;
+    ivec2 resolution = svgf_resolution( svgf );
+
+    vec2 center_variance = svgf_center_variance_shared();
+
+    float new_variance_reflections = svgf_propagate_variance() ? center_variance.x : 0.0;
+    float new_variance_restirgi = svgf_propagate_variance() ? center_variance.y : 0.0;
+
+    vec2 encoded_normal_p = texelFetch( global_textures[ ( svgf.current_normals_texture_index ) ], frag_coord, 0 ).rg;
     vec3 normal_p = octahedral_decode( encoded_normal_p );
 
-    vec2 linear_z_dd = texelFetch( global_textures[ nonuniformEXT( svgf.current_linear_z_dd_texture_index ) ], frag_coord, 0 ).rg;
-    uint mesh_id_p = texelFetch( global_utextures[ nonuniformEXT( svgf.current_mesh_id_texture_index ) ], frag_coord, 0 ).r;
+    vec2 linear_z_dd = texelFetch( global_textures[ ( svgf.current_linear_z_dd_texture_index ) ], frag_coord, 0 ).rg;
+    uint mesh_id_p = texelFetch( global_utextures[ ( svgf.current_mesh_id_texture_index ) ], frag_coord, 0 ).r;
 
-    vec3 color_p_reflections = texelFetch( global_textures[ nonuniformEXT( svgf_reflections.integrated_color_texture_index ) ], frag_coord, 0 ).rgb;
-    vec3 color_p_restirgi = texelFetch( global_textures[ nonuniformEXT( svgf_restirgi.integrated_color_texture_index ) ], frag_coord, 0 ).rgb;
+    vec4 center_p_reflections = texelFetch( global_textures[ ( svgf_reflections.integrated_color_texture_index ) ], frag_coord, 0 );
+    vec4 center_p_restirgi = texelFetch( global_textures[ ( svgf_restirgi.integrated_color_texture_index ) ], frag_coord, 0 );
+
+    vec3 color_p_reflections = center_p_reflections.rgb;
+    vec3 color_p_restirgi = center_p_restirgi.rgb;
     float luminance_p_reflections = luminance( color_p_reflections );
     float luminance_p_restirgi = luminance( color_p_restirgi );
 
-    // Reduce kernel at fine scale for performances
+    // Use a smaller kernel at the two coarsest wavelet scales.
     int radius = ( svgf_push.step_size >= 8u ) ? 1 : 2;
 
     const float phi_depth = svgf_push.sigma_z * max( linear_z_dd.y, 1e-8 ) * svgf_push.step_size;
@@ -554,14 +573,20 @@ void main() {
     float color_weight_reflections = 1.0;
     float color_weight_restirgi = 1.0;
 
-    float variance_p_reflections = blur_variance_3x3( svgf, svgf_reflections, frag_coord );
-    float variance_p_restirgi = blur_variance_3x3( svgf, svgf_restirgi, frag_coord );
+    vec2 blurred_variance = blur_svgf_variance_shared( frag_coord );
+
+    float variance_p_reflections = blurred_variance.x;
+    float variance_p_restirgi = blurred_variance.y;
+
+    // The luminance normalization is constant across the kernel for each signal.
+    float rcp_sigma_l_reflections = 1.0 / ( svgf_push.sigma_l * sqrt( max( variance_p_reflections, 0.0 ) ) + 1e-5 );
+    float rcp_sigma_l_restirgi = 1.0 / ( svgf_push.sigma_l * sqrt( max( variance_p_restirgi, 0.0 ) ) + 1e-5 );
 
     for ( int y = -radius; y <= radius; ++y ) {
         for ( int x = -radius; x <= radius; ++x ) {
             ivec2 q = frag_coord + ivec2( x, y ) * int( svgf_push.step_size );
 
-            if ( outside_svgf_resolution( svgf, q ) ) {
+            if ( outside_svgf_resolution( q, resolution ) ) {
                 continue;
             }
 
@@ -569,50 +594,32 @@ void main() {
                 continue;
             }
 
-            uint mesh_id_q = texelFetch( global_utextures[ nonuniformEXT( svgf.current_mesh_id_texture_index ) ], q, 0 ).r;
+            uint mesh_id_q = texelFetch( global_utextures[ ( svgf.current_mesh_id_texture_index ) ], q, 0 ).r;
             if ( mesh_id_p != mesh_id_q ) {
                 continue;
             }
 
-            float h_q = h[ abs( x ) ] * h[ abs( y ) ];
-            float normal_depth_weight = compute_normal_depth_weight( svgf, normal_p, linear_z_dd, q, phi_depth );
+            float h_q = kernel_weights[ abs( x ) ] * kernel_weights[ abs( y ) ];
 
-            filter_signal_sample( svgf_reflections, q, h_q, normal_depth_weight, variance_p_reflections, luminance_p_reflections,
-                                  new_filtered_color_reflections, color_weight_reflections, new_variance_reflections );
-            filter_signal_sample( svgf_restirgi, q, h_q, normal_depth_weight, variance_p_restirgi, luminance_p_restirgi,
-                                  new_filtered_color_restirgi, color_weight_restirgi, new_variance_restirgi );
+            float w_n, w_z;
+            compute_normal_depth_weight( svgf, normal_p, linear_z_dd, q, phi_depth, w_n, w_z );
+
+            filter_signal_sample( svgf_reflections, q, h_q, w_n, w_z, rcp_sigma_l_reflections, luminance_p_reflections,
+                new_filtered_color_reflections, color_weight_reflections, new_variance_reflections );
+            filter_signal_sample( svgf_restirgi, q, h_q, w_n, w_z, rcp_sigma_l_restirgi, luminance_p_restirgi,
+                new_filtered_color_restirgi, color_weight_restirgi, new_variance_restirgi );
         }
     }
 
-    // if ( svgf_push.step_size == 16u ) {
-    //     // Maximum 5x5 kernel weight is ~7.11 including the center.
-    //     float support = ( color_weight_restirgi - 1.0 ) / 6.111;
-
-    //     new_filtered_color_restirgi = vec3( clamp( support, 0.0, 1.0 ) );
-    //     color_weight_restirgi = 1.0;
-    // }
-
-    // if ( svgf_push.step_size == 16u ) {
-    //     float variance = texelFetch(
-    //         global_textures[
-    //             nonuniformEXT( svgf_restirgi.variance_texture_index )
-    //         ],
-    //         frag_coord,
-    //         0 ).r;
-
-    //     new_filtered_color_restirgi = vec3( variance );
-    //     color_weight_restirgi = 1.0;
-    // }
-
-    store_filtered_signal( svgf_reflections, frag_coord, new_filtered_color_reflections, color_weight_reflections, new_variance_reflections );
-    store_filtered_signal( svgf_restirgi, frag_coord, new_filtered_color_restirgi, color_weight_restirgi, new_variance_restirgi );
+    store_filtered_signal( svgf_reflections, frag_coord, new_filtered_color_reflections, color_weight_reflections, new_variance_reflections, uint( center_p_reflections.a ) );
+    store_filtered_signal( svgf_restirgi, frag_coord, new_filtered_color_restirgi, color_weight_restirgi, new_variance_restirgi, uint( center_p_restirgi.a ) );
 }
 
 #endif // COMPUTE_SVGF_WAVELET
 
-#if defined(COMPUTE_SVGF_DOWNSAMPLE)
+#if defined( COMPUTE_SVGF_DOWNSAMPLE )
 
-layout (local_size_x = 8, local_size_y = 8, local_size_z = 1) in;
+layout( local_size_x = 8, local_size_y = 8, local_size_z = 1 ) in;
 void main() {
     ivec2 frag_coord = ivec2( gl_GlobalInvocationID.xy );
 
@@ -620,30 +627,30 @@ void main() {
         return;
     }
 
-    float representative_depth = -1.f;
-    ivec2 fullres_xy = choose_svgf_representative_fullres_pixel( svgf, frag_coord, representative_depth );
+    float representative_depth;
+    ivec2 fullres_xy = choose_svgf_representative_fullres_pixel( frag_coord, representative_depth );
 
-    // Write the current-frame representative sample of all guide textures.
-    vec2 normals = texelFetch( global_textures[ nonuniformEXT( svgf.normals_texture_index ) ], fullres_xy, 0 ).rg;
+    vec2 normals = texelFetch( global_textures[ ( svgf.normals_texture_index ) ], fullres_xy, 0 ).rg;
 
     ivec2 base_fullres = frag_coord * 2;
     ivec2 representative_offset = fullres_xy - base_fullres;
 
     uint representative_index = uint( representative_offset.y * 2 + representative_offset.x );
-    // Use empty 2 channels to store raw depth and subpixel
-    imageStore( global_images_2d[ nonuniformEXT( svgf.current_normals_texture_index ) ], frag_coord, vec4( normals, representative_depth, float(representative_index) ) );
 
-    uvec4 mesh_id = texelFetch( global_utextures[ nonuniformEXT( svgf.mesh_id_texture_index ) ], fullres_xy, 0 );
-    imageStore( global_uimages_2d[ nonuniformEXT( svgf.current_mesh_id_texture_index ) ], frag_coord, mesh_id );
+    // Guide channels: octahedral normal RG, raw depth B, representative sample index A.
+    imageStore( global_images_2d[ ( svgf.current_normals_texture_index ) ], frag_coord, vec4( normals, representative_depth, float( representative_index ) ) );
 
-    vec4 linear_z_dd = texelFetch( global_textures[ nonuniformEXT( svgf.linear_z_dd_texture_index ) ], fullres_xy, 0 );
-    imageStore( global_images_2d[ nonuniformEXT( svgf.current_linear_z_dd_texture_index ) ], frag_coord, linear_z_dd );
+    uvec4 mesh_id = texelFetch( global_utextures[ ( svgf.mesh_id_texture_index ) ], fullres_xy, 0 );
+    imageStore( global_uimages_2d[ ( svgf.current_mesh_id_texture_index ) ], frag_coord, mesh_id );
 
-    vec4 depth_normal_fwidth = texelFetch( global_textures[ nonuniformEXT( svgf.depth_normal_fwidth_texture_index ) ], fullres_xy, 0 );
-    imageStore( global_images_2d[ nonuniformEXT( svgf.current_depth_normal_fwidth_texture_index ) ], frag_coord, depth_normal_fwidth );
+    vec4 linear_z_dd = texelFetch( global_textures[ ( svgf.linear_z_dd_texture_index ) ], fullres_xy, 0 );
+    imageStore( global_images_2d[ ( svgf.current_linear_z_dd_texture_index ) ], frag_coord, linear_z_dd );
 
-    vec4 motion_vectors = texelFetch( global_textures[ nonuniformEXT( svgf.motion_vectors_texture_index ) ], fullres_xy, 0 );
-    imageStore( global_images_2d[ nonuniformEXT( svgf.current_motion_vectors_texture_index ) ], frag_coord, motion_vectors );
+    vec4 depth_normal_fwidth = texelFetch( global_textures[ ( svgf.depth_normal_fwidth_texture_index ) ], fullres_xy, 0 );
+    imageStore( global_images_2d[ ( svgf.current_depth_normal_fwidth_texture_index ) ], frag_coord, depth_normal_fwidth );
+
+    vec4 motion_vectors = texelFetch( global_textures[ ( svgf.motion_vectors_texture_index ) ], fullres_xy, 0 );
+    imageStore( global_images_2d[ ( svgf.current_motion_vectors_texture_index ) ], frag_coord, motion_vectors );
 }
 
 #endif // COMPUTE_SVGF_DOWNSAMPLE

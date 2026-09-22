@@ -279,6 +279,11 @@ struct GpuShadowVisibilityConstants {
     uint max_samples;
     uint disable_spatial;
 
+    float light_angular_radius; // used by directional lights, in radiants
+    float light_source_radius;  // point, world unit
+    uint pad000;
+    uint pad001;
+
 }; // struct GpuShadowVisibilityConstants
 
 

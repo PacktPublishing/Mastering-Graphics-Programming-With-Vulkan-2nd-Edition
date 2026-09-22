@@ -111,38 +111,35 @@ static BlendState blend_premultiplied = {
 static ShaderCompilationCreation scc_debug_mesh = {
     .stages = {
         ShaderCompilationStage{
-            .source_file_path = "glsl/debug_mesh.glsl",
+            .source = { .glsl = "glsl/debug_mesh.glsl" },
             .type = VK_SHADER_STAGE_VERTEX_BIT,
         },
         ShaderCompilationStage{
-            .source_file_path = "glsl/debug_mesh.glsl",
+            .source = { .glsl = "glsl/debug_mesh.glsl" },
             .type = VK_SHADER_STAGE_FRAGMENT_BIT,
         },
     },
     .name = "debug_mesh",
-    .slang_input = 0,
 };
 
 static ShaderCompilationCreation scc_debug_update_sphere_matrices = {
     .stages = {
         ShaderCompilationStage{
-            .source_file_path = "glsl/debug_mesh.glsl",
+            .source = { .glsl = "glsl/debug_mesh.glsl" },
             .type = VK_SHADER_STAGE_COMPUTE_BIT,
         }
     },
     .name = "debug_update_sphere_matrices",
-    .slang_input = 0,
 };
 
 static ShaderCompilationCreation scc_debug_update_cone_matrices = {
     .stages = {
         ShaderCompilationStage{
-            .source_file_path = "glsl/debug_mesh.glsl",
+            .source = { .glsl = "glsl/debug_mesh.glsl" },
             .type = VK_SHADER_STAGE_COMPUTE_BIT,
         }
     },
     .name = "debug_update_cone_matrices",
-    .slang_input = 0,
 };
 
 inline const VertexInputCreation vi_debug_mesh = {
@@ -244,6 +241,8 @@ void DebugPass::update_psos( FrameGraphResourceContext& context, PipelineUpdateP
 }
 
 void DebugPass::render( FrameGraphRenderContext& context ) {
+    const ShaderLanguage language = context.render_config->shader_language();
+
     if ( !enabled )
         return;
 
@@ -255,7 +254,7 @@ void DebugPass::render( FrameGraphRenderContext& context ) {
     DebugDrawRuntimeData& debug_draw = render_blackboard.debug_draw;
 
 #if ( DEBUG_DRAW_MESHLET_SPHERES || DEBUG_DRAW_POINT_LIGHT_SPHERES )
-    cb->bind_pipeline( debug_mesh_pipeline.pipeline );
+    cb->bind_pipeline( debug_mesh_pipeline.active( language ) );
     cb->bind_vertex_buffer( sphere_mesh_buffer, 0, 0 );
     cb->bind_index_buffer( sphere_mesh_indices, 0, VK_INDEX_TYPE_UINT32 );
 
@@ -267,7 +266,7 @@ void DebugPass::render( FrameGraphRenderContext& context ) {
 #endif
 
 #if DEBUG_DRAW_MESHLET_CONES
-    cb->bind_pipeline( debug_mesh_pipeline.pipeline );
+    cb->bind_pipeline( debug_mesh_pipeline.active( language ) );
     cb->bind_vertex_buffer( cone_mesh_buffer, 0, 0 );
     cb->bind_index_buffer( cone_mesh_indices, 0, VK_INDEX_TYPE_UINT32 );
 
@@ -331,6 +330,7 @@ void DebugPass::render( FrameGraphRenderContext& context ) {
 }
 
 void DebugPass::pre_render( FrameGraphRenderContext& context ) {
+    const ShaderLanguage language = context.render_config->shader_language();
 
     if ( !enabled ) {
         return;
@@ -366,7 +366,7 @@ void DebugPass::pre_render( FrameGraphRenderContext& context ) {
 
     cb->flush_barriers();
 
-    cb->bind_pipeline( debug_update_sphere_matrices_pipeline.pipeline );
+    cb->bind_pipeline( debug_update_sphere_matrices_pipeline.active( language ) );
     cb->bind_descriptor_set(
         { renderer->gpu->bindless_descriptor_set, debug_update_sphere_matrices_descriptor_set[ current_frame_index ] },
         { render_blackboard.scene_cb_offset } );
@@ -375,7 +375,7 @@ void DebugPass::pre_render( FrameGraphRenderContext& context ) {
         Mesh& mesh = render_scene->meshes[ mesh_index ];
         if ( !mesh.has_skinning() ) continue;
 
-        cb->push_constants( debug_update_sphere_matrices_pipeline.pipeline, 0, 4, &mesh_index );
+        cb->push_constants( debug_update_sphere_matrices_pipeline.active( language ), 0, 4, &mesh_index );
         cb->dispatch( mesh.meshlet_count, 1, 1 );
     }
 
@@ -394,7 +394,7 @@ void DebugPass::pre_render( FrameGraphRenderContext& context ) {
 
     cb->flush_barriers();
 
-    cb->bind_pipeline( debug_update_cone_matrices_pipeline.pipeline );
+    cb->bind_pipeline( debug_update_cone_matrices_pipeline.active( language ) );
     cb->bind_descriptor_set(
         { renderer->gpu->bindless_descriptor_set, debug_update_cone_matrices_descriptor_set[ current_frame_index ] },
         { render_blackboard.scene_cb_offset } );
@@ -403,7 +403,7 @@ void DebugPass::pre_render( FrameGraphRenderContext& context ) {
         Mesh& mesh = render_scene->meshes[ mesh_index ];
         if ( !mesh.has_skinning() ) continue;
 
-        cb->push_constants( debug_update_cone_matrices_pipeline.pipeline, 0, 4, &mesh_index );
+        cb->push_constants( debug_update_cone_matrices_pipeline.active( language ), 0, 4, &mesh_index );
         cb->dispatch( mesh.meshlet_count, 1, 1 );
     }
 
@@ -453,8 +453,8 @@ void DebugPass::create_gpu_resources( FrameGraphResourceContext& context ) {
 
 
 #if DEBUG_DRAW_MESHLET_CONES
-    filename = mesh_name.append_use_f( "%s/cone.obj", RAPTOR_DATA_FOLDER );
-   load_debug_mesh( filename, resident_allocator, renderer, cone_index_count, &cone_mesh_buffer, &cone_mesh_indices );
+    cstring filename = mesh_name.append_use_f( "%s/cone.obj", RAPTOR_DATA_FOLDER );
+    load_debug_mesh( filename, resident_allocator, renderer, cone_index_count, &cone_mesh_buffer, &cone_mesh_indices );
 #endif // DEBUG_DRAW_MESHLET_CONES
 
     mesh_name.shutdown();
@@ -577,21 +577,21 @@ void DebugPass::create_gpu_resources( FrameGraphResourceContext& context ) {
         DescriptorSetBinder descriptors;
 
         for ( u32 i = 0; i < k_max_frames; ++i ) {
-            ShaderReflectionInfo* shader_reflection = renderer->get_shader_reflection( debug_mesh_pipeline.pipeline );
+            ShaderReflectionInfo* shader_reflection = renderer->get_shader_reflection( debug_mesh_pipeline.any() );
             descriptors.reset();
             descriptors.name = "debug_mesh_sphere_ds";
             descriptors.ssbos.push( { sphere_matrices_buffer[ i ], 10 } );
 
             sphere_mesh_descriptor_set[ i ] = renderer->create_descriptor_set( descriptors, shader_reflection,
-                debug_mesh_pipeline.pipeline, 0, *context.render_blackboard );
+                debug_mesh_pipeline.any(), 0, *context.render_blackboard );
 
             descriptors.reset();
-            ShaderReflectionInfo* compute_shader_reflection = renderer->get_shader_reflection( debug_update_sphere_matrices_pipeline.pipeline );
+            ShaderReflectionInfo* compute_shader_reflection = renderer->get_shader_reflection( debug_update_sphere_matrices_pipeline.any() );
             descriptors.name = "debug_update_sphere_matrices_ds";
             descriptors.ssbos.push( { sphere_matrices_buffer[ i ], 10 } );
 
             debug_update_sphere_matrices_descriptor_set[ i ] = renderer->create_descriptor_set( descriptors, compute_shader_reflection,
-            debug_update_sphere_matrices_pipeline.pipeline, 0, *context.render_blackboard );
+            debug_update_sphere_matrices_pipeline.any(), 0, *context.render_blackboard );
         }
     }
 #endif // DEBUG_DRAW_MESHLET_SPHERES
@@ -636,21 +636,21 @@ void DebugPass::create_gpu_resources( FrameGraphResourceContext& context ) {
         DescriptorSetBinder descriptors;
 
         for ( u32 i = 0; i < k_max_frames; ++i ) {
-            ShaderReflectionInfo* shader_reflection = renderer->get_shader_reflection( debug_mesh_pipeline.pipeline );
+            ShaderReflectionInfo* shader_reflection = renderer->get_shader_reflection( debug_mesh_pipeline.any() );
             descriptors.reset();
             descriptors.name = "debug_mesh_cone_ds";
             descriptors.ssbos.push( { cone_matrices_buffer[ i ], 10 } );
 
             cone_mesh_descriptor_set[ i ] = renderer->create_descriptor_set( descriptors, shader_reflection,
-                debug_mesh_pipeline.pipeline, 0, *context.render_blackboard );
+                debug_mesh_pipeline.any(), 0, *context.render_blackboard );
 
             descriptors.reset();
-            ShaderReflectionInfo* compute_shader_reflection = renderer->get_shader_reflection( debug_update_cone_matrices_pipeline.pipeline );
+            ShaderReflectionInfo* compute_shader_reflection = renderer->get_shader_reflection( debug_update_cone_matrices_pipeline.any() );
             descriptors.name = "debug_update_cone_matrices_ds";
             descriptors.ssbos.push( { cone_matrices_buffer[ i ], 10 } );
 
             debug_update_cone_matrices_descriptor_set[ i ] = renderer->create_descriptor_set( descriptors, compute_shader_reflection,
-            debug_update_cone_matrices_pipeline.pipeline, 0, *context.render_blackboard );
+            debug_update_cone_matrices_pipeline.any(), 0, *context.render_blackboard );
         }
     }
 #endif // DEBUG_DRAW_MESHLET_CONES
@@ -815,72 +815,67 @@ inline const VertexInputCreation vi_debug_line = {
 static ShaderCompilationCreation scc_debug_line = {
     .stages = {
         ShaderCompilationStage{
-            .source_file_path = "glsl/debug_line.glsl",
+            .source = { .glsl = "glsl/debug_line.glsl" },
             .type = VK_SHADER_STAGE_VERTEX_BIT,
         },
         ShaderCompilationStage{
-            .source_file_path = "glsl/debug_line.glsl",
+            .source = { .glsl = "glsl/debug_line.glsl" },
             .type = VK_SHADER_STAGE_FRAGMENT_BIT,
         },
     },
     .name = "debug_line_cpu",
-    .slang_input = 0,
 };
 
 static ShaderCompilationCreation scc_debug_line_2d = {
     .stages = {
         ShaderCompilationStage{
-            .source_file_path = "glsl/debug_line.glsl",
+            .source = { .glsl = "glsl/debug_line.glsl" },
             .type = VK_SHADER_STAGE_VERTEX_BIT,
         },
         ShaderCompilationStage{
-            .source_file_path = "glsl/debug_line.glsl",
+            .source = { .glsl = "glsl/debug_line.glsl" },
             .type = VK_SHADER_STAGE_FRAGMENT_BIT,
         },
     },
     .name = "debug_line_2d_cpu",
-    .slang_input = 0,
 };
 
 static ShaderCompilationCreation scc_debug_line_gpu = {
     .stages = {
         ShaderCompilationStage{
-            .source_file_path = "glsl/debug_line.glsl",
+            .source = { .glsl = "glsl/debug_line.glsl" },
             .type = VK_SHADER_STAGE_VERTEX_BIT,
         },
         ShaderCompilationStage{
-            .source_file_path = "glsl/debug_line.glsl",
+            .source = { .glsl = "glsl/debug_line.glsl" },
             .type = VK_SHADER_STAGE_FRAGMENT_BIT,
         },
     },
     .name = "debug_line_gpu",
-    .slang_input = 0,
 };
 
 static ShaderCompilationCreation scc_debug_line_2d_gpu = {
     .stages = {
         ShaderCompilationStage{
-            .source_file_path = "glsl/debug_line.glsl",
+            .source = { .glsl = "glsl/debug_line.glsl" },
             .type = VK_SHADER_STAGE_VERTEX_BIT,
         },
         ShaderCompilationStage{
-            .source_file_path = "glsl/debug_line.glsl",
+            .source = { .glsl = "glsl/debug_line.glsl" },
             .type = VK_SHADER_STAGE_FRAGMENT_BIT,
         },
     },
     .name = "debug_line_2d_gpu",
-    .slang_input = 0,
 };
 
 static ShaderCompilationCreation scc_commands_finalize = {
     .stages = {
         ShaderCompilationStage{
-            .source_file_path = "glsl/debug_line.glsl",
+            .source = { .glsl = "glsl/debug_line.glsl" },
             .type = VK_SHADER_STAGE_COMPUTE_BIT,
         }
     },
     .name = "commands_finalize",
-    .slang_input = 0,
 };
 
 static PipelineCreation pc_debug_line_cpu = {
@@ -1026,6 +1021,7 @@ void DebugDrawPass::update_psos( FrameGraphResourceContext& context, PipelineUpd
 }
 
 void DebugDrawPass::pre_render( FrameGraphRenderContext& context ) {
+    const ShaderLanguage language = context.render_config->shader_language();
 
     Renderer* renderer = context.renderer;
     RenderScene* render_scene = context.render_view->scene;
@@ -1040,7 +1036,7 @@ void DebugDrawPass::pre_render( FrameGraphRenderContext& context ) {
     cb->flush_barriers();
 
     // Write final command
-    cb->bind_pipeline( gpu_commands_finalize.pipeline );
+    cb->bind_pipeline( gpu_commands_finalize.active( language ) );
     cb->bind_descriptor_set(
         { renderer->gpu->bindless_descriptor_set, gpu_commands_finalize_descriptor_set },
         {  } );
@@ -1054,6 +1050,7 @@ void DebugDrawPass::pre_render( FrameGraphRenderContext& context ) {
 }
 
 void DebugDrawPass::render( FrameGraphRenderContext& context ) {
+    const ShaderLanguage language = context.render_config->shader_language();
 
     Renderer* renderer = context.renderer;
     DebugDrawRuntimeData& debug_draw = context.render_blackboard->debug_draw;
@@ -1067,7 +1064,7 @@ void DebugDrawPass::render( FrameGraphRenderContext& context ) {
     if ( debug_config.show_cpu_draws ) {
         // 3D lines
         if ( debug_draw.cpu_lines_count ) {
-            cb->bind_pipeline( cpu_line_draw_pipeline.pipeline );
+            cb->bind_pipeline( cpu_line_draw_pipeline.active( language ) );
             cb->bind_vertex_buffer( debug_draw.cpu_lines_vb, 0, 0 );
             cb->bind_descriptor_set(
                 { renderer->gpu->bindless_descriptor_set, cpu_line_draw_descriptor_set },
@@ -1080,7 +1077,7 @@ void DebugDrawPass::render( FrameGraphRenderContext& context ) {
 
         // 2D lines
         if ( debug_draw.cpu_lines2d_count ) {
-            cb->bind_pipeline( cpu_line_2d_draw_pipeline.pipeline );
+            cb->bind_pipeline( cpu_line_2d_draw_pipeline.active( language ) );
             cb->bind_vertex_buffer( debug_draw.cpu_lines2d_vb, 0, 0 );
             cb->bind_descriptor_set(
                 { renderer->gpu->bindless_descriptor_set, cpu_line_draw_descriptor_set },
@@ -1095,14 +1092,14 @@ void DebugDrawPass::render( FrameGraphRenderContext& context ) {
     // Draw gpu written debug lines
     if ( debug_config.show_gpu_draws ) {
 
-        cb->bind_pipeline( gpu_line_draw_pipeline.pipeline );
+        cb->bind_pipeline( gpu_line_draw_pipeline.active( language ) );
         cb->bind_descriptor_set(
             { renderer->gpu->bindless_descriptor_set, gpu_line_draw_descriptor_set },
             { render_blackboard.scene_cb_offset } );
 
         cb->draw_indirect( debug_draw.gpu_line_commands_sb, 1, 0, sizeof( VkDrawIndirectCommand ) );
         // Draw 2d lines
-        cb->bind_pipeline( gpu_line_2d_draw_pipeline.pipeline );
+        cb->bind_pipeline( gpu_line_2d_draw_pipeline.active( language ) );
         cb->bind_descriptor_set(
             { renderer->gpu->bindless_descriptor_set, gpu_line_draw_descriptor_set },
             { render_blackboard.scene_cb_offset } );
@@ -1118,20 +1115,20 @@ void DebugDrawPass::create_gpu_resources( FrameGraphResourceContext& context ) {
 
     DescriptorSetBinder descriptors;
 
-    ShaderReflectionInfo* shader_reflection = renderer->get_shader_reflection( cpu_line_draw_pipeline.pipeline );
+    ShaderReflectionInfo* shader_reflection = renderer->get_shader_reflection( cpu_line_draw_pipeline.any() );
     descriptors.reset();
     descriptors.name = "debug_cpu_ds";
-    cpu_line_draw_descriptor_set = renderer->create_descriptor_set( descriptors, shader_reflection, cpu_line_draw_pipeline.pipeline, 0, *context.render_blackboard );
+    cpu_line_draw_descriptor_set = renderer->create_descriptor_set( descriptors, shader_reflection, cpu_line_draw_pipeline.any(), 0, *context.render_blackboard );
 
-    shader_reflection = renderer->get_shader_reflection( gpu_line_draw_pipeline.pipeline );
+    shader_reflection = renderer->get_shader_reflection( gpu_line_draw_pipeline.any() );
     descriptors.reset();
     descriptors.name = "debug_gpu_ds";
-    gpu_line_draw_descriptor_set = renderer->create_descriptor_set( descriptors, shader_reflection, gpu_line_draw_pipeline.pipeline, 0, *context.render_blackboard );
+    gpu_line_draw_descriptor_set = renderer->create_descriptor_set( descriptors, shader_reflection, gpu_line_draw_pipeline.any(), 0, *context.render_blackboard );
 
-    shader_reflection = renderer->get_shader_reflection( gpu_commands_finalize.pipeline );
+    shader_reflection = renderer->get_shader_reflection( gpu_commands_finalize.any() );
     descriptors.reset();
     descriptors.name = "debug_finalize_ds";
-    gpu_commands_finalize_descriptor_set = renderer->create_descriptor_set( descriptors, shader_reflection, gpu_commands_finalize.pipeline, 0, *context.render_blackboard );
+    gpu_commands_finalize_descriptor_set = renderer->create_descriptor_set( descriptors, shader_reflection, gpu_commands_finalize.any(), 0, *context.render_blackboard );
 }
 
 void DebugDrawPass::destroy_gpu_resources( FrameGraphResourceContext& context ) {

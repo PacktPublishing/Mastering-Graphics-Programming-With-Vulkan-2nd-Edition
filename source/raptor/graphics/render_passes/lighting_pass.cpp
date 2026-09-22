@@ -30,6 +30,9 @@ struct LightPassConstants {
     u32             output_width;
     u32             output_height;
     u32             emissive;
+
+    u32            debug_index;
+    u32            _pad[ 3 ];
 }; // struct LightingConstants
 
 void LightingPass::declare_frame_graph_node( FrameGraphResourceContext& context ) {
@@ -56,7 +59,7 @@ void LightingPass::declare_frame_graph_node( FrameGraphResourceContext& context 
         inputs.push( { .type = FrameGraphResourceType_Texture,
                        .handle = builder.get_output_handle( "point_shadows_pass", "point_shadows_depth" ) } );
     }
-    
+
     if ( context.render_config->restirgi.enabled ) {
         inputs.push( { .type = FrameGraphResourceType_Texture,
                        .handle = builder.get_output_handle( "svgf_wavelet_pass", "restirgi_denoised_output" ) } );
@@ -66,7 +69,7 @@ void LightingPass::declare_frame_graph_node( FrameGraphResourceContext& context 
         inputs.push( { .type = FrameGraphResourceType_Texture,
                        .handle = builder.get_output_handle( "svgf_wavelet_pass", "reflections_denoised_output" ) } );
     }
-    
+
     context.frame_graph->add_node_v2( {
         .inputs = inputs.as_cspan(),
         .outputs = {
@@ -104,12 +107,11 @@ void LightingPass::update_psos( FrameGraphResourceContext& context, PipelineUpda
     ShaderCompilationCreation scc = {
         .stages = {
             {
-                .source_file_path = "glsl/pbr.glsl",
+                .source = { .glsl = "glsl/pbr.glsl" },
                 .type = VK_SHADER_STAGE_COMPUTE_BIT,
             },
         },
         .name = "deferred_lighting_compute",
-        .slang_input = 0,
     };
 
     if ( context.render_config->raytraced_shadows.enabled ) {
@@ -132,6 +134,7 @@ void LightingPass::update_psos( FrameGraphResourceContext& context, PipelineUpda
 }
 
 void LightingPass::render( FrameGraphRenderContext& context ) {
+    const ShaderLanguage language = context.render_config->shader_language();
 
     if ( !enabled )
         return;
@@ -146,7 +149,7 @@ void LightingPass::render( FrameGraphRenderContext& context ) {
 
         gpu_commands->flush_barriers();
 
-        gpu_commands->bind_pipeline( compute_pipeline.pipeline );
+        gpu_commands->bind_pipeline( compute_pipeline.active( language ) );
 
         gpu_commands->bind_descriptor_set( { renderer->gpu->bindless_descriptor_set, lighting_descriptor_set[ current_frame_index ] },
                                             { render_blackboard.scene_cb_offset, constants_offset, render_blackboard.lighting.lighting_constants_cb_offset } );
@@ -224,6 +227,7 @@ void LightingPass::create_gpu_resources( FrameGraphResourceContext& context ) {
 
     FrameGraph* frame_graph = context.frame_graph;
     RenderScene* scene = context.render_scene;
+    FrameGraphBuilder& builder = *context.frame_graph->builder;
 
     FrameGraphNode* node = frame_graph->get_node( "lighting_pass" );
     if ( node == nullptr ) {
@@ -240,19 +244,31 @@ void LightingPass::create_gpu_resources( FrameGraphResourceContext& context ) {
 
     Renderer* renderer = context.renderer;
     const u64 hashed_name = hash_calculate( "pbr_lighting" );
-    
+
     color_texture = get_output_texture( frame_graph, node->inputs[ 0 ] );
     normal_texture = get_output_texture( frame_graph, node->inputs[ 1 ] );
     roughness_texture = get_output_texture( frame_graph, node->inputs[ 2 ] );
     emissive_texture = get_output_texture( frame_graph, node->inputs[ 3 ] );
     depth_texture = get_output_texture( frame_graph, node->inputs[ 4 ] );
+    debug_texture = get_output_texture( frame_graph, builder.get_output_handle( "gbuffer_pass_late", "gbuffer_debug" ) );
 
     output_texture = frame_graph->access_resource( node->outputs[ 0 ] );
 
     // Create debug texture
-    ImageCreation texture_creation;
-    texture_creation.set_size( 1280, 800, 1 ).set_layers( 1 ).set_mips( 1 ).set_format_type( VK_FORMAT_R16G16B16A16_SFLOAT, TextureType::Texture2D )
-        .set_flags( TextureFlags::RenderTarget_mask | TextureFlags::Compute_mask ).set_name( "lighting_debug_texture" );
+    ImageCreation texture_creation{
+        .image_type        = VK_IMAGE_TYPE_2D,
+        .format            = VK_FORMAT_R16G16B16A16_SFLOAT,
+        .width             = 1280,
+        .height            = 800,
+        .depth             = 1,
+        .mip_level_count   = 1,
+        .array_layer_count = 1,
+        .usage             = VK_IMAGE_USAGE_SAMPLED_BIT |
+                             VK_IMAGE_USAGE_STORAGE_BIT |
+                             VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT |
+                             VK_IMAGE_USAGE_TRANSFER_DST_BIT |
+                             VK_IMAGE_USAGE_TRANSFER_SRC_BIT,
+        .name              = "lighting_debug_texture" };
 
     lighting_debug_texture = renderer->gpu->create_image( texture_creation );
     lighting_debug_image_view = renderer->gpu->create_image_view( {
@@ -321,7 +337,7 @@ void LightingPass::create_descriptors( FrameGraphResourceContext& context ) {
 
     DescriptorSetBinder descriptors;
 
-    PipelineHandle pipeline = renderer->resource_cache.pipelines.get( hash_calculate( "deferred_lighting_compute" ) );
+    PipelineHandle pipeline = renderer->resource_cache.pipelines.get( hash_calculate( "deferred_lighting_compute" ) ).any();
     ShaderReflectionInfo* shader_reflection = renderer->get_shader_reflection( pipeline );
 
     for ( u32 i = 0; i < k_max_frames; ++i ) {
@@ -353,6 +369,7 @@ void LightingPass::upload_gpu_data( FrameGraphResourceContext& context ) {
         lighting_data->output_width = render_blackboard.render_width;
         lighting_data->output_height = render_blackboard.render_height;
         lighting_data->emissive = emissive_texture->resource_info.texture.image_view.index();
+        lighting_data->debug_index = debug_texture->resource_info.texture.image_view.index();
     }
 
     if ( renderer->gpu->fragment_shading_rate_present ) {

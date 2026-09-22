@@ -104,7 +104,7 @@ void PointlightShadowPass2::update_psos( FrameGraphResourceContext& context, Pip
         {
         .stages = {
             {
-                .source_file_path = "glsl/meshlet_shadows.glsl",
+                .source = { .glsl = "glsl/meshlet_shadows.glsl" },
                 .type = VK_SHADER_STAGE_COMPUTE_BIT,
             }
         },
@@ -119,7 +119,7 @@ void PointlightShadowPass2::update_psos( FrameGraphResourceContext& context, Pip
     renderer->create_compute_pipeline_state( {
         .stages = {
             {
-                .source_file_path = "glsl/meshlet_shadows.glsl",
+                .source = { .glsl = "glsl/meshlet_shadows.glsl" },
                 .type = VK_SHADER_STAGE_COMPUTE_BIT,
             }
         },
@@ -135,7 +135,7 @@ void PointlightShadowPass2::update_psos( FrameGraphResourceContext& context, Pip
         {
         .stages = {
             {
-                .source_file_path = "glsl/meshlet_shadows.glsl",
+                .source = { .glsl = "glsl/meshlet_shadows.glsl" },
                 .type = VK_SHADER_STAGE_COMPUTE_BIT,
             }
         },
@@ -151,7 +151,7 @@ void PointlightShadowPass2::update_psos( FrameGraphResourceContext& context, Pip
         {
         .stages = {
             {
-                .source_file_path = "glsl/meshlet_shadows.glsl",
+                .source = { .glsl = "glsl/meshlet_shadows.glsl" },
                 .type = VK_SHADER_STAGE_COMPUTE_BIT,
             }
         },
@@ -174,11 +174,11 @@ void PointlightShadowPass2::update_psos( FrameGraphResourceContext& context, Pip
         {
             .stages = {
                 {
-                    .source_file_path = "glsl/meshlet_shadows.glsl",
+                    .source = { .glsl = "glsl/meshlet_shadows.glsl" },
                     .type = VK_SHADER_STAGE_TASK_BIT_EXT,
                 },
                 {
-                    .source_file_path = "glsl/meshlet_shadows.glsl",
+                    .source = { .glsl = "glsl/meshlet_shadows.glsl" },
                     .type = VK_SHADER_STAGE_MESH_BIT_EXT,
                 }
             },
@@ -212,6 +212,7 @@ struct ShadowDrawPushConstants {
 };
 
 void PointlightShadowPass2::render( FrameGraphRenderContext& context ) {
+    const ShaderLanguage language = context.render_config->shader_language();
 
     // Skip rendering if shadows are disabled
     if ( context.render_config->shadows.disable_shadows ) {
@@ -244,14 +245,14 @@ void PointlightShadowPass2::render( FrameGraphRenderContext& context ) {
         cb->flush_barriers();
 
         // Calculate shadow resolutions
-        cb->bind_pipeline( shadow_resolution_pipeline.pipeline );
+        cb->bind_pipeline( shadow_resolution_pipeline.active( language ) );
 
         cb->bind_descriptor_set( { renderer->gpu->bindless_descriptor_set, shadow_resolution_descriptor_set[ frame_index ] },
                                  { context.render_blackboard->scene_cb_offset } );
 
         u32 depth_pyramid_texture_index = scene->mesh_draw_counts.depth_pyramid_texture_index;
 
-        cb->push_constants( shadow_resolution_pipeline.pipeline, 0, sizeof( depth_pyramid_texture_index ), &depth_pyramid_texture_index );
+        cb->push_constants( shadow_resolution_pipeline.active( language ), 0, sizeof( depth_pyramid_texture_index ), &depth_pyramid_texture_index );
 
         const u32 tile_size = 64;
 
@@ -320,7 +321,7 @@ void PointlightShadowPass2::render( FrameGraphRenderContext& context ) {
     RASSERT( draw_base[ 2 ] + draw_capacity[ 2 ] == max_draws );
 
     // Clear counters
-    cb->bind_pipeline( clear_counters_pipeline.pipeline );
+    cb->bind_pipeline( clear_counters_pipeline.active( language ) );
 
     cb->add_buffer_barrier( draw_keys, 0, VK_WHOLE_SIZE,
                             { VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
@@ -358,7 +359,7 @@ void PointlightShadowPass2::render( FrameGraphRenderContext& context ) {
 
     cb->flush_barriers();
 
-    cb->bind_pipeline( build_lists_pipeline.pipeline );
+    cb->bind_pipeline( build_lists_pipeline.active( language ) );
 
     cb->bind_descriptor_set( { renderer->gpu->bindless_descriptor_set, build_lists_ds[ frame_index ] },
                               { context.render_blackboard->scene_cb_offset } );
@@ -376,7 +377,7 @@ void PointlightShadowPass2::render( FrameGraphRenderContext& context ) {
         .draw_base = { draw_base[ 0 ], draw_base[ 1 ], draw_base[ 2 ] }
     };
 
-    cb->push_constants( build_lists_pipeline.pipeline, 0, sizeof( build_lists_push ), &build_lists_push );
+    cb->push_constants( build_lists_pipeline.active( language ), 0, sizeof( build_lists_push ), &build_lists_push );
     cb->dispatch( tiles_per_key, num_keys, 1 );
 
     cb->barrier_instant_compute_write_to_compute_read();
@@ -389,7 +390,7 @@ void PointlightShadowPass2::render( FrameGraphRenderContext& context ) {
 
     cb->flush_barriers();
 
-    cb->bind_pipeline( build_indirect_cmds_pipeline.pipeline );
+    cb->bind_pipeline( build_indirect_cmds_pipeline.active( language ) );
 
     cb->bind_descriptor_set( { renderer->gpu->bindless_descriptor_set, build_indirect_cmds_ds[ frame_index ] },
                               { context.render_blackboard->scene_cb_offset } );
@@ -407,7 +408,7 @@ void PointlightShadowPass2::render( FrameGraphRenderContext& context ) {
 
     const u32 group_x = raptor::ceilu32( max_bucket_draws / 64.0f );
 
-    cb->push_constants( build_indirect_cmds_pipeline.pipeline, 0,
+    cb->push_constants( build_indirect_cmds_pipeline.active( language ), 0,
                         sizeof( indirect_push ), &indirect_push );
 
     cb->dispatch( group_x, k_shadow_mip_count, 1 );
@@ -562,7 +563,7 @@ void PointlightShadowPass2::render( FrameGraphRenderContext& context ) {
         cb->set_fullscreen_viewport();
         cb->set_fullscreen_scissor();
 
-        cb->bind_pipeline( meshlet_draw_pipeline.pipeline );
+        cb->bind_pipeline( meshlet_draw_pipeline.active( language ) );
 
         cb->bind_descriptor_set( { renderer->gpu->bindless_descriptor_set, meshlet_draw_ds[ frame_index ] },
                                  { context.render_blackboard->scene_cb_offset } );
@@ -578,7 +579,7 @@ void PointlightShadowPass2::render( FrameGraphRenderContext& context ) {
             .draw_meta_base = draw_base[ mip ]
         };
 
-        cb->push_constants( meshlet_draw_pipeline.pipeline, 0, sizeof( draw_push ), &draw_push );
+        cb->push_constants( meshlet_draw_pipeline.active( language ), 0, sizeof( draw_push ), &draw_push );
 
         const u32 argument_offset = draw_base[ mip ] * sizeof( VkDrawMeshTasksIndirectCommandEXT );
         const u32 count_offset = mip * sizeof( u32 );
@@ -678,8 +679,11 @@ void PointlightShadowPass2::create_gpu_resources( FrameGraphResourceContext& con
     //// Create cubemap debug texture
     //// TODO(marco): these textures should only be created once, we only need to change
     //// the pages that are bound
-    //texture_creation.reset().set_size( layer_width, layer_height, 1 ).set_format_type( depth_texture_format, TextureType::Texture2D )
-    //    .set_flags( TextureFlags::RenderTarget_mask ).set_name( "cubemap_array_debug" );
+    //texture_creation = { .image_type = VK_IMAGE_TYPE_2D, .format = depth_texture_format,
+    //                     .width = layer_width, .height = layer_height, .depth = 1,
+    //                     .usage = VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT |
+    //                              VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT,
+    //                     .name = "cubemap_array_debug" };
     //cubemap_debug_face_image = gpu.create_image( texture_creation );
 
     //cubemap_debug_face_image_view = gpu.create_image_view( {
@@ -702,35 +706,35 @@ void PointlightShadowPass2::create_gpu_resources( FrameGraphResourceContext& con
 
     for ( u32 i = 0; i < k_max_frames; ++i ) {
 
-        shader_reflection = renderer->get_shader_reflection( clear_counters_pipeline.pipeline );
+        shader_reflection = renderer->get_shader_reflection( clear_counters_pipeline.any() );
         descriptors.reset();
         add_descriptors( descriptors, shader_reflection, shadows, i );
         descriptors.name = "point_shadows_clear_ds";
-        clear_counters_ds[ i ] = renderer->create_descriptor_set( descriptors, shader_reflection, clear_counters_pipeline.pipeline, i, render_blackboard );
+        clear_counters_ds[ i ] = renderer->create_descriptor_set( descriptors, shader_reflection, clear_counters_pipeline.any(), i, render_blackboard );
 
-        shader_reflection = renderer->get_shader_reflection( build_lists_pipeline.pipeline );
+        shader_reflection = renderer->get_shader_reflection( build_lists_pipeline.any() );
         descriptors.reset();
         add_descriptors( descriptors, shader_reflection, shadows, i );
         descriptors.name = "point_shadows_build_lists_ds";
-        build_lists_ds[ i ] = renderer->create_descriptor_set( descriptors, shader_reflection, build_lists_pipeline.pipeline, i, render_blackboard );
+        build_lists_ds[ i ] = renderer->create_descriptor_set( descriptors, shader_reflection, build_lists_pipeline.any(), i, render_blackboard );
 
-        shader_reflection = renderer->get_shader_reflection( build_indirect_cmds_pipeline.pipeline );
+        shader_reflection = renderer->get_shader_reflection( build_indirect_cmds_pipeline.any() );
         descriptors.reset();
         add_descriptors( descriptors, shader_reflection, shadows, i );
         descriptors.name = "point_shadows_build_indirect_ds";
-        build_indirect_cmds_ds[ i ] = renderer->create_descriptor_set( descriptors, shader_reflection, build_indirect_cmds_pipeline.pipeline, i, render_blackboard );
+        build_indirect_cmds_ds[ i ] = renderer->create_descriptor_set( descriptors, shader_reflection, build_indirect_cmds_pipeline.any(), i, render_blackboard );
 
-        shader_reflection = renderer->get_shader_reflection( meshlet_draw_pipeline.pipeline );
+        shader_reflection = renderer->get_shader_reflection( meshlet_draw_pipeline.any() );
         descriptors.reset();
         add_descriptors( descriptors, shader_reflection, shadows, i );
         descriptors.name = "point_shadows_meshlet_draw_ds";
-        meshlet_draw_ds[ i ] = renderer->create_descriptor_set( descriptors, shader_reflection, meshlet_draw_pipeline.pipeline, i, render_blackboard );
+        meshlet_draw_ds[ i ] = renderer->create_descriptor_set( descriptors, shader_reflection, meshlet_draw_pipeline.any(), i, render_blackboard );
 
-        shader_reflection = renderer->get_shader_reflection( shadow_resolution_pipeline.pipeline );
+        shader_reflection = renderer->get_shader_reflection( shadow_resolution_pipeline.any() );
         descriptors.reset();
         add_descriptors( descriptors, shader_reflection, shadows, i );
         descriptors.name = "point_shadows_shadow_resolution_ds";
-        shadow_resolution_descriptor_set[ i ] = renderer->create_descriptor_set( descriptors, shader_reflection, shadow_resolution_pipeline.pipeline, i, render_blackboard );
+        shadow_resolution_descriptor_set[ i ] = renderer->create_descriptor_set( descriptors, shader_reflection, shadow_resolution_pipeline.any(), i, render_blackboard );
     }
 }
 
@@ -923,9 +927,21 @@ void PointlightShadowPass2::recreate_lightcount_dependent_resources( FrameGraphR
 
     VkFormat depth_texture_format = VK_FORMAT_D16_UNORM;
 
-    texture_creation.set_size( layer_width, layer_height, 1 ).set_layers( layer_count ).set_mips( k_shadow_mip_count )
-        .set_format_type( depth_texture_format, TextureType::Texture_Cube_Array )
-        .set_flags( TextureFlags::RenderTarget_mask | TextureFlags::Sparse_mask ).set_name( "depth_cubemap_array" );
+    texture_creation.create_flags      = VK_IMAGE_CREATE_CUBE_COMPATIBLE_BIT |
+                                         VK_IMAGE_CREATE_SPARSE_RESIDENCY_BIT |
+                                         VK_IMAGE_CREATE_SPARSE_BINDING_BIT;
+    texture_creation.image_type        = VK_IMAGE_TYPE_2D;
+    texture_creation.format            = depth_texture_format;
+    texture_creation.width             = layer_width;
+    texture_creation.height            = layer_height;
+    texture_creation.depth             = 1;
+    texture_creation.mip_level_count   = k_shadow_mip_count;
+    texture_creation.array_layer_count = layer_count;
+    texture_creation.usage             = VK_IMAGE_USAGE_SAMPLED_BIT |
+                                         VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT |
+                                         VK_IMAGE_USAGE_TRANSFER_DST_BIT |
+                                         VK_IMAGE_USAGE_TRANSFER_SRC_BIT;
+    texture_creation.name              = "depth_cubemap_array";
     cubemap_shadow_array_image = gpu.create_image( texture_creation );
 
     gpu.link_image_sampler( cubemap_shadow_array_image, gpu.global_samplers[ GlobalSamplers::ShadowLinearClamp ] );

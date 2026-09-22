@@ -584,9 +584,14 @@ void GpuDevice::init( const GpuDeviceCreation& creation ) {
     }
 
     ray_tracing_pipeline_properties = VkPhysicalDeviceRayTracingPipelinePropertiesKHR{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_RAY_TRACING_PIPELINE_PROPERTIES_KHR };
+    acceleration_structure_properties = VkPhysicalDeviceAccelerationStructurePropertiesKHR{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_ACCELERATION_STRUCTURE_PROPERTIES_KHR };
+
     if ( ray_tracing_present ) {
         ray_tracing_pipeline_properties.pNext = physical_device_properties_pnext;
         physical_device_properties_pnext = &ray_tracing_pipeline_properties;
+
+        acceleration_structure_properties.pNext = physical_device_properties_pnext;
+        physical_device_properties_pnext = &acceleration_structure_properties;
     }
 
     if ( pipeline_binary_present ) {
@@ -1217,30 +1222,53 @@ void GpuDevice::init( const GpuDeviceCreation& creation ) {
     //
     // Init primitive resources
     //
-    SamplerCreation sc{};
-    sc.set_address_mode_uvw( VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE, VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE, VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE )
-        .set_min_mag_mip( VK_FILTER_LINEAR, VK_FILTER_LINEAR, VK_SAMPLER_MIPMAP_MODE_LINEAR ).set_name( "Sampler Linear Clamp" );
-    global_samplers[ GlobalSamplers::LinearClamp ] = create_sampler( sc );
+    global_samplers[ GlobalSamplers::LinearClamp ] = create_sampler( {
+    .min_filter = VK_FILTER_LINEAR,
+    .mag_filter = VK_FILTER_LINEAR,
+    .mip_filter = VK_SAMPLER_MIPMAP_MODE_LINEAR,
+    .address_mode_u = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE,
+    .address_mode_v = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE,
+    .address_mode_w = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE,
+    .name = "Sampler Linear Clamp" } );
 
-    sc.set_address_mode_uvw( VK_SAMPLER_ADDRESS_MODE_REPEAT, VK_SAMPLER_ADDRESS_MODE_REPEAT, VK_SAMPLER_ADDRESS_MODE_REPEAT ).set_name( "Sampler Linear Repeat" );
-    global_samplers[ GlobalSamplers::LinearRepeat ] = create_sampler( sc );
+    global_samplers[ GlobalSamplers::LinearRepeat ] = create_sampler( {
+        .min_filter = VK_FILTER_LINEAR,
+        .mag_filter = VK_FILTER_LINEAR,
+        .mip_filter = VK_SAMPLER_MIPMAP_MODE_LINEAR,
+        .address_mode_u = VK_SAMPLER_ADDRESS_MODE_REPEAT,
+        .address_mode_v = VK_SAMPLER_ADDRESS_MODE_REPEAT,
+        .address_mode_w = VK_SAMPLER_ADDRESS_MODE_REPEAT,
+        .name = "Sampler Linear Repeat" } );
 
-    sc.set_address_mode_uvw( VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE, VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE, VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE )
-        .set_min_mag_mip( VK_FILTER_NEAREST, VK_FILTER_NEAREST, VK_SAMPLER_MIPMAP_MODE_NEAREST ).set_name( "Sampler Nearest Clamp" );
+    global_samplers[ GlobalSamplers::NearestClamp ] = create_sampler( {
+        .min_filter = VK_FILTER_NEAREST,
+        .mag_filter = VK_FILTER_NEAREST,
+        .mip_filter = VK_SAMPLER_MIPMAP_MODE_NEAREST,
+        .address_mode_u = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE,
+        .address_mode_v = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE,
+        .address_mode_w = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE,
+        .name = "Sampler Nearest Clamp" } );
 
-    global_samplers[ GlobalSamplers::NearestClamp ] = create_sampler( sc );
+    global_samplers[ GlobalSamplers::NearestRepeat ] = create_sampler( {
+        .min_filter = VK_FILTER_NEAREST,
+        .mag_filter = VK_FILTER_NEAREST,
+        .mip_filter = VK_SAMPLER_MIPMAP_MODE_NEAREST,
+        .address_mode_u = VK_SAMPLER_ADDRESS_MODE_REPEAT,
+        .address_mode_v = VK_SAMPLER_ADDRESS_MODE_REPEAT,
+        .address_mode_w = VK_SAMPLER_ADDRESS_MODE_REPEAT,
+        .name = "Sampler Nearest Repeat" } );
 
-    sc.set_address_mode_uvw( VK_SAMPLER_ADDRESS_MODE_REPEAT, VK_SAMPLER_ADDRESS_MODE_REPEAT, VK_SAMPLER_ADDRESS_MODE_REPEAT )
-        .set_min_mag_mip( VK_FILTER_NEAREST, VK_FILTER_NEAREST, VK_SAMPLER_MIPMAP_MODE_NEAREST ).set_name( "Sampler Nearest Repeat" );
-
-    global_samplers[ GlobalSamplers::NearestRepeat ] = create_sampler( sc );
-
-    sc.set_address_mode_uvw( VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE, VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE, VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE )
-        .set_min_mag_mip( VK_FILTER_LINEAR, VK_FILTER_LINEAR, VK_SAMPLER_MIPMAP_MODE_NEAREST ).set_name( "Sampler Shadow Linear Clamp" );
-    sc.compare_enable = VK_TRUE;
-    sc.compare_op = VK_COMPARE_OP_LESS;
-
-    global_samplers[ GlobalSamplers::ShadowLinearClamp ] = create_sampler( sc );
+    // Comparison sampler for shadow map PCF: min/mag lineari, mip nearest.
+    global_samplers[ GlobalSamplers::ShadowLinearClamp ] = create_sampler( {
+        .min_filter = VK_FILTER_LINEAR,
+        .mag_filter = VK_FILTER_LINEAR,
+        .mip_filter = VK_SAMPLER_MIPMAP_MODE_NEAREST,
+        .address_mode_u = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE,
+        .address_mode_v = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE,
+        .address_mode_w = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE,
+        .compare_enable = VK_TRUE,
+        .compare_op = VK_COMPARE_OP_LESS,
+        .name = "Sampler Shadow Linear Clamp" } );
 
     {
         const VkDeviceSize fullscreen_size = 3 * 3 * sizeof( f32 );
@@ -1267,8 +1295,14 @@ void GpuDevice::init( const GpuDeviceCreation& creation ) {
     }
 
     // Init Dummy resources
-    ImageCreation dummy_image_creation;
-    dummy_image_creation.set_size( 1, 1, 1 ).set_flags( TextureFlags::Mask::RenderTarget_mask | TextureFlags::Mask::Compute_mask ).set_format_type( VK_FORMAT_R8_UNORM, TextureType::Texture2D ).set_name( "Dummy_texture" );
+    ImageCreation dummy_image_creation{
+        .image_type = VK_IMAGE_TYPE_2D,
+        .format     = VK_FORMAT_R8_UNORM,
+        .width      = 1, .height = 1, .depth = 1,
+        .usage      = VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_STORAGE_BIT |
+                      VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT |
+                      VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT,
+        .name       = "Dummy_texture" };
     dummy_image = create_image( dummy_image_creation );
 
     dummy_image_view = create_image_view( { .parent_image = dummy_image, .view_type = VK_IMAGE_VIEW_TYPE_2D,
@@ -1604,57 +1638,86 @@ void GpuDevice::shutdown() {
 }
 
 // Resource Creation ////////////////////////////////////////////////////////////
+bool vulkan_validate_image_creation( const ImageCreation& creation ) {
 
-static VkImageUsageFlags vulkan_get_image_usage( const ImageCreation& creation ) {
-    const bool is_render_target = ( creation.flags & TextureFlags::RenderTarget_mask ) == TextureFlags::RenderTarget_mask;
-    const bool is_compute_used = ( creation.flags & TextureFlags::Compute_mask ) == TextureFlags::Compute_mask;
-    const bool is_shading_rate_texture = ( creation.flags & TextureFlags::ShadingRate_mask ) == TextureFlags::ShadingRate_mask;
+    // VUID-VkImageCreateInfo-usage-requiredbitmask
+    RASSERTM( creation.usage != 0, "Image '%s': usage is 0. Every image must declare what it is for.", creation.name );
+    RASSERTM( creation.format != VK_FORMAT_UNDEFINED, "Image '%s': format is VK_FORMAT_UNDEFINED.", creation.name );
 
-    // Default to always readable from shader.
-    VkImageUsageFlags usage = VK_IMAGE_USAGE_SAMPLED_BIT;
+    // Image stores the extent in 16 bits, so a larger creation would be truncated.
+    RASSERTM( creation.width <= u16_max && creation.height <= u16_max && creation.depth <= u16_max,
+              "Image '%s': extent %ux%ux%u does not fit in the 16 bits Image uses.", creation.name,
+              creation.width, creation.height, creation.depth );
+    RASSERTM( creation.mip_level_count <= u8_max, "Image '%s': %u mip levels do not fit in 8 bits.", creation.name, creation.mip_level_count );
+    RASSERTM( creation.array_layer_count <= u16_max, "Image '%s': %u array layers do not fit in 16 bits.", creation.name, creation.array_layer_count );
 
-    usage |= is_compute_used ? VK_IMAGE_USAGE_STORAGE_BIT : 0;
+    // Initial data is uploaded through a staging buffer copy.
+    RASSERTM( creation.initial_data == nullptr || ( creation.usage & VK_IMAGE_USAGE_TRANSFER_DST_BIT ),
+              "Image '%s': initial_data is set but VK_IMAGE_USAGE_TRANSFER_DST_BIT is missing.", creation.name );
 
-    usage |= is_shading_rate_texture ? VK_IMAGE_USAGE_FRAGMENT_SHADING_RATE_ATTACHMENT_BIT_KHR : 0;
+    // A depth/stencil format is never a color attachment, and vice versa.
+    const bool has_depth_or_stencil = TextureFormat::has_depth_or_stencil( creation.format );
+    RASSERTM( !has_depth_or_stencil || !( creation.usage & VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT ),
+              "Image '%s': depth/stencil format with VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT.", creation.name );
+    RASSERTM( has_depth_or_stencil || !( creation.usage & VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT ),
+              "Image '%s': color format with VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT.", creation.name );
 
-    if ( TextureFormat::has_depth_or_stencil( creation.format ) ) {
-        // Depth/Stencil textures are normally textures you render into.
-        usage |= VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT;
-        usage |= VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT; // TODO
-
-    } else {
-        usage |= VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT; // TODO
-        usage |= is_render_target ? VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT : 0;
+    // VUID-VkImageCreateInfo-imageType-00954 / -00961
+    if ( creation.create_flags & VK_IMAGE_CREATE_CUBE_COMPATIBLE_BIT ) {
+        RASSERTM( creation.image_type == VK_IMAGE_TYPE_2D,
+                  "Image '%s': VK_IMAGE_CREATE_CUBE_COMPATIBLE_BIT requires VK_IMAGE_TYPE_2D.", creation.name );
+        RASSERTM( creation.width == creation.height,
+                  "Image '%s': a cube compatible image must be square, got %ux%u.", creation.name, creation.width, creation.height );
+        RASSERTM( ( creation.array_layer_count % 6 ) == 0,
+                  "Image '%s': a cube compatible image needs a multiple of 6 layers, got %u.", creation.name, creation.array_layer_count );
     }
 
-    return usage;
+    // VUID-VkImageCreateInfo-extent-00ic / -arrayLayers-00948
+    if ( creation.image_type == VK_IMAGE_TYPE_1D ) {
+        RASSERTM( creation.height == 1 && creation.depth == 1,
+                  "Image '%s': VK_IMAGE_TYPE_1D requires height and depth of 1.", creation.name );
+    } else if ( creation.image_type == VK_IMAGE_TYPE_2D ) {
+        RASSERTM( creation.depth == 1, "Image '%s': VK_IMAGE_TYPE_2D requires a depth of 1.", creation.name );
+    } else if ( creation.image_type == VK_IMAGE_TYPE_3D ) {
+        RASSERTM( creation.array_layer_count == 1,
+                  "Image '%s': VK_IMAGE_TYPE_3D cannot have array layers.", creation.name );
+    }
+
+    // Sparse residency implies sparse binding, and neither works with initial data.
+    if ( creation.create_flags & VK_IMAGE_CREATE_SPARSE_RESIDENCY_BIT ) {
+        RASSERTM( creation.create_flags & VK_IMAGE_CREATE_SPARSE_BINDING_BIT,
+                  "Image '%s': SPARSE_RESIDENCY requires SPARSE_BINDING.", creation.name );
+        RASSERTM( creation.initial_data == nullptr,
+                  "Image '%s': a sparse image cannot be created with initial_data.", creation.name );
+    }
+
+    return true;
 }
 
 static void vulkan_create_image( GpuDevice& gpu, const ImageCreation& creation, ImageHandle handle, Image* image ) {
 
-    bool is_cubemap = false;
-    u32 layer_count = creation.array_layer_count;
-    if ( creation.type == TextureType::TextureCube || creation.type == TextureType::Texture_Cube_Array ) {
-        is_cubemap = true;
-    }
+    vulkan_validate_image_creation( creation );
 
-    const bool is_sparse_texture = ( creation.flags & TextureFlags::Sparse_mask ) == TextureFlags::Sparse_mask;
+    const u32 layer_count = creation.array_layer_count;
+    // Sparse residency changes both the allocation and the destruction path, so
+    // it is cached on the image instead of being re-derived from the flags.
+    const bool is_sparse_image = ( creation.create_flags & VK_IMAGE_CREATE_SPARSE_RESIDENCY_BIT ) != 0;
 
-    image->width = creation.width;
-    image->height = creation.height;
-    image->depth = creation.depth;
+    image->width = ( u16 )creation.width;
+    image->height = ( u16 )creation.height;
+    image->depth = ( u16 )creation.depth;
     image->mip_base_level = 0;        // For new textures, we have a view that is for all mips and layers.
     image->array_base_layer = 0;      // For new textures, we have a view that is for all mips and layers.
-    image->array_layer_count = layer_count;
-    image->mip_level_count = creation.mip_level_count;
-    image->type = creation.type;
+    image->array_layer_count = ( u16 )layer_count;
+    image->mip_level_count = ( u8 )creation.mip_level_count;
+    image->vk_image_type = creation.image_type;
+    image->vk_create_flags = creation.create_flags;
     image->name = creation.name;
     image->vk_format = creation.format;
-    image->vk_usage = vulkan_get_image_usage( creation );
+    image->vk_usage = creation.usage;
     image->sampler = nullptr;
-    image->flags = creation.flags;
     image->handle = handle;
-    image->sparse = is_sparse_texture;
+    image->sparse = is_sparse_image;
     image->alias_image = ImageHandle();
     image->vma_allocation = 0;
     image->sync_state = {};
@@ -1664,8 +1727,8 @@ static void vulkan_create_image( GpuDevice& gpu, const ImageCreation& creation, 
     //// Create the image
     VkImageCreateInfo image_info = { VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO };
     image_info.format = image->vk_format;
-    image_info.flags = ( is_cubemap ? VK_IMAGE_CREATE_CUBE_COMPATIBLE_BIT : 0 ) | ( is_sparse_texture ? ( VK_IMAGE_CREATE_SPARSE_RESIDENCY_BIT | VK_IMAGE_CREATE_SPARSE_BINDING_BIT ) : 0 );
-    image_info.imageType = to_vk_image_type( image->type );
+    image_info.flags = creation.create_flags;
+    image_info.imageType = creation.image_type;
     image_info.extent.width = creation.width;
     image_info.extent.height = creation.height;
     image_info.extent.depth = creation.depth;
@@ -1683,7 +1746,7 @@ static void vulkan_create_image( GpuDevice& gpu, const ImageCreation& creation, 
     rprint( "creating tex %s\n", creation.name );
 
     if ( creation.alias.is_invalid() ) {
-        if ( is_sparse_texture ) {
+        if ( is_sparse_image ) {
             check( vkCreateImage( gpu.vulkan_device, &image_info, gpu.vulkan_allocation_callbacks, &image->vk_image ) );
         } else {
             check( vmaCreateImage( gpu.vma_allocator, &image_info, &memory_info,
@@ -1696,7 +1759,7 @@ static void vulkan_create_image( GpuDevice& gpu, const ImageCreation& creation, 
     } else {
         Image* alias_texture = gpu.get_image( creation.alias );
         RASSERT( alias_texture != nullptr );
-        RASSERT( !is_sparse_texture );
+        RASSERT( !is_sparse_image );
 
         check( vmaCreateAliasingImage( gpu.vma_allocator, alias_texture->vma_allocation, &image_info, &image->vk_image ) );
         image->alias_image = creation.alias;
@@ -2040,33 +2103,43 @@ BLASHandle GpuDevice::create_blas( const BLASCreation& creation ) {
         const BLASGeometry& blas_geometry = creation.geometries[ i ];
 
         VkAccelerationStructureGeometryKHR& geometry = build_info.geometries.push_use();
-        geometry = { VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_KHR };
-        geometry.geometryType = VK_GEOMETRY_TYPE_TRIANGLES_KHR;
-        geometry.flags = blas_geometry.opaque ? VK_GEOMETRY_OPAQUE_BIT_KHR : 0;
+        geometry = {
+            .sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_KHR,
+            .geometryType = VK_GEOMETRY_TYPE_TRIANGLES_KHR,
 
-        geometry.geometry.triangles.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_TRIANGLES_DATA_KHR;
-        geometry.geometry.triangles.vertexFormat = VK_FORMAT_R32G32B32_SFLOAT;
-        geometry.geometry.triangles.vertexData.deviceAddress = get_buffer_device_address( blas_geometry.vertex_buffer ) + blas_geometry.vertex_buffer_offset;
-        geometry.geometry.triangles.vertexStride = blas_geometry.vertex_stride;
-        geometry.geometry.triangles.maxVertex = blas_geometry.max_vertex;
-        geometry.geometry.triangles.indexType = blas_geometry.index_type;
-        geometry.geometry.triangles.indexData.deviceAddress = get_buffer_device_address( blas_geometry.index_buffer );
-        geometry.geometry.triangles.transformData.deviceAddress = blas_geometry.transform_buffer.is_valid() ? get_buffer_device_address(blas_geometry.transform_buffer) : 0;
+            .geometry = {
+                .triangles = {
+                    .sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_TRIANGLES_DATA_KHR,
+                    .vertexFormat = VK_FORMAT_R32G32B32_SFLOAT,
+                    .vertexData = {.deviceAddress = get_buffer_device_address( blas_geometry.vertex_buffer ) + blas_geometry.vertex_buffer_offset },
+                    .vertexStride = blas_geometry.vertex_stride,
+                    .maxVertex = blas_geometry.max_vertex,
+                    .indexType = blas_geometry.index_type,
+                    .indexData = {.deviceAddress = get_buffer_device_address( blas_geometry.index_buffer ) },
+                    .transformData = {.deviceAddress = blas_geometry.transform_buffer.is_valid() ? get_buffer_device_address( blas_geometry.transform_buffer ) : 0 }
+                }
+            },
+            .flags = blas_geometry.opaque ? VK_GEOMETRY_OPAQUE_BIT_KHR : 0u,
+        };
 
         VkAccelerationStructureBuildRangeInfoKHR& build_range_info = build_info.ranges.push_use();
-        build_range_info.primitiveCount = blas_geometry.primitive_count;
-        build_range_info.primitiveOffset = blas_geometry.index_buffer_offset;
-        build_range_info.transformOffset = blas_geometry.transform_buffer_offset;
-        build_range_info.firstVertex = 0;
+        build_range_info = {
+            .primitiveCount = blas_geometry.primitive_count,
+            .primitiveOffset = blas_geometry.index_buffer_offset,
+            .firstVertex = 0,
+            .transformOffset = blas_geometry.transform_buffer_offset
+        };
     }
 
     VkAccelerationStructureBuildGeometryInfoKHR& blas_build_info = build_info.build_info;
-    blas_build_info = { VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_BUILD_GEOMETRY_INFO_KHR };
-    blas_build_info.type = VK_ACCELERATION_STRUCTURE_TYPE_BOTTOM_LEVEL_KHR;
-    blas_build_info.flags = VK_BUILD_ACCELERATION_STRUCTURE_PREFER_FAST_TRACE_BIT_KHR | VK_BUILD_ACCELERATION_STRUCTURE_ALLOW_COMPACTION_BIT_KHR;
-    blas_build_info.mode = VK_BUILD_ACCELERATION_STRUCTURE_MODE_BUILD_KHR;
-    blas_build_info.geometryCount = build_info.geometries.size;
-    blas_build_info.pGeometries = build_info.geometries.data;
+    blas_build_info = {
+        .sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_BUILD_GEOMETRY_INFO_KHR,
+        .type = VK_ACCELERATION_STRUCTURE_TYPE_BOTTOM_LEVEL_KHR,
+        .flags = VK_BUILD_ACCELERATION_STRUCTURE_PREFER_FAST_TRACE_BIT_KHR | VK_BUILD_ACCELERATION_STRUCTURE_ALLOW_COMPACTION_BIT_KHR,
+        .mode = VK_BUILD_ACCELERATION_STRUCTURE_MODE_BUILD_KHR,
+        .geometryCount = build_info.geometries.size,
+        .pGeometries = build_info.geometries.data
+    };
 
     ArenaAllocator* temp_allocator = MemoryService::instance()->get_thread_allocator();
     sizet base_marker = temp_allocator->get_marker();
@@ -2102,7 +2175,7 @@ BLASHandle GpuDevice::create_blas( const BLASCreation& creation ) {
     RASSERT( v_blas_buffer );
     RASSERT( v_blas_buffer->vk_buffer != VK_NULL_HANDLE );
 
-    const VkDeviceSize scratch_alignment = 128;// acceleration_structure_properties.minAccelerationStructureScratchOffsetAlignment;
+    const VkDeviceSize scratch_alignment = acceleration_structure_properties.minAccelerationStructureScratchOffsetAlignment;
 
     const AccelerationStructureScratch blas_scratch = create_acceleration_structure_scratch( *this, blas_build_size_info.buildScratchSize,
                                                                                              scratch_alignment, "blas_scratch_buffer" );
@@ -2114,12 +2187,12 @@ BLASHandle GpuDevice::create_blas( const BLASCreation& creation ) {
     }
 
     VkAccelerationStructureCreateInfoKHR blas_create_info{
-        VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_CREATE_INFO_KHR
+        .sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_CREATE_INFO_KHR,
+        .buffer = v_blas_buffer->vk_buffer,
+        .offset = 0,
+        .size = blas_build_size_info.accelerationStructureSize,
+        .type = VK_ACCELERATION_STRUCTURE_TYPE_BOTTOM_LEVEL_KHR
     };
-    blas_create_info.buffer = v_blas_buffer->vk_buffer;
-    blas_create_info.offset = 0;
-    blas_create_info.size = blas_build_size_info.accelerationStructureSize;
-    blas_create_info.type = VK_ACCELERATION_STRUCTURE_TYPE_BOTTOM_LEVEL_KHR;
 
     BLAS* blas = get_blas( handle );
 
@@ -2179,13 +2252,14 @@ TLASHandle GpuDevice::create_tlas( const TLASCreation& creation ) {
         const VkDeviceAddress blas_address = vkGetAccelerationStructureDeviceAddressKHR( vulkan_device, &blas_address_info );
 
         VkAccelerationStructureInstanceKHR& tlas_instance = instances.push_use();
-        tlas_instance = {};
-        tlas_instance.transform = source_instance.transform;
-        tlas_instance.instanceCustomIndex = source_instance.instance_custom_index;
-        tlas_instance.instanceShaderBindingTableRecordOffset = source_instance.sbt_record_offset;
-        tlas_instance.mask = source_instance.mask;
-        tlas_instance.flags = source_instance.flags;
-        tlas_instance.accelerationStructureReference = blas_address;
+        tlas_instance = {
+            .transform = source_instance.transform,
+            .instanceCustomIndex = source_instance.instance_custom_index,
+            .mask = source_instance.mask,
+            .instanceShaderBindingTableRecordOffset = source_instance.sbt_record_offset,
+            .flags = source_instance.flags,
+            .accelerationStructureReference = blas_address,
+        };
     }
 
     const VkDeviceSize instance_buffer_size = sizeof( VkAccelerationStructureInstanceKHR ) * creation.instances.size;
@@ -2222,11 +2296,17 @@ TLASHandle GpuDevice::create_tlas( const TLASCreation& creation ) {
     TLASBuildInfo& build_info = tlas_build_requests.push_use();
 
     VkAccelerationStructureGeometryKHR& tlas_geometry = build_info.geometry;
-    tlas_geometry = { VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_KHR };
-    tlas_geometry.geometryType = VK_GEOMETRY_TYPE_INSTANCES_KHR;
-    tlas_geometry.geometry.instances.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_INSTANCES_DATA_KHR;
-    tlas_geometry.geometry.instances.arrayOfPointers = VK_FALSE;
-    tlas_geometry.geometry.instances.data.deviceAddress = instance_buffer_address;
+    tlas_geometry = {
+        .sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_KHR,
+        .geometryType = VK_GEOMETRY_TYPE_INSTANCES_KHR,
+        .geometry = {
+            .instances = {
+                .sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_INSTANCES_DATA_KHR,
+                .arrayOfPointers = VK_FALSE,
+                .data = {.deviceAddress = instance_buffer_address }
+            }
+        }
+    };
 
     VkAccelerationStructureBuildGeometryInfoKHR& tlas_build_info = build_info.build_info;
     tlas_build_info = { VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_BUILD_GEOMETRY_INFO_KHR };
@@ -2262,7 +2342,7 @@ TLASHandle GpuDevice::create_tlas( const TLASCreation& creation ) {
     RASSERT( vk_tlas_buffer );
     RASSERT( vk_tlas_buffer->vk_buffer != VK_NULL_HANDLE );
 
-    const VkDeviceSize scratch_alignment = 128;//acceleration_structure_properties.minAccelerationStructureScratchOffsetAlignment;
+    const VkDeviceSize scratch_alignment = acceleration_structure_properties.minAccelerationStructureScratchOffsetAlignment;
 
     const AccelerationStructureScratch tlas_scratch = create_acceleration_structure_scratch( *this, tlas_build_size_info.buildScratchSize,
                                                                                              scratch_alignment, "tlas_scratch_buffer" );
@@ -2307,8 +2387,13 @@ TLASHandle GpuDevice::create_tlas( const TLASCreation& creation ) {
     RASSERT( tlas_build_info.scratchData.deviceAddress % scratch_alignment == 0 );
 
     VkAccelerationStructureBuildRangeInfoKHR& tlas_range_info = build_info.range;
-    tlas_range_info = {};
-    tlas_range_info.primitiveCount = ( u32 )creation.instances.size;
+
+    tlas_range_info = {
+        .primitiveCount = ( u32 )creation.instances.size,
+        .primitiveOffset = 0,
+        .firstVertex = 0,
+        .transformOffset = 0,
+    };
 
     // Cache information.
     tlas->scratch_buffer = tlas_scratch.buffer;
@@ -2875,39 +2960,48 @@ PipelineHandle GpuDevice::create_pipeline( const PipelineCreation& creation, con
         shader_group_info_array.init( temp_stack.allocator, RayTracingGroup::Count );
 
         VkRayTracingShaderGroupCreateInfoKHR& raygen_group = shader_group_info_array.push_use();
-        raygen_group = { VK_STRUCTURE_TYPE_RAY_TRACING_SHADER_GROUP_CREATE_INFO_KHR };
-        raygen_group.type = VK_RAY_TRACING_SHADER_GROUP_TYPE_GENERAL_KHR;
-        raygen_group.generalShader = raygen_stage_index;
-        raygen_group.closestHitShader = VK_SHADER_UNUSED_KHR;
-        raygen_group.anyHitShader = VK_SHADER_UNUSED_KHR;
-        raygen_group.intersectionShader = VK_SHADER_UNUSED_KHR;
+        raygen_group = {
+            .sType = VK_STRUCTURE_TYPE_RAY_TRACING_SHADER_GROUP_CREATE_INFO_KHR,
+            .type = VK_RAY_TRACING_SHADER_GROUP_TYPE_GENERAL_KHR,
+            .generalShader = raygen_stage_index,
+            .closestHitShader = VK_SHADER_UNUSED_KHR,
+            .anyHitShader = VK_SHADER_UNUSED_KHR,
+            .intersectionShader = VK_SHADER_UNUSED_KHR
+        };
 
         VkRayTracingShaderGroupCreateInfoKHR& miss_group = shader_group_info_array.push_use();
-        miss_group = { VK_STRUCTURE_TYPE_RAY_TRACING_SHADER_GROUP_CREATE_INFO_KHR };
-        miss_group.type = VK_RAY_TRACING_SHADER_GROUP_TYPE_GENERAL_KHR;
-        miss_group.generalShader = miss_stage_index;
-        miss_group.closestHitShader = VK_SHADER_UNUSED_KHR;
+        miss_group = {
+            .sType = VK_STRUCTURE_TYPE_RAY_TRACING_SHADER_GROUP_CREATE_INFO_KHR,
+            .type = VK_RAY_TRACING_SHADER_GROUP_TYPE_GENERAL_KHR,
+            .generalShader = miss_stage_index,
+            .closestHitShader = VK_SHADER_UNUSED_KHR,
+            .anyHitShader = VK_SHADER_UNUSED_KHR,
+            .intersectionShader = VK_SHADER_UNUSED_KHR
+        };
         miss_group.anyHitShader = VK_SHADER_UNUSED_KHR;
         miss_group.intersectionShader = VK_SHADER_UNUSED_KHR;
 
         VkRayTracingShaderGroupCreateInfoKHR& hit_group = shader_group_info_array.push_use();
-        hit_group = { VK_STRUCTURE_TYPE_RAY_TRACING_SHADER_GROUP_CREATE_INFO_KHR };
-        hit_group.type = VK_RAY_TRACING_SHADER_GROUP_TYPE_TRIANGLES_HIT_GROUP_KHR;
-        hit_group.generalShader = VK_SHADER_UNUSED_KHR;
-        hit_group.closestHitShader = hit_stage_index;
-        hit_group.anyHitShader = VK_SHADER_UNUSED_KHR;
-        hit_group.intersectionShader = VK_SHADER_UNUSED_KHR;
+        hit_group = {
+            .sType = VK_STRUCTURE_TYPE_RAY_TRACING_SHADER_GROUP_CREATE_INFO_KHR,
+            .type = VK_RAY_TRACING_SHADER_GROUP_TYPE_TRIANGLES_HIT_GROUP_KHR,
+            .generalShader = VK_SHADER_UNUSED_KHR,
+            .closestHitShader = hit_stage_index,
+            .anyHitShader = VK_SHADER_UNUSED_KHR,
+            .intersectionShader = VK_SHADER_UNUSED_KHR
+        };
 
-        VkRayTracingPipelineCreateInfoKHR pipeline_info{ VK_STRUCTURE_TYPE_RAY_TRACING_PIPELINE_CREATE_INFO_KHR };
-        pipeline_info.stageCount = shader_stage_info_array.size;
-        pipeline_info.pStages = shader_stage_info_array.data;
-        pipeline_info.groupCount = shader_group_info_array.size;
-        pipeline_info.pGroups = shader_group_info_array.data;
-        pipeline_info.maxPipelineRayRecursionDepth = 1;
-        pipeline_info.pLibraryInfo = nullptr;
-        pipeline_info.pLibraryInterface = nullptr;
-        pipeline_info.pDynamicState = nullptr;
-        pipeline_info.layout = pipeline->cached_vk_layout;
+        VkRayTracingPipelineCreateInfoKHR pipeline_info{
+            .sType = VK_STRUCTURE_TYPE_RAY_TRACING_PIPELINE_CREATE_INFO_KHR,
+            .stageCount = shader_stage_info_array.size,
+            .pStages = shader_stage_info_array.data,
+            .groupCount = shader_group_info_array.size,
+            .pGroups = shader_group_info_array.data,
+            .maxPipelineRayRecursionDepth = 1,
+            .pLibraryInfo = nullptr,
+            .pLibraryInterface = nullptr,
+            .pDynamicState = nullptr,
+            .layout = pipeline->cached_vk_layout };
 
         if ( pipeline_binary_present ) {
             bool valid_cache = false;
@@ -2951,8 +3045,6 @@ PipelineHandle GpuDevice::create_pipeline( const PipelineCreation& creation, con
         const u32 base_alignment = ray_tracing_pipeline_properties.shaderGroupBaseAlignment;
 
         const u32 sbt_record_stride = ( u32 )memory_align( handle_size, handle_alignment );
-        const u32 sbt_record_size = sbt_record_stride;
-
         const u32 group_handles_size = handle_size * group_count;
 
         sizet current_marker = temp_allocator->get_marker();
@@ -2995,7 +3087,7 @@ PipelineHandle GpuDevice::create_pipeline( const PipelineCreation& creation, con
 
         // Create unified SBT buffer
         pipeline->shader_binding_table = create_buffer( {
-            .size = sbt_buffer_size,
+            .size = sbt_buffer_size + base_alignment - 1,
             .usage = VK_BUFFER_USAGE_SHADER_BINDING_TABLE_BIT_KHR |
                      VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT,
             .memory_usage = VMA_MEMORY_USAGE_AUTO_PREFER_HOST,
@@ -3008,38 +3100,44 @@ PipelineHandle GpuDevice::create_pipeline( const PipelineCreation& creation, con
             return {};
         }
 
-        MapBufferParameters map{ .buffer = pipeline->shader_binding_table, .offset = 0, .size = (u32)sbt_buffer_size };
+        const VkDeviceAddress buffer_address = get_buffer_device_address( pipeline->shader_binding_table );
+        const VkDeviceAddress sbt_address = align_device_address( buffer_address, base_alignment );
+        const sizet sbt_data_offset = ( sizet )( sbt_address - buffer_address );
+
+        MapBufferParameters map{ .buffer = pipeline->shader_binding_table,
+                                 .offset = 0, .size = ( u32 )( sbt_buffer_size + base_alignment - 1 ) };
 
         void* mapped_data = map_buffer( map );
         RASSERT( mapped_data );
 
-        memcpy( mapped_data, sbt_data.data, sbt_buffer_size );
-        flush_buffer( pipeline->shader_binding_table, 0, ( u32 )sbt_buffer_size );
+        // Match the CPU copy location to the aligned GPU address.
+        memcpy( ( u8* )mapped_data + sbt_data_offset, sbt_data.data, sbt_buffer_size );
+        flush_buffer( pipeline->shader_binding_table, ( u32 )sbt_data_offset, ( u32 )sbt_buffer_size );
         unmap_buffer( map );
 
         // Cache regions to be used when tracing rays.
-        const VkDeviceAddress sbt_address = get_buffer_device_address( pipeline->shader_binding_table );
-
         RASSERT( ( sbt_address % base_alignment ) == 0 );
-
         RASSERT( ( sbt_address + raygen_region_offset ) % base_alignment == 0 );
         RASSERT( ( sbt_address + miss_region_offset ) % base_alignment == 0 );
         RASSERT( ( sbt_address + hit_region_offset ) % base_alignment == 0 );
 
-        pipeline->sbt_raygen_region = {};
-        pipeline->sbt_raygen_region.deviceAddress = sbt_address + raygen_region_offset;
-        pipeline->sbt_raygen_region.stride = sbt_record_stride;
-        pipeline->sbt_raygen_region.size = sbt_record_stride * raygen_record_count;
+        pipeline->sbt_raygen_region = {
+            .deviceAddress = sbt_address + raygen_region_offset,
+            .stride = sbt_record_stride,
+            .size = sbt_record_stride * raygen_record_count
+        };
 
-        pipeline->sbt_miss_region = {};
-        pipeline->sbt_miss_region.deviceAddress = sbt_address + miss_region_offset;
-        pipeline->sbt_miss_region.stride = sbt_record_stride;
-        pipeline->sbt_miss_region.size = sbt_record_stride * miss_record_count;
+        pipeline->sbt_miss_region = {
+            .deviceAddress = sbt_address + miss_region_offset,
+            .stride = sbt_record_stride,
+            .size = sbt_record_stride * miss_record_count
+        };
 
-        pipeline->sbt_hit_region = {};
-        pipeline->sbt_hit_region.deviceAddress = sbt_address + hit_region_offset;
-        pipeline->sbt_hit_region.stride = sbt_record_stride;
-        pipeline->sbt_hit_region.size = sbt_record_stride * hit_record_count;
+        pipeline->sbt_hit_region = {
+            .deviceAddress = sbt_address + hit_region_offset,
+            .stride = sbt_record_stride,
+            .size = sbt_record_stride * hit_record_count
+        };
 
         pipeline->sbt_callable_region = {};
 
@@ -3903,7 +4001,7 @@ void GpuDevice::destroy_image_instant( ResourceHandle image ) {
         // Standard image: vma allocation valid
         if ( v_image->vma_allocation != 0 ) {
             vmaDestroyImage( vma_allocator, v_image->vk_image, v_image->vma_allocation );
-        } else if ( ( v_image->flags & TextureFlags::Sparse_mask ) == TextureFlags::Sparse_mask ) {
+        } else if ( v_image->sparse ) {
             // Sparse textures
             vkDestroyImage( vulkan_device, v_image->vk_image, vulkan_allocation_callbacks );
         } else if ( v_image->vma_allocation == nullptr ) {
@@ -4123,7 +4221,7 @@ void GpuDevice::create_swapchain() {
         *color = {};
         color->vk_image = swapchain_images[ iv ];
         color->vk_format = vulkan_surface_format.format;
-        color->type = TextureType::Texture2D;
+        color->vk_image_type = VK_IMAGE_TYPE_2D;
         color->width = swapchain_width;
         color->height = swapchain_height;
 
@@ -4146,8 +4244,13 @@ void GpuDevice::create_swapchain() {
 
         set_resource_name( VK_OBJECT_TYPE_IMAGE_VIEW, (u64)vk_image_view->vk_image_view, vk_image_view->name );
 
-        ImageCreation depth_image_creation;
-        depth_image_creation.set_size( swapchain_width, swapchain_height, 1 ).set_format_type( VK_FORMAT_D32_SFLOAT, TextureType::Texture2D ).set_name( "DepthImage_Texture" );
+        ImageCreation depth_image_creation{
+            .image_type = VK_IMAGE_TYPE_2D,
+            .format     = VK_FORMAT_D32_SFLOAT,
+            .width      = swapchain_width, .height = swapchain_height, .depth = 1,
+            .usage      = VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT |
+                          VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT,
+            .name       = "DepthImage_Texture" };
         ImageHandle depth_handle = create_image( depth_image_creation );
 
         // Manual creation of image view
@@ -4392,10 +4495,19 @@ void GpuDevice::resize_image_3d( ImageHandle image, u32 width, u32 height, u32 d
     vk_image_to_delete->handle = image_to_delete;
 
     // Re-create image in place.
-    ImageCreation tc;
-    tc.set_flags( vk_image->flags ).set_format_type( vk_image->vk_format, vk_image->type )
-        .set_name( vk_image->name ).set_size( width, height, depth )
-        .set_mips( mip_levels );
+    // Every field is copied across: with explicit Vulkan flags this round trip is
+    // lossless, where the old TextureFlags path silently re-derived the usage and
+    // dropped the array layers.
+    ImageCreation tc{
+        .create_flags       = vk_image->vk_create_flags,
+        .image_type         = vk_image->vk_image_type,
+        .format             = vk_image->vk_format,
+        .width              = width, .height = height, .depth = depth,
+        .mip_level_count    = mip_levels,
+        .array_layer_count  = vk_image->array_layer_count,
+        .usage              = vk_image->vk_usage,
+        .owner_queue_family = ( u16 )vk_image->sync_state.owner_queue_family,
+        .name               = vk_image->name };
     vulkan_create_image( *this, tc, vk_image->handle, vk_image );
 
     destroy_image( image_to_delete );
@@ -4474,7 +4586,7 @@ PagePoolHandle GpuDevice::allocate_image_pool( ImageHandle image_handle, u32 poo
 
     page_pool->block_width = granularity.width;
     page_pool->block_height = granularity.height;
-    page_pool->block_size = page_size;
+    page_pool->block_size = ( u32 )page_size;
 
     page_pool->mip_tail_first_lod = sparse_requirement->imageMipTailFirstLod;
     page_pool->mip_tail_size = sparse_requirement->imageMipTailSize;
@@ -4993,7 +5105,7 @@ void GpuDevice::update_bindless_resources() {
                 //}
 
                 // Add optional compute bindless descriptor update
-                //if ( image->flags & TextureFlags::Compute_mask ) {
+                //if ( image->vk_usage & VK_IMAGE_USAGE_STORAGE_BIT ) {
                 if ( image_view->compute_access ) {
                     VkWriteDescriptorSet& descriptor_write_image = bindless_descriptor_writes[ current_write_index ];
                     VkDescriptorImageInfo& descriptor_image_info_compute = bindless_image_info[ current_write_index ];

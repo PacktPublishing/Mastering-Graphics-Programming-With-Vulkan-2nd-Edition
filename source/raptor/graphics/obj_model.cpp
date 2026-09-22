@@ -211,9 +211,13 @@ void ObjModel::load_model( cstring filename, cstring path, ArenaAllocator* temp_
         return;
     }
 
-    SamplerCreation sampler_creation{ };
-    sampler_creation.set_address_mode_uv( VK_SAMPLER_ADDRESS_MODE_REPEAT, VK_SAMPLER_ADDRESS_MODE_REPEAT ).set_min_mag_mip( VK_FILTER_LINEAR, VK_FILTER_LINEAR, VK_SAMPLER_MIPMAP_MODE_LINEAR);
-    sampler = renderer->create_sampler( sampler_creation );
+    sampler = renderer->create_sampler( {
+        .min_filter = VK_FILTER_LINEAR,
+        .mag_filter = VK_FILTER_LINEAR,
+        .mip_filter = VK_SAMPLER_MIPMAP_MODE_LINEAR,
+        .address_mode_u = VK_SAMPLER_ADDRESS_MODE_REPEAT,
+        .address_mode_v = VK_SAMPLER_ADDRESS_MODE_REPEAT,
+        .address_mode_w = VK_SAMPLER_ADDRESS_MODE_REPEAT } );
 
     render_scene->samplers.push( *sampler );
 

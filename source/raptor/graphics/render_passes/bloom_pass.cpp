@@ -52,7 +52,7 @@ void BloomPass::update_psos( FrameGraphResourceContext& context, PipelineUpdateP
     renderer->create_compute_pipeline_state( {
         .stages = {
             {
-                .source_file_path = "glsl/chapter5/post_bloom.glsl",
+                .source = { .glsl = "glsl/chapter5/post_bloom.glsl" },
                 .type = VK_SHADER_STAGE_COMPUTE_BIT,
             }
         },
@@ -66,7 +66,7 @@ void BloomPass::update_psos( FrameGraphResourceContext& context, PipelineUpdateP
     renderer->create_compute_pipeline_state( {
         .stages = {
             {
-                .source_file_path = "glsl/chapter5/post_bloom.glsl",
+                .source = { .glsl = "glsl/chapter5/post_bloom.glsl" },
                 .type = VK_SHADER_STAGE_COMPUTE_BIT,
             }
         },
@@ -93,6 +93,7 @@ struct GpuBloomConstants {
 };
 
 void BloomPass::post_render( FrameGraphRenderContext& context ) {
+    const ShaderLanguage language = context.render_config->shader_language();
 
     // Avoid copying first frame as source image is not ready
     Renderer* renderer = context.renderer;
@@ -111,7 +112,7 @@ void BloomPass::post_render( FrameGraphRenderContext& context ) {
     u32 height = bloom_image_data->height;
 
     // Downsample
-    gpu_commands->bind_pipeline( downsample_pipeline.pipeline );
+    gpu_commands->bind_pipeline( downsample_pipeline.active( language ) );
 
     for ( u32 i = 0; i < bloom_image_views.size; i++ ) {
 
@@ -142,7 +143,7 @@ void BloomPass::post_render( FrameGraphRenderContext& context ) {
     }
 
     // Upsample
-    gpu_commands->bind_pipeline( upsample_pipeline.pipeline );
+    gpu_commands->bind_pipeline( upsample_pipeline.active( language ) );
 
     for ( i32 i = bloom_image_views.size - 1; i > 0; i-- ) {
 
@@ -252,7 +253,7 @@ void BloomPass::create_gpu_resources( FrameGraphResourceContext& context ) {
     FlatHashMapIterator it = renderer->resource_cache.pipelines.find( hash_calculate( "bloom_downsample" ) );
     RASSERT( it.is_valid() );
 
-    PipelineHandle pipeline = renderer->resource_cache.pipelines.get( it );
+    PipelineHandle pipeline = renderer->resource_cache.pipelines.get( it ).any();
     DescriptorSetLayoutHandle layout_handle = gpu.get_descriptor_set_layout( pipeline, k_material_descriptor_set_index );
     ShaderReflectionInfo* reflection_info = renderer->get_shader_reflection( pipeline );
 
@@ -263,11 +264,18 @@ void BloomPass::create_gpu_resources( FrameGraphResourceContext& context ) {
     u32 mip_levels = calculate_mip_levels( blackboard.render_width / 2, blackboard.render_height / 2 );
 
     // Create image
-    ImageCreation image_creation{ };
-    image_creation.set_format_type( VK_FORMAT_R16G16B16A16_SFLOAT, TextureType::Enum::Texture2D )
-        .set_flags( TextureFlags::Compute_mask )
-        .set_size( blackboard.render_width / 2, blackboard.render_height / 2, 1 )
-        .set_name( "bloom" ).set_mips( mip_levels );
+    ImageCreation image_creation{
+        .image_type      = VK_IMAGE_TYPE_2D,
+        .format          = VK_FORMAT_R16G16B16A16_SFLOAT,
+        .width           = ( u32 )( blackboard.render_width / 2 ),
+        .height          = ( u32 )( blackboard.render_height / 2 ),
+        .depth           = 1,
+        .mip_level_count = mip_levels,
+        .usage           = VK_IMAGE_USAGE_SAMPLED_BIT |
+                           VK_IMAGE_USAGE_STORAGE_BIT |
+                           VK_IMAGE_USAGE_TRANSFER_DST_BIT |
+                           VK_IMAGE_USAGE_TRANSFER_SRC_BIT,
+        .name            = "bloom" };
 
     bloom_image = gpu.create_image( image_creation );
 

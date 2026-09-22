@@ -16,119 +16,6 @@ BlendStateCreation& BlendStateCreation::reset() {
     return *this;
 }
 
-// TextureCreation ////////////////////////////////////////////////////////
-ImageCreation& ImageCreation::reset() {
-    mip_level_count = 1;
-    array_layer_count = 1;
-    initial_data = nullptr;
-    alias = ImageHandle();
-
-    width = height = depth = 1;
-    format = VK_FORMAT_UNDEFINED;
-    flags = 0;
-
-    return *this;
-}
-
-ImageCreation& ImageCreation::set_size( u16 width_, u16 height_, u16 depth_ ) {
-    width = width_;
-    height = height_;
-    depth = depth_;
-
-    return *this;
-}
-
-ImageCreation& ImageCreation::set_flags( u8 flags_ ) {
-    flags = flags_;
-
-    return *this;
-}
-
-ImageCreation& ImageCreation::set_mips( u32 mip_level_count_ ) {
-    mip_level_count = mip_level_count_;
-
-    return *this;
-}
-
-ImageCreation& ImageCreation::set_layers( u32 layer_count_ ) {
-    array_layer_count = layer_count_;
-
-    return *this;
-}
-
-ImageCreation& ImageCreation::set_format_type( VkFormat format_, TextureType::Enum type_ ) {
-    format = format_;
-    type = type_;
-
-    return *this;
-}
-
-ImageCreation& ImageCreation::set_name( cstring name_ ) {
-    name = name_;
-
-    return *this;
-}
-
-ImageCreation& ImageCreation::set_data( void* data_ ) {
-    initial_data = data_;
-
-    return *this;
-}
-
-ImageCreation& ImageCreation::set_alias( ImageHandle alias_ ) {
-    alias = alias_;
-
-    return *this;
-}
-
-ImageCreation& ImageCreation::set_owner( u32 value ) {
-    owner_queue_family = (u16)value;
-    return *this;
-}
-
-// SamplerCreation ////////////////////////////////////////////////////////
-SamplerCreation& SamplerCreation::set_min_mag_mip( VkFilter min, VkFilter mag, VkSamplerMipmapMode mip ) {
-    min_filter = min;
-    mag_filter = mag;
-    mip_filter = mip;
-
-    return *this;
-}
-
-SamplerCreation& SamplerCreation::set_address_mode_u( VkSamplerAddressMode u ) {
-    address_mode_u = u;
-
-    return *this;
-}
-
-SamplerCreation& SamplerCreation::set_address_mode_uv( VkSamplerAddressMode u, VkSamplerAddressMode v ) {
-    address_mode_u = u;
-    address_mode_v = v;
-
-    return *this;
-}
-
-SamplerCreation& SamplerCreation::set_address_mode_uvw( VkSamplerAddressMode u, VkSamplerAddressMode v, VkSamplerAddressMode w ) {
-    address_mode_u = u;
-    address_mode_v = v;
-    address_mode_w = w;
-
-    return *this;
-}
-
-SamplerCreation& SamplerCreation::set_reduction_mode( VkSamplerReductionMode mode ) {
-    reduction_mode = mode;
-
-    return *this;
-}
-
-SamplerCreation& SamplerCreation::set_name( const char* name_ ) {
-    name = name_;
-
-    return *this;
-}
-
-
 // ShaderStateCreation ////////////////////////////////////////////////////
 ShaderStateCreation& ShaderStateCreation::reset() {
     stages.clear();
@@ -283,20 +170,6 @@ cstring to_stage_defines( VkShaderStageFlagBits value ) {
         default:
             return "";
     }
-}
-
-//
-// Texture1D, Texture2D, Texture3D, TextureCube, Texture_1D_Array, Texture_2D_Array, Texture_Cube_Array, Count
-VkImageType to_vk_image_type( TextureType::Enum type ) {
-    static VkImageType s_vk_target[ TextureType::Count ] = { VK_IMAGE_TYPE_1D, VK_IMAGE_TYPE_2D, VK_IMAGE_TYPE_3D, VK_IMAGE_TYPE_2D, VK_IMAGE_TYPE_1D, VK_IMAGE_TYPE_2D, VK_IMAGE_TYPE_2D };
-    return s_vk_target[ type ];
-}
-
-//
-//
-VkImageViewType to_vk_image_view_type( TextureType::Enum type ) {
-    static VkImageViewType s_vk_data[] = { VK_IMAGE_VIEW_TYPE_1D, VK_IMAGE_VIEW_TYPE_2D, VK_IMAGE_VIEW_TYPE_3D, VK_IMAGE_VIEW_TYPE_CUBE, VK_IMAGE_VIEW_TYPE_1D_ARRAY, VK_IMAGE_VIEW_TYPE_2D_ARRAY, VK_IMAGE_VIEW_TYPE_CUBE_ARRAY };
-    return s_vk_data[ type ];
 }
 
 //
@@ -1133,6 +1006,34 @@ VkImageSubresourceRange range_depth( u32 base_mip, u32 mip_count,
     return range_aspect( aspect,
                          base_mip, mip_count,
                          base_layer, layer_count );
+}
+
+// ShaderSource //////////////////////////////////////////////////////////
+cstring ShaderSource::path( ShaderLanguage language ) const {
+    cstring wanted = ( language == ShaderLanguage::Slang ) ? slang : glsl;
+    if ( wanted != nullptr ) {
+        return wanted;
+    }
+    return ( language == ShaderLanguage::Slang ) ? glsl : slang;
+}
+
+bool ShaderSource::has( ShaderLanguage language ) const {
+    return ( ( language == ShaderLanguage::Slang ) ? slang : glsl ) != nullptr;
+}
+
+// ShaderCompilationCreation /////////////////////////////////////////////
+bool ShaderCompilationCreation::has( ShaderLanguage language ) const {
+    if ( stages.size == 0 ) {
+        return false;
+    }
+
+    for ( u32 s = 0; s < stages.size; ++s ) {
+        if ( !stages[ s ].source.has( language ) ) {
+            return false;
+        }
+    }
+
+    return true;
 }
 
 } // namespace raptor

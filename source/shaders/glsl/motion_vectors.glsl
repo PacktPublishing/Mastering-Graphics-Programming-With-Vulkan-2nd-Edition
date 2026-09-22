@@ -48,13 +48,17 @@ void main() {
     float c1 = 0.003;
     float c2 = 0.017;
     float depth_diff = abs( 1.0 - ( previous_position_ndc.z / current_position_ndc.z ) );
+
+    float curr_linear = raw_depth_to_linear_depth( current_position_ndc.z,  frame.z_near, frame.z_far );
+    float prev_linear = raw_depth_to_linear_depth( previous_position_ndc.z, frame.z_near, frame.z_far );
+    depth_diff  = abs( 1.0 - ( prev_linear / max( curr_linear, 1e-6 ) ) );
     float eps = c1 + c2 * abs( view_normal.z );
 
     vec2 visibility_velocity = current_position_ndc.xy - previous_position_ndc.xy;
     visibility_velocity = velocity;
 
     vec2 visibility_motion = depth_diff < eps ? visibility_velocity : vec2( -1, -1 );
-    //visibility_motion = velocity;
+    visibility_motion = velocity;
 
     // TODO(marco): the article wants to store the previous depth value, but it doesn't look like it's needed?!
     imageStore( global_images_2d[ pc.visibility_motion_vectors_index  ], pos.xy, vec4(visibility_motion, 0, 0) );

@@ -114,7 +114,7 @@ int main( int argc, char** argv ) {
     task_scheduler.Initialize( config );
 
     // window
-    WindowConfiguration wconf{ 1280, 800, "Chapter 14: ReSTIR GI", &MemoryService::instance()->system_allocator};
+    WindowConfiguration wconf{ 1920, 1080, "Chapter 14: ReSTIR GI", &MemoryService::instance()->system_allocator};
     raptor::Window window;
     window.init( &wconf );
 
@@ -155,7 +155,7 @@ int main( int argc, char** argv ) {
     imgui->init( &imgui_config );
 
     GameCamera game_camera;
-    game_camera.camera.init_perpective( 0.1f, 1000.f, 60.f, wconf.width * 1.f / wconf.height );
+    game_camera.camera.init_perpective( 0.1f, 100.f, 60.f, wconf.width * 1.f / wconf.height );
     game_camera.init( true, 20.f, 6.f, 0.1f );
 
     time_service_init();
@@ -498,6 +498,8 @@ int main( int argc, char** argv ) {
                 }
             }
             ImGui::End();
+
+            const bool camera_edited = game_camera.draw_debug_ui();
 
             if ( ImGui::Begin( "GPU" ) ) {
                 renderer.imgui_draw();

@@ -242,8 +242,18 @@ static void scene_load_from_gltf( cstring filename, raptor::Renderer& renderer, 
             ++mip_levels;
         }
 
-        ImageCreation tc;
-        tc.set_data( image_data ).set_format_type( VK_FORMAT_R8G8B8A8_UNORM, TextureType::Texture2D ).set_flags( 0 ).set_size( ( u16 )width, ( u16 )height, 1 ).set_name( image.uri ).set_mips( mip_levels );
+        ImageCreation tc{
+            .image_type      = VK_IMAGE_TYPE_2D,
+            .format          = VK_FORMAT_R8G8B8A8_UNORM,
+            .width           = ( u32 )width,
+            .height          = ( u32 )height,
+            .depth           = 1,
+            .mip_level_count = mip_levels,
+            .usage           = VK_IMAGE_USAGE_SAMPLED_BIT |
+                               VK_IMAGE_USAGE_TRANSFER_DST_BIT |
+                               VK_IMAGE_USAGE_TRANSFER_SRC_BIT,
+            .initial_data    = image_data,
+            .name            = image.uri };
         TextureResource* tr = renderer.create_texture( tc );
         RASSERT( tr != nullptr );
 
@@ -254,7 +264,16 @@ static void scene_load_from_gltf( cstring filename, raptor::Renderer& renderer, 
 
     ImageCreation texture_creation{ };
     u32 zero_value = 0;
-    texture_creation.set_name( "dummy_texture" ).set_size( 1, 1, 1 ).set_format_type( VK_FORMAT_R8G8B8A8_UNORM, TextureType::Texture2D ).set_flags( 1 ).set_data( &zero_value );
+    texture_creation.image_type   = VK_IMAGE_TYPE_2D;
+    texture_creation.format       = VK_FORMAT_R8G8B8A8_UNORM;
+    texture_creation.width        = 1;
+    texture_creation.height       = 1;
+    texture_creation.depth        = 1;
+    texture_creation.usage        = VK_IMAGE_USAGE_SAMPLED_BIT |
+                                    VK_IMAGE_USAGE_TRANSFER_DST_BIT |
+                                    VK_IMAGE_USAGE_TRANSFER_SRC_BIT;
+    texture_creation.initial_data = &zero_value;
+    texture_creation.name         = "dummy_texture";
     scene.dummy_texture = gpu.create_image( texture_creation );
     scene.dummy_texture_view = gpu.create_image_view( {
         .parent_image = scene.dummy_texture, .view_type = VK_IMAGE_VIEW_TYPE_2D,
@@ -743,7 +762,7 @@ int main( int argc, char** argv ) {
     imgui->init( &imgui_config );
 
     GameCamera game_camera;
-    game_camera.camera.init_perpective( 0.1f, 4000.f, 60.f, wconf.width * 1.f / wconf.height );
+    game_camera.camera.init_perpective( 0.1f, 100.f, 60.f, wconf.width * 1.f / wconf.height );
     game_camera.init( true, 20.f, 6.f, 0.1f );
 
     time_service_init();
@@ -826,7 +845,7 @@ int main( int argc, char** argv ) {
 
         // Compile shader and reflect it
         ShaderReflection shader_reflection;
-        shader_state = renderer.create_shader_state( shader_compilation_creation, "chapter2", &shader_reflection );
+        shader_state = renderer.create_shader_state( shader_compilation_creation, "chapter2", ShaderLanguage::Glsl, &shader_reflection );
 
         scene_pipeline_layout = renderer.create_pipeline_layout( shader_reflection );
 

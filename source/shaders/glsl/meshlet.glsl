@@ -78,7 +78,10 @@ void main()
     vec4 world_center = model * vec4(meshlets[global_meshlet_index].center, 1);
     float scale = length( model[0] );
     float radius = meshlets[global_meshlet_index].radius * scale * 1.1;   // Artificially inflate bounding sphere.
-    vec3 cone_axis = mat3( model ) * vec3(int(meshlets[global_meshlet_index].cone_axis[0]) / 127.0, int(meshlets[global_meshlet_index].cone_axis[1]) / 127.0, int(meshlets[global_meshlet_index].cone_axis[2]) / 127.0);
+    vec3 decoded_axis = vec3(int(meshlets[global_meshlet_index].cone_axis[0]),
+                             int(meshlets[global_meshlet_index].cone_axis[1]),
+                             int(meshlets[global_meshlet_index].cone_axis[2])) / 127.0;
+    vec3 cone_axis = mat3( model ) * decoded_axis;
     float cone_cutoff = int(meshlets[global_meshlet_index].cone_cutoff) / 127.0;
 
     bool accept = false;
@@ -86,11 +89,11 @@ void main()
     vec4 view_center = vec4(0);
     // Backface culling and move meshlet in camera space
     if ( freeze_occlusion_camera() ) {
-        accept = !coneCull(world_center.xyz, radius, cone_axis, cone_cutoff, frame.camera_position.xyz);
-        view_center = frame.world_to_camera * world_center;
-    } else {
         accept = !coneCull(world_center.xyz, radius, cone_axis, cone_cutoff, frame.camera_position_debug.xyz);
         view_center = frame.world_to_camera_debug * world_center;
+    } else {
+        accept = !coneCull(world_center.xyz, radius, cone_axis, cone_cutoff, frame.camera_position.xyz);
+        view_center = frame.world_to_camera * world_center;
     }
 
     bool frustum_visible = true;
@@ -103,7 +106,7 @@ void main()
     bool occlusion_visible = true;
     if ( frustum_visible ) {
 
-        vec3 camera_world_position = freeze_occlusion_camera() ? frame.camera_position.xyz : frame.camera_position_debug.xyz;
+        vec3 camera_world_position = freeze_occlusion_camera() ? frame.camera_position_debug.xyz : frame.camera_position.xyz;
         mat4 culling_view_projection = late_flag == 0 ? frame.previous_view_projection : frame.view_projection;
 
         occlusion_visible = occlusion_cull( view_center.xyz, radius, frame.z_near, frame.projection_00, frame.projection_11,

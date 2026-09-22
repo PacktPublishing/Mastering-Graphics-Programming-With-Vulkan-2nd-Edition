@@ -129,7 +129,7 @@ float4 scattering_extinction_from_color_density( float3 color, float density ) {
 ConstantBuffer<GpuVolumetricFogConstants> fog : register(b40, space1);
 
 
-#if defined(COMPUTE_INJECT_DATA_SLANG)
+#if defined(COMPUTE_INJECT_DATA)
 
 [shader("compute")]
 [numthreads(FROXEL_DISPATCH_X, FROXEL_DISPATCH_Y, FROXEL_DISPATCH_Z)]
@@ -167,10 +167,10 @@ void main(uint3 dispatchThreadID : SV_DispatchThreadID) {
     global_images_3d[fog.froxel_data_texture_index][froxel_coord.xyz] = scattering_extinction;
 }
 
-#endif // COMPUTE_INJECT_DATA_SLANG
+#endif // COMPUTE_INJECT_DATA
 
 
-#if defined(COMPUTE_LIGHT_SCATTERING_SLANG)
+#if defined(COMPUTE_LIGHT_SCATTERING)
 
 #include "lighting.slangh"
 
@@ -270,10 +270,10 @@ void main(uint3 dispatchThreadID : SV_DispatchThreadID) {
     global_images_3d[fog.raw_light_scattering_texture_index][froxel_coord] = float4(scattering, extinction);
 }
 
-#endif // COMPUTE_LIGHT_SCATTERING_SLANG
+#endif // COMPUTE_LIGHT_SCATTERING
 
 
-#if defined(COMPUTE_LIGHT_INTEGRATION_SLANG)
+#if defined(COMPUTE_LIGHT_INTEGRATION)
 
 
 [shader("compute")]
@@ -324,11 +324,11 @@ void main(uint3 dispatchThreadID : SV_DispatchThreadID) {
     }
 }
 
-#endif // COMPUTE_LIGHT_INTEGRATION_SLANG
+#endif // COMPUTE_LIGHT_INTEGRATION
 
 
 
-#if defined(COMPUTE_SPATIAL_FILTERING_SLANG)
+#if defined(COMPUTE_SPATIAL_FILTERING)
 
 #define SIGMA_FILTER 4.0
 #define RADIUS 2
@@ -378,11 +378,11 @@ void main(uint3 dispatchThreadID : SV_DispatchThreadID) {
     global_images_3d[fog.froxel_data_texture_index][froxel_coord] = scattering_extinction;
 }
 
-#endif // COMPUTE_SPATIAL_FILTERING_SLANG
+#endif // COMPUTE_SPATIAL_FILTERING
 
 
 
-#if defined(COMPUTE_TEMPORAL_FILTERING_SLANG)
+#if defined(COMPUTE_TEMPORAL_FILTERING)
 
 
 [shader("compute")]
@@ -427,10 +427,10 @@ void main(uint3 dispatchThreadID : SV_DispatchThreadID) {
     global_images_3d[fog.temporal_current_texture_index][froxel_coord] = scattering_extinction;
 }
 
-#endif // COMPUTE_TEMPORAL_FILTERING_SLANG
+#endif // COMPUTE_TEMPORAL_FILTERING
 
 
-#if defined(COMPUTE_VOLUMETRIC_NOISE_BAKING_SLANG)
+#if defined(COMPUTE_VOLUMETRIC_NOISE_BAKING)
 
 struct PushConstants {
     uint            output_texture_index;
@@ -536,4 +536,4 @@ void main(uint3 dispatchThreadID : SV_DispatchThreadID) {
     global_images_3d[pc.output_texture_index][pos] = float4(perlin_data, 0, 0, 0);
 }
 
-#endif // COMPUTE_VOLUMETRIC_NOISE_BAKING_SLANG
+#endif // COMPUTE_VOLUMETRIC_NOISE_BAKING

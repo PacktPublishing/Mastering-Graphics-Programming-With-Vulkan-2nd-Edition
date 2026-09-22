@@ -164,6 +164,10 @@ vec3 calculate_raytraced_directional_light_contribution(vec4 albedo, float rough
     const vec3 l = normalize( light_direction );
     const float NoL = clamp(dot(normal, l), 0.0, 1.0);
 
+    if ( NoL <= 0.0001f ) {
+        return vec3( 0.0 );
+    }
+
     vec3 pixel_luminance = vec3(0);
 
     // TODO(marco): better upsampling
@@ -173,7 +177,7 @@ vec3 calculate_raytraced_directional_light_contribution(vec4 albedo, float rough
         shadow = texelFetch( global_textures[ nonuniformEXT( light_cb.shadow_visibility_texture_index ) ], ivec2( pixel_position ), 0 ).r;
     }
 
-    if ( shadow >= 0.0f && NoL > 0.0001f ) {
+    if ( shadow >= 0.0f ) {
         float light_intensity = NoL * light_cb.raytraced_shadow_light_intensity * shadow;
 
         const vec3 h = normalize(v + l);
@@ -246,7 +250,16 @@ vec3 calculate_point_light_contribution(vec4 albedo, float roughness, vec3 norma
 
     const vec3 position_to_light = light.world_position - world_position;
     const vec3 l = normalize( position_to_light );
-    const float NoL = clamp(dot(normal, l), 0.0, 1.0);
+
+    const float NoL = dot( normal, l );
+    if ( NoL <= 0.0001f ) {
+        return vec3( 0.0 );
+    }
+
+    const float falloff = attenuation_square_falloff(position_to_light, 1.0f / light.radius);
+    if ( falloff <= 0.0001f ) {
+        return vec3( 0.0 );
+    }
 
     vec3 pixel_luminance = vec3(0);
 
@@ -352,8 +365,9 @@ vec3 calculate_point_light_contribution(vec4 albedo, float roughness, vec3 norma
     }
 #endif // NEW_PCF
 
-    float attenuation = attenuation_square_falloff(position_to_light, 1.0f / light.radius) * shadow;
-    if ( attenuation > 0.0001f && NoL > 0.0001f ) {
+    
+    float attenuation = falloff * shadow;
+    if ( attenuation > 0.0001f ) {
 
         float light_intensity = NoL * light.intensity * attenuation;
 
@@ -455,10 +469,17 @@ uint get_lowest_bit( uint v ) {
 
 // NOTE(marco): compute binary mask from min_bit with mask_width bits set
 uint bit_field_mask( uint mask_width, uint min_bit ) {
-    uint last_bit = min_bit + mask_width;
-    uint v = ( ( ( 1 << last_bit ) - 1) & ~( ( 1 << min_bit ) - 1) );
 
-    return v;
+    // 1u << 32 is undefined in GLSL, safe measure.
+    const uint last_bit = min( min_bit + mask_width, 32u );
+    const uint hi = ( last_bit == 32u ) ? 0xFFFFFFFFu : ( ( 1u << last_bit ) - 1u );
+    // min_bit is clamped to 31, safe to left shift.
+    const uint lo = ( 1u << min_bit ) - 1u;
+    return hi & ~lo;
+    //uint last_bit = min_bit + mask_width;
+    //uint v = ( ( ( 1 << last_bit ) - 1) & ~( ( 1 << min_bit ) - 1) );
+
+    //return v;
 }
 
 // uint get_tile_address( uvec2 pixel_position ) {
@@ -499,11 +520,13 @@ vec4 calculate_lighting(vec4 base_colour, vec3 orm, vec3 normal, vec3 emissive, 
     vec4 final_color = vec4( 0 );
 
     vec4 pos_camera_space = frame.world_to_camera * vec4( world_position, 1.0 );
+    // Camera looks into negative z
+    const float view_z = -pos_camera_space.z;
 
-    float z_light_far = frame.z_far;
-    float linear_d = ( pos_camera_space.z - frame.z_near ) / ( z_light_far - frame.z_near );
-    int bin_index = int( linear_d / BIN_WIDTH );
-    uint bin_value = bins[ bin_index ];
+    const float z_light_far = frame.z_far;
+    const float linear_d = ( view_z - frame.z_near ) / ( z_light_far - frame.z_near );
+    const int bin_index = clamp( int( linear_d * NUM_BINS ), 0, int( NUM_BINS ) - 1 );
+    const uint bin_value = bins[ bin_index ];
 
     uint min_light_id = bin_value & 0xFFFF;
     uint max_light_id = ( bin_value >> 16 ) & 0xFFFF;
@@ -546,7 +569,7 @@ vec4 calculate_lighting(vec4 base_colour, vec3 orm, vec3 normal, vec3 emissive, 
             uint bit_index = get_lowest_bit( merged_mask );
             uint light_index = 32 * word_index + bit_index;
 
-            merged_mask ^= ( 1 << bit_index );
+            merged_mask ^= ( 1u << bit_index );
 
             uint global_light_index = light_indices[ light_index ];
 

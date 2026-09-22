@@ -49,56 +49,51 @@ void ShadowVisibilityPass::declare_frame_graph_node( FrameGraphResourceContext& 
 ShaderCompilationCreation ssc_visibility_variance = {
     .stages = {
         {
-            .source_file_path = "glsl/raytraced_shadows.glsl",
+            .source = { .glsl = "glsl/raytraced_shadows.glsl" },
             .type = VK_SHADER_STAGE_COMPUTE_BIT,
         },
     },
     .name = "shadow_visibility_variance",
-    .slang_input = 0,
 };
 
 ShaderCompilationCreation ssc_visibility = {
     .stages = {
         {
-            .source_file_path = "glsl/raytraced_shadows.glsl",
+            .source = { .glsl = "glsl/raytraced_shadows.glsl" },
             .type = VK_SHADER_STAGE_COMPUTE_BIT,
         },
     },
     .name = "shadow_visibility",
-    .slang_input = 0,
 };
 
 ShaderCompilationCreation ssc_visibility_filtering = {
     .stages = {
         {
-            .source_file_path = "glsl/raytraced_shadows.glsl",
+            .source = { .glsl = "glsl/raytraced_shadows.glsl" },
             .type = VK_SHADER_STAGE_COMPUTE_BIT,
         },
     },
     .name = "shadow_visibility_filtering",
-    .slang_input = 0,
 };
 
 ShaderCompilationCreation ssc_cache_reprojection = {
     .stages = {
         {
-            .source_file_path = "glsl/raytraced_shadows.glsl",
+            .source = { .glsl = "glsl/raytraced_shadows.glsl" },
             .type = VK_SHADER_STAGE_COMPUTE_BIT,
         },
     },
     .name = "shadow_cache_reprojection",
-    .slang_input = 0,
 };
 
 ShaderCompilationCreation ssc_upscaling = {
     .stages = {
         {
-            .source_file_path = "glsl/raytraced_shadows.glsl",
+            .source = { .glsl = "glsl/raytraced_shadows.glsl" },
             .type = VK_SHADER_STAGE_COMPUTE_BIT,
         },
     },
     .name = "shadow_visibility_upscaling",
-    .slang_input = 0,
 };
 
 void ShadowVisibilityPass::update_psos( FrameGraphResourceContext& context, PipelineUpdatePhase phase ) {
@@ -151,6 +146,8 @@ void ShadowVisibilityPass::update_psos( FrameGraphResourceContext& context, Pipe
 }
 
 void ShadowVisibilityPass::render( FrameGraphRenderContext& context ) {
+    const ShaderLanguage language = context.render_config->shader_language();
+
     if ( !enabled ) {
         return;
     }
@@ -261,7 +258,7 @@ void ShadowVisibilityPass::render( FrameGraphRenderContext& context ) {
 
     cb->flush_barriers();
 
-    cb->bind_pipeline( cache_reprojection_pipeline.pipeline );
+    cb->bind_pipeline( cache_reprojection_pipeline.active( language ) );
 
     cb->bind_descriptor_set(
         { context.renderer->gpu->bindless_descriptor_set, descriptor_set[ current_frame_index ] },
@@ -287,7 +284,7 @@ void ShadowVisibilityPass::render( FrameGraphRenderContext& context ) {
     cb->flush_barriers();
 
     // Variance pass
-    cb->bind_pipeline( variance_pipeline.pipeline );
+    cb->bind_pipeline( variance_pipeline.active( language ) );
 
     cb->dispatch( dispatch_x, dispatch_y, 1 );
 
@@ -332,7 +329,7 @@ void ShadowVisibilityPass::render( FrameGraphRenderContext& context ) {
     cb->flush_barriers();
 
     // Visiblity pass
-    cb->bind_pipeline( visibility_pipeline.pipeline );
+    cb->bind_pipeline( visibility_pipeline.active( language ) );
 
     cb->dispatch( dispatch_x, dispatch_y, 1 );
 
@@ -353,7 +350,7 @@ void ShadowVisibilityPass::render( FrameGraphRenderContext& context ) {
     cb->flush_barriers();
 
     // Visiblity filtering pass
-    cb->bind_pipeline( visibility_filtering_pipeline.pipeline );
+    cb->bind_pipeline( visibility_filtering_pipeline.active( language ) );
 
     cb->dispatch( dispatch_x, dispatch_y, 1 );
 
@@ -376,7 +373,7 @@ void ShadowVisibilityPass::render( FrameGraphRenderContext& context ) {
     // Upscaling pass (to full resolution)
     dispatch_x = ( ceilu32( render_blackboard.render_width * 1.f ) + 7 ) / 8;
     dispatch_y = ( ceilu32( render_blackboard.render_height * 1.f ) + 7 ) / 8;
-    cb->bind_pipeline( upscaling_pipeline.pipeline );
+    cb->bind_pipeline( upscaling_pipeline.active( language ) );
 
     cb->dispatch( dispatch_x, dispatch_y, 1 );
 }
@@ -447,11 +444,19 @@ void ShadowVisibilityPass::recreate_textures( GpuDevice& gpu, u32 lights_count, 
     const u32 adjusted_width = ceilu32( width * texture_scale );
     const u32 adjusted_height = ceilu32( height * texture_scale );
 
-    ImageCreation texture_creation{ };
-    texture_creation.set_flags( TextureFlags::Compute_mask ).set_name( "visibility_cache" )
-        .set_format_type( VK_FORMAT_R16G16B16A16_SFLOAT, TextureType::Texture_2D_Array )
-        .set_size( adjusted_width, adjusted_height, 1 )
-        .set_mips( 1 ).set_layers( 1 );
+    ImageCreation texture_creation{
+        .image_type        = VK_IMAGE_TYPE_2D,
+        .format            = VK_FORMAT_R16G16B16A16_SFLOAT,
+        .width             = adjusted_width,
+        .height            = adjusted_height,
+        .depth             = 1,
+        .mip_level_count   = 1,
+        .array_layer_count = 1,
+        .usage             = VK_IMAGE_USAGE_SAMPLED_BIT |
+                             VK_IMAGE_USAGE_STORAGE_BIT |
+                             VK_IMAGE_USAGE_TRANSFER_DST_BIT |
+                             VK_IMAGE_USAGE_TRANSFER_SRC_BIT,
+        .name              = "visibility_cache" };
 
     ImageViewCreation image_view_creation{ .parent_image = ImageHandle(),
             .view_type = VK_IMAGE_VIEW_TYPE_2D_ARRAY,
@@ -467,7 +472,7 @@ void ShadowVisibilityPass::recreate_textures( GpuDevice& gpu, u32 lights_count, 
         visibility_cache_image_view[ i ] = gpu.create_image_view( image_view_creation );
 
         // NOTE(marco): last 4 frames visibility variation per light
-        texture_creation.set_name( "variation_cache" );
+        texture_creation.name = "variation_cache";
         variation_cache_image[ i ] = gpu.create_image( texture_creation );
 
         image_view_creation.parent_image = variation_cache_image[ i ];
@@ -476,14 +481,16 @@ void ShadowVisibilityPass::recreate_textures( GpuDevice& gpu, u32 lights_count, 
     }
 
     // Visibility delta
-    texture_creation.set_name( "variation" ).set_format_type( VK_FORMAT_R16_SFLOAT, TextureType::Texture_2D_Array );
+    texture_creation.image_type = VK_IMAGE_TYPE_2D;
+    texture_creation.format     = VK_FORMAT_R16_SFLOAT;
+    texture_creation.name       = "variation";
     variation_image = gpu.create_image( texture_creation );
 
     image_view_creation.parent_image = variation_image;
     image_view_creation.name = texture_creation.name;
     variation_image_view = gpu.create_image_view( image_view_creation );
 
-    texture_creation.set_name( "filtered_variation" );
+    texture_creation.name = "filtered_variation";
     filtered_variation_image = gpu.create_image( texture_creation );
 
     image_view_creation.parent_image = filtered_variation_image;
@@ -491,7 +498,7 @@ void ShadowVisibilityPass::recreate_textures( GpuDevice& gpu, u32 lights_count, 
     filtered_variation_image_view = gpu.create_image_view( image_view_creation );
 
     // Store visibility + used depth
-    texture_creation.set_name( "filtered_visibility" );
+    texture_creation.name = "filtered_visibility";
     texture_creation.format = VK_FORMAT_R16G16_SFLOAT;
     filtered_visibility_image = gpu.create_image( texture_creation );
 
@@ -501,7 +508,9 @@ void ShadowVisibilityPass::recreate_textures( GpuDevice& gpu, u32 lights_count, 
 
     // Last 4 frames samples count per light
     for ( u32 i = 0; i < 2; ++i ) {
-        texture_creation.set_name( "samples_count_cache" ).set_format_type( VK_FORMAT_R8G8B8A8_UINT, TextureType::Texture_2D_Array );
+        texture_creation.image_type = VK_IMAGE_TYPE_2D;
+        texture_creation.format     = VK_FORMAT_R8G8B8A8_UINT;
+        texture_creation.name       = "samples_count_cache";
         samples_count_cache_image[ i ] = gpu.create_image( texture_creation );
 
         image_view_creation.parent_image = samples_count_cache_image[ i ];
@@ -596,6 +605,8 @@ void ShadowVisibilityPass::upload_gpu_data( FrameGraphResourceContext& context )
         constants->disable_history = rt_shadows_config.disable_history ? 1 : 0;
         constants->max_samples = rt_shadows_config.max_samples;
         constants->disable_spatial = rt_shadows_config.disable_spatial ? 1 : 0;
+        constants->light_angular_radius = glm::radians( rt_shadows_config.light_angular_radius * 0.5f );
+        constants->light_source_radius = rt_shadows_config.light_source_radius;
     }
 }
 
@@ -638,7 +649,7 @@ void ShadowVisibilityPass::update_dependent_resources( FrameGraphResourceContext
 }
 
 void ShadowVisibilityPass::create_descriptors( Renderer* renderer, RenderBlackboard* render_blackboard ) {
-    ShaderReflectionInfo* reflection_info = renderer->get_shader_reflection( variance_pipeline.pipeline );
+    ShaderReflectionInfo* reflection_info = renderer->get_shader_reflection( variance_pipeline.any() );
 
     DescriptorSetBinder descriptors;
 
@@ -649,7 +660,7 @@ void ShadowVisibilityPass::create_descriptors( Renderer* renderer, RenderBlackbo
         descriptors.name = "shadow_visibility_pass_descriptor_set";
         descriptors.dynamic_buffers.push( { 30, sizeof( GpuShadowVisibilityConstants ) } );
 
-        descriptor_set[ i ] = renderer->create_descriptor_set( descriptors, reflection_info, variance_pipeline.pipeline, i, *render_blackboard );
+        descriptor_set[ i ] = renderer->create_descriptor_set( descriptors, reflection_info, variance_pipeline.any(), i, *render_blackboard );
     }
 }
 

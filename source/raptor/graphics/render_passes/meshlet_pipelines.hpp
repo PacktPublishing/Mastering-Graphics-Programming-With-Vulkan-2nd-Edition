@@ -9,18 +9,17 @@ namespace raptor {
 static ShaderCompilationCreation scc_meshlet_depth_pre = {
     .stages = {
         ShaderCompilationStage{
-            .source_file_path = "meshlet.glsl",
-            .headers = { "platform.h", "scene.h", "mesh.h", "meshlet.h" },
+            .source = { .glsl = "meshlet.glsl" },
+            //.headers = { "platform.h", "scene.h", "mesh.h", "meshlet.h" },
             .type = VK_SHADER_STAGE_MESH_BIT_EXT,
         },
         ShaderCompilationStage{
-            .source_file_path = "meshlet.glsl",
-            .headers = { "platform.h", "scene.h", "mesh.h", "debug_rendering.h", "meshlet.h", "culling.h" },
+            .source = { .glsl = "meshlet.glsl" },
+            //.headers = { "platform.h", "scene.h", "mesh.h", "debug_rendering.h", "meshlet.h", "culling.h" },
             .type = VK_SHADER_STAGE_TASK_BIT_EXT,
         },
     },
     .name = "depth_pre",
-    .slang_input = 0,
 };
 
 static PipelineCreation pc_meshlet_depth_pre = {
@@ -58,78 +57,76 @@ static PipelineCreation pc_meshlet_depth_pre = {
 };
 
 // depth_pre_slang
-
-static ShaderCompilationCreation scc_meshlet_depth_pre_slang = {
-    .stages = {
-        ShaderCompilationStage{
-            .source_file_path = "slang/meshlet.slang",
-            .type = VK_SHADER_STAGE_MESH_BIT_EXT,
-        },
-        ShaderCompilationStage{
-            .source_file_path = "slang/meshlet.slang",
-            .type = VK_SHADER_STAGE_TASK_BIT_EXT,
-        },
-    },
-    .name = "depth_pre_slang",
-    .slang_input = 1,
-};
-
-static PipelineCreation pc_meshlet_depth_pre_slang = {
-    .rasterization = {
-        .cull_mode = VK_CULL_MODE_NONE,
-        .front     = VK_FRONT_FACE_COUNTER_CLOCKWISE,
-        .fill      = VK_POLYGON_MODE_FILL,
-    },
-    .depth_stencil = {
-        .front               = {},
-        .back                = {},
-        .depth_comparison    = VK_COMPARE_OP_LESS_OR_EQUAL,
-        .depth_enable        = 1,
-        .depth_write_enable  = 1,
-        .stencil_enable      = 0,
-    },
-    .blend_state = {
-        .blend_states = {},
-    },
-    .vertex_input = {},
-    .topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST,
-    .flags = 0,
-
-    .render_pass_output = {},
-    .shader = {},
-
-    .layout = {},
-    .viewport = nullptr,
-
-    .num_active_layouts = 0,
-    .num_specialization_constants = 0,
-
-    .name = "depth_pre_slang",
-    .render_pass_name = "depth_pre_pass",
-};
+//
+//static ShaderCompilationCreation scc_meshlet_depth_pre_slang = {
+//    .stages = {
+//        ShaderCompilationStage{
+//            .source = { .slang = "slang/meshlet.slang" },
+//            .type = VK_SHADER_STAGE_MESH_BIT_EXT,
+//        },
+//        ShaderCompilationStage{
+//            .source = { .slang = "slang/meshlet.slang" },
+//            .type = VK_SHADER_STAGE_TASK_BIT_EXT,
+//        },
+//    },
+//    .name = "depth_pre_slang",
+//};
+//
+//static PipelineCreation pc_meshlet_depth_pre_slang = {
+//    .rasterization = {
+//        .cull_mode = VK_CULL_MODE_NONE,
+//        .front     = VK_FRONT_FACE_COUNTER_CLOCKWISE,
+//        .fill      = VK_POLYGON_MODE_FILL,
+//    },
+//    .depth_stencil = {
+//        .front               = {},
+//        .back                = {},
+//        .depth_comparison    = VK_COMPARE_OP_LESS_OR_EQUAL,
+//        .depth_enable        = 1,
+//        .depth_write_enable  = 1,
+//        .stencil_enable      = 0,
+//    },
+//    .blend_state = {
+//        .blend_states = {},
+//    },
+//    .vertex_input = {},
+//    .topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST,
+//    .flags = 0,
+//
+//    .render_pass_output = {},
+//    .shader = {},
+//
+//    .layout = {},
+//    .viewport = nullptr,
+//
+//    .num_active_layouts = 0,
+//    .num_specialization_constants = 0,
+//
+//    .name = "depth_pre_slang",
+//    .render_pass_name = "depth_pre_pass",
+//};
 
 // gbuffer_culling
 
 static ShaderCompilationCreation scc_meshlet_gbuffer_culling = {
     .stages = {
         ShaderCompilationStage{
-            .source_file_path = "glsl/meshlet.glsl",
+            .source = { .glsl = "glsl/meshlet.glsl" },
             //.headers = { "glsl/platform.h", "glsl/scene.h", "glsl/mesh.h", "glsl/meshlet.h" },
             .type = VK_SHADER_STAGE_MESH_BIT_EXT,
         },
         ShaderCompilationStage{
-            .source_file_path = "glsl/meshlet.glsl",
+            .source = { .glsl = "glsl/meshlet.glsl" },
             //.headers = { "glsl/platform.h", "glsl/scene.h", "glsl/mesh.h", "glsl/debug_rendering.h", "glsl/meshlet.h", "glsl/culling.h" },
             .type = VK_SHADER_STAGE_TASK_BIT_EXT,
         },
         ShaderCompilationStage{
-            .source_file_path = "glsl/meshlet.glsl",
+            .source = { .glsl = "glsl/meshlet.glsl" },
             //.headers = { "glsl/platform.h", "glsl/scene.h", "glsl/mesh.h", "glsl/meshlet.h" },
             .type = VK_SHADER_STAGE_FRAGMENT_BIT,
         },
     },
     .name = "gbuffer_culling",
-    .slang_input = 0,
 };
 
 static PipelineCreation pc_meshlet_gbuffer_culling = {
@@ -167,82 +164,80 @@ static PipelineCreation pc_meshlet_gbuffer_culling = {
 };
 
 // gbuffer_culling_slang
-
-static ShaderCompilationCreation scc_meshlet_gbuffer_culling_slang = {
-    .stages = {
-        ShaderCompilationStage{
-            .source_file_path = "slang/meshlet.slang",
-            .type = VK_SHADER_STAGE_MESH_BIT_EXT,
-        },
-        ShaderCompilationStage{
-            .source_file_path = "slang/meshlet.slang",
-            .type = VK_SHADER_STAGE_TASK_BIT_EXT,
-        },
-        ShaderCompilationStage{
-            .source_file_path = "slang/meshlet.slang",
-            .type = VK_SHADER_STAGE_FRAGMENT_BIT,
-        },
-    },
-    .name = "gbuffer_culling_slang",
-    .slang_input = 1,
-};
-
-static PipelineCreation pc_meshlet_gbuffer_culling_slang = {
-    .rasterization = {
-        .cull_mode = VK_CULL_MODE_BACK_BIT,
-        .front     = VK_FRONT_FACE_COUNTER_CLOCKWISE,
-        .fill      = VK_POLYGON_MODE_FILL,
-    },
-    .depth_stencil = {
-        .front               = {},
-        .back                = {},
-        .depth_comparison    = VK_COMPARE_OP_LESS_OR_EQUAL,
-        .depth_enable        = 1,
-        .depth_write_enable  = 1,
-        .stencil_enable      = 0,
-    },
-    .blend_state = {
-        .blend_states = {},
-    },
-    .vertex_input = {},
-    .topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST,
-    .flags = 0,
-
-    .render_pass_output = {},
-    .shader = {},
-
-    .layout = {},
-    .viewport = nullptr,
-
-    .num_active_layouts = 0,
-    .num_specialization_constants = 0,
-
-    .name = "gbuffer_culling_slang",
-    .render_pass_name = "gbuffer_pass_early",
-};
+//
+//static ShaderCompilationCreation scc_meshlet_gbuffer_culling_slang = {
+//    .stages = {
+//        ShaderCompilationStage{
+//            .source = { .slang = "slang/meshlet.slang" },
+//            .type = VK_SHADER_STAGE_MESH_BIT_EXT,
+//        },
+//        ShaderCompilationStage{
+//            .source = { .slang = "slang/meshlet.slang" },
+//            .type = VK_SHADER_STAGE_TASK_BIT_EXT,
+//        },
+//        ShaderCompilationStage{
+//            .source = { .slang = "slang/meshlet.slang" },
+//            .type = VK_SHADER_STAGE_FRAGMENT_BIT,
+//        },
+//    },
+//    .name = "gbuffer_culling_slang",
+//};
+//
+//static PipelineCreation pc_meshlet_gbuffer_culling_slang = {
+//    .rasterization = {
+//        .cull_mode = VK_CULL_MODE_BACK_BIT,
+//        .front     = VK_FRONT_FACE_COUNTER_CLOCKWISE,
+//        .fill      = VK_POLYGON_MODE_FILL,
+//    },
+//    .depth_stencil = {
+//        .front               = {},
+//        .back                = {},
+//        .depth_comparison    = VK_COMPARE_OP_LESS_OR_EQUAL,
+//        .depth_enable        = 1,
+//        .depth_write_enable  = 1,
+//        .stencil_enable      = 0,
+//    },
+//    .blend_state = {
+//        .blend_states = {},
+//    },
+//    .vertex_input = {},
+//    .topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST,
+//    .flags = 0,
+//
+//    .render_pass_output = {},
+//    .shader = {},
+//
+//    .layout = {},
+//    .viewport = nullptr,
+//
+//    .num_active_layouts = 0,
+//    .num_specialization_constants = 0,
+//
+//    .name = "gbuffer_culling_slang",
+//    .render_pass_name = "gbuffer_pass_early",
+//};
 
 // transparent_no_cull
 
 static ShaderCompilationCreation scc_meshlet_transparent_no_cull = {
     .stages = {
         ShaderCompilationStage{
-            .source_file_path = "glsl/meshlet.glsl",
+            .source = { .glsl = "glsl/meshlet.glsl" },
             //.headers = { "glsl/platform.h", "glsl/scene.h", "glsl/mesh.h", "glsl/meshlet.h" },
             .type = VK_SHADER_STAGE_MESH_BIT_EXT,
         },
         ShaderCompilationStage{
-            .source_file_path = "glsl/meshlet.glsl",
+            .source = { .glsl = "glsl/meshlet.glsl" },
             //.headers = { "glsl/platform.h", "glsl/scene.h", "glsl/mesh.h", "glsl/debug_rendering.h", "glsl/meshlet.h", "glsl/culling.h" },
             .type = VK_SHADER_STAGE_TASK_BIT_EXT,
         },
         ShaderCompilationStage{
-            .source_file_path = "glsl/meshlet.glsl",
+            .source = { .glsl = "glsl/meshlet.glsl" },
             //.headers = { "platform.h", "scene.h", "mesh.h", "lighting.h" },
             .type = VK_SHADER_STAGE_FRAGMENT_BIT,
         },
     },
     .name = "transparent_no_cull",
-    .slang_input = 0,
 };
 
 static PipelineCreation pc_meshlet_transparent_no_cull = {
@@ -299,18 +294,17 @@ static PipelineCreation pc_meshlet_transparent_no_cull = {
 static ShaderCompilationCreation scc_meshlet_mesh = {
     .stages = {
         ShaderCompilationStage{
-            .source_file_path = "meshlet.glsl",
+            .source = { .glsl = "meshlet.glsl" },
             .headers = { "platform.h", "scene.h", "mesh.h", "meshlet.h" },
             .type = VK_SHADER_STAGE_MESH_BIT_EXT,
         },
         ShaderCompilationStage{
-            .source_file_path = "meshlet.glsl",
+            .source = { .glsl = "meshlet.glsl" },
             .headers = { "platform.h", "scene.h", "mesh.h" },
             .type = VK_SHADER_STAGE_FRAGMENT_BIT,
         },
     },
     .name = "mesh",
-    .slang_input = 0,
 };
 
 static PipelineCreation pc_meshlet_mesh = {
@@ -352,13 +346,12 @@ static PipelineCreation pc_meshlet_mesh = {
 static ShaderCompilationCreation scc_generate_meshlet_index_buffer = {
     .stages = {
         ShaderCompilationStage{
-            .source_file_path = "meshlet.glsl",
+            .source = { .glsl = "meshlet.glsl" },
             .headers = { "platform.h", "scene.h", "mesh.h", "meshlet.h" },
             .type = VK_SHADER_STAGE_COMPUTE_BIT,
         },
     },
     .name = "generate_meshlet_index_buffer",
-    .slang_input = 0,
 };
 
 static PipelineCreation pc_generate_meshlet_index_buffer = {
@@ -387,18 +380,17 @@ static PipelineCreation pc_generate_meshlet_index_buffer = {
 static ShaderCompilationCreation scc_meshlet_emulation_gbuffer_culling = {
     .stages = {
         ShaderCompilationStage{
-            .source_file_path = "meshlet.glsl",
+            .source = { .glsl = "meshlet.glsl" },
             .headers = { "platform.h", "scene.h", "mesh.h", "meshlet.h" },
             .type = VK_SHADER_STAGE_VERTEX_BIT,
         },
         ShaderCompilationStage{
-            .source_file_path = "meshlet.glsl",
+            .source = { .glsl = "meshlet.glsl" },
             .headers = { "platform.h", "scene.h", "mesh.h", "debug_rendering.h" },
             .type = VK_SHADER_STAGE_FRAGMENT_BIT,
         },
     },
     .name = "emulation_gbuffer_culling",
-    .slang_input = 0,
 };
 
 static PipelineCreation pc_meshlet_emulation_gbuffer_culling = {
@@ -440,13 +432,12 @@ static PipelineCreation pc_meshlet_emulation_gbuffer_culling = {
 static ShaderCompilationCreation scc_generate_meshlet_instances = {
     .stages = {
         ShaderCompilationStage{
-            .source_file_path = "meshlet.glsl",
+            .source = { .glsl = "meshlet.glsl" },
             .headers = { "platform.h", "scene.h", "mesh.h", "meshlet.h" },
             .type = VK_SHADER_STAGE_COMPUTE_BIT,
         },
     },
     .name = "generate_meshlet_instances",
-    .slang_input = 0,
 };
 
 static PipelineCreation pc_generate_meshlet_instances = {
@@ -475,13 +466,12 @@ static PipelineCreation pc_generate_meshlet_instances = {
 static ShaderCompilationCreation scc_meshlet_instance_culling = {
     .stages = {
         ShaderCompilationStage{
-            .source_file_path = "meshlet.glsl",
+            .source = { .glsl = "meshlet.glsl" },
             .headers = { "platform.h", "scene.h", "mesh.h", "meshlet.h", "culling.h" },
             .type = VK_SHADER_STAGE_COMPUTE_BIT,
         },
     },
     .name = "meshlet_instance_culling",
-    .slang_input = 0,
 };
 
 static PipelineCreation pc_meshlet_instance_culling = {
@@ -510,13 +500,12 @@ static PipelineCreation pc_meshlet_instance_culling = {
 static ShaderCompilationCreation scc_meshlet_write_counts = {
     .stages = {
         ShaderCompilationStage{
-            .source_file_path = "meshlet.glsl",
+            .source = { .glsl = "meshlet.glsl" },
             .headers = { "platform.h", "scene.h", "mesh.h", "meshlet.h", "culling.h" },
             .type = VK_SHADER_STAGE_COMPUTE_BIT,
         },
     },
     .name = "meshlet_write_counts",
-    .slang_input = 0,
 };
 
 static PipelineCreation pc_meshlet_write_counts = {
@@ -545,18 +534,17 @@ static PipelineCreation pc_meshlet_write_counts = {
 static ShaderCompilationCreation scc_depth_cubemap_meshlet = {
     .stages = {
         ShaderCompilationStage{
-            .source_file_path = "meshlet.glsl",
+            .source = { .glsl = "meshlet.glsl" },
             .headers = { "platform.h", "scene.h", "mesh.h", "meshlet.h" },
             .type = VK_SHADER_STAGE_MESH_BIT_EXT,
         },
         ShaderCompilationStage{
-            .source_file_path = "meshlet.glsl",
+            .source = { .glsl = "meshlet.glsl" },
             .headers = { "platform.h", "scene.h", "mesh.h", "debug_rendering.h", "meshlet.h", "culling.h" },
             .type = VK_SHADER_STAGE_TASK_BIT_EXT,
         },
     },
     .name = "depth_cubemap",
-    .slang_input = 0,
 };
 
 static PipelineCreation pc_depth_cubemap_meshlet = {
@@ -598,18 +586,17 @@ static PipelineCreation pc_depth_cubemap_meshlet = {
 static ShaderCompilationCreation scc_depth_tetrahedron = {
     .stages = {
         ShaderCompilationStage{
-            .source_file_path = "meshlet.glsl",
+            .source = { .glsl = "meshlet.glsl" },
             .headers = { "platform.h", "scene.h", "mesh.h", "meshlet.h" },
             .type = VK_SHADER_STAGE_MESH_BIT_EXT,
         },
         ShaderCompilationStage{
-            .source_file_path = "meshlet.glsl",
+            .source = { .glsl = "meshlet.glsl" },
             .headers = { "platform.h", "scene.h", "mesh.h", "debug_rendering.h", "meshlet.h", "culling.h" },
             .type = VK_SHADER_STAGE_TASK_BIT_EXT,
         },
     },
     .name = "depth_tetrahedron",
-    .slang_input = 0,
 };
 
 static PipelineCreation pc_depth_tetrahedron = {
@@ -651,13 +638,12 @@ static PipelineCreation pc_depth_tetrahedron = {
 static ShaderCompilationCreation scc_meshlet_pointshadows_culling = {
     .stages = {
         ShaderCompilationStage{
-            .source_file_path = "meshlet.glsl",
+            .source = { .glsl = "meshlet.glsl" },
             .headers = { "platform.h", "scene.h", "mesh.h", "meshlet.h", "culling.h", "debug_rendering.h" },
             .type = VK_SHADER_STAGE_COMPUTE_BIT,
         },
     },
     .name = "meshlet_pointshadows_culling",
-    .slang_input = 0,
 };
 
 static PipelineCreation pc_meshlet_pointshadows_culling = {
@@ -686,13 +672,12 @@ static PipelineCreation pc_meshlet_pointshadows_culling = {
 static ShaderCompilationCreation scc_meshlet_pointshadows_commands_generation = {
     .stages = {
         ShaderCompilationStage{
-            .source_file_path = "meshlet.glsl",
+            .source = { .glsl = "meshlet.glsl" },
             .headers = { "platform.h", "scene.h" },
             .type = VK_SHADER_STAGE_COMPUTE_BIT,
         },
     },
     .name = "meshlet_pointshadows_commands_generation",
-    .slang_input = 0,
 };
 
 static PipelineCreation pc_meshlet_pointshadows_commands_generation = {
@@ -721,13 +706,12 @@ static PipelineCreation pc_meshlet_pointshadows_commands_generation = {
 static ShaderCompilationCreation scc_pointshadows_resolution_calculation = {
     .stages = {
         ShaderCompilationStage{
-            .source_file_path = "meshlet.glsl",
+            .source = { .glsl = "meshlet.glsl" },
             .headers = { "platform.h", "scene.h" },
             .type = VK_SHADER_STAGE_COMPUTE_BIT,
         },
     },
     .name = "pointshadows_resolution_calculation",
-    .slang_input = 0,
 };
 
 static PipelineCreation pc_pointshadows_resolution_calculation = {

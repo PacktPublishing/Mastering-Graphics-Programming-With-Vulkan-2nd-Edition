@@ -107,9 +107,12 @@ void main() {
     vec4 guide = texelFetch( global_textures[ reflections.gbuffer_texures.y ], xy, 0 );
     vec2 encoded_normal = guide.rg;
     float raw_depth = guide.b;
-    uint representative_index = uint( round( guide.a ) );
+    // Safe clamp to have valid values
+    int representative_index = clamp( int( round( guide.a ) ), 0, 3 );
 
-    ivec2 fullres_xy = xy * 2 + representative_offsets[ representative_index ];
+    int scale_rcp = max( 1, int( round( reflections_push.resolution_scale_rcp ) ) );
+    ivec2 fullres_xy = clamp( xy * scale_rcp + representative_offsets[ representative_index ],
+                              ivec2( 0 ), ivec2( frame.resolution ) - ivec2( 1 ) );
 
     // Debug: use full res texture
     //raw_depth = texelFetch( global_textures[ nonuniformEXT( frame.depth_texture_index ) ], fullres_xy, 0 ).r;
@@ -158,8 +161,12 @@ void main() {
         vec3 ray_origin = world_pos + normal * 0.02;
 
         vec3 reflected_ray = normalize( reflect( -incoming, vndf_normal_world ) );
+        //reflected_ray = normalize( reflect( -incoming, normal ) );
+
         if ( dot( reflected_ray, normal ) <= 0.001f ) {
-            // Ray is inside or under the ggx surface, no contribution
+            // Ray is inside or under the ggx surface, no contribution.
+            // Write a value otherwise ghosting and flickering can happen.
+            imageStore( global_images_2d[ reflections.out_image_index ], ivec2( gl_LaunchIDEXT.xy ), vec4( 0, 0, 0, 1 ) );
             return;
         }
 
@@ -244,7 +251,9 @@ void main() {
             vec4 p2_screen = frame.view_projection * p2_world;
 
             ivec2 texture_size = textureSize( global_textures[ nonuniformEXT( mesh.textures.x ) ], 0 );
-            vec2 screen_size = vec2(frame.resolution.x, frame.resolution.y);
+
+            // Raygen works at lower resolution, take in account for mip calculation
+            vec2 screen_size = vec2( frame.resolution ) / max( 1.0, reflections_push.resolution_scale_rcp );
 
             vec2_array_type uv_buffer = vec2_array_type( mesh.uv_buffer );
             vec2 uv0 = uv_buffer[ i0 ].v;
@@ -269,7 +278,9 @@ void main() {
             float lights_importance[ NUM_LIGHTS ];
             float total_importance = 0.0;
 
-            for ( uint l = 0; l < frame.active_lights; ++l ) {
+            uint num_lights = min( frame.active_lights, uint( NUM_LIGHTS ) );
+
+            for ( uint l = 0; l < num_lights; ++l ) {
                 // Compute light importance by using something similar to "Importance Sampling of Many Lights on the GPU"
                 Light light = lights[ l ];
                 vec3 p_to_light = light.world_position - p_world.xyz;
@@ -277,19 +288,11 @@ void main() {
                 float point_light_angle = dot( normalize( p_to_light ), shading_normal );
 
                 float distance_sq = max( dot( p_to_light, p_to_light ), 1e-6 );
-                float sin_theta_u = clamp( light.radius * inversesqrt( distance_sq ), -1.0, 1.0 );
-                float theta_u     = asin( sin_theta_u );
-
                 float r_sq = light.radius * light.radius;
 
                 bool light_active = ( point_light_angle > 1e-4 ) && ( distance_sq <= r_sq );
 
-                // TODO(marco): can we avoid using acos?
-                float theta_i = acos( clamp( point_light_angle, -1.0, 1.0 ) );
-
-                float theta_prime = max( 0, theta_i - theta_u );
-                float orientation = abs( cos( theta_prime ) );
-                //orientation = max( cos( theta_prime ), 0.0f );
+                float orientation = point_light_angle;
 
                 // Follow the light attenuation formula
                 float factor = distance_sq * ( 1.0 / r_sq );
@@ -304,7 +307,7 @@ void main() {
             }
 
             if ( total_importance > 0.0001f ) {
-                for ( uint l = 0; l < frame.active_lights; ++l ) {
+                for ( uint l = 0; l < num_lights; ++l ) {
                     lights_importance[ l ] /= total_importance;
                 }    
             }
@@ -313,7 +316,7 @@ void main() {
 
             uint light_index = 0;
             float accum_probability = 0.0;
-            for ( ; light_index < frame.active_lights; ++light_index ) {
+            for ( ; light_index < num_lights; ++light_index ) {
                 accum_probability += lights_importance[ light_index ];
 
                 if ( accum_probability > rnd_value ) {
@@ -321,7 +324,7 @@ void main() {
                 }
             }
 
-            if ( light_index < frame.active_lights ) {
+            if ( total_importance > 0.0001f && light_index < num_lights ) {
 
                 // Debug: light selected
                 //reflection_colour = vec3( 0, 0, 1 );
@@ -331,20 +334,25 @@ void main() {
                 vec3 l = normalize( p_to_light );
                 float light_distance = sqrt( dot( p_to_light, p_to_light ) );
 
-                // Reuse instance id - setting a value that is not -1 as the closest hit is not called.
-                // Default to hit, and if missing, only the miss shader will be set and instance id will be set to -1.
-                payload.instance_id = 0;
-
                 float offset = max( 0.02, length( p_world - world_pos ) * 0.001f );
-                float tmax = max( light_distance - offset, 0.0 );
+                const float shadow_tmin = 0.01;
+                float tmax = light_distance - offset;
 
                 vec3 secondary_ray_start = p_world.xyz + triangle_normal * offset;
 
-                traceRayEXT( as, gl_RayFlagsOpaqueEXT | gl_RayFlagsTerminateOnFirstHitEXT | gl_RayFlagsSkipClosestHitShaderEXT,
-                             0xff, reflections.sbt_offset, reflections.sbt_stride, reflections.miss_index,
-                             secondary_ray_start, 0.01, l, tmax, 0 );
+                // With closer lights tmax could become smaller than tmin, and this is undefined.
+                float shadow_term = 1.0;
+                if ( tmax > shadow_tmin ) {
+                    // Reuse instance id - setting a value that is not -1 as the closest hit is not called.
+                    // Default to hit, and if missing, only the miss shader will be set and instance id will be set to -1.
+                    payload.instance_id = 0;
 
-                float shadow_term = payload.instance_id == -1 ? 1.0 : 0.0;
+                    traceRayEXT( as, gl_RayFlagsOpaqueEXT | gl_RayFlagsTerminateOnFirstHitEXT | gl_RayFlagsSkipClosestHitShaderEXT,
+                                 0xff, reflections.sbt_offset, reflections.sbt_stride, reflections.miss_index,
+                                 secondary_ray_start, shadow_tmin, l, tmax, 0 );
+
+                    shadow_term = payload.instance_id == -1 ? 1.0 : 0.0;
+                }
 
                 if ( render_debug_line ) {
                     debug_draw_line( p_world, p_world + l * light_distance, yellow, yellow );
@@ -381,14 +389,11 @@ void main() {
             }
 
             // Add raytraced light contribution
-            if ( is_raytrace_shadow_point_light() ) {
-
-            }
-            else {
+            if ( !is_raytrace_shadow_point_light() ) {
                 vec3 l = normalize( light_cb.raytraced_shadow_light_position );
-                float NoL = (dot( shading_normal, l ));
+                float NoL = dot( shading_normal, l );
 
-                if ( NoL >= 0.0 ) {
+                if ( NoL > 0.0 ) {
 
                     // Reuse instance id - setting a value that is not -1 as the closest hit is not called.
                     // Default to hit, and if missing, only the miss shader will be set and instance id will be set to -1.

@@ -233,42 +233,6 @@ namespace IndexType {
     }
 } // namespace IndexType
 
-namespace TextureType {
-    enum Enum {
-        Texture1D, Texture2D, Texture3D, TextureCube, Texture_1D_Array, Texture_2D_Array, Texture_Cube_Array, Count
-    };
-
-    enum Mask {
-        Texture1D_mask = 1 << 0, Texture2D_mask = 1 << 1, Texture3D_mask = 1 << 2, TextureCube_mask = 1 << 3, Texture_1D_Array_mask = 1 << 4, Texture_2D_Array_mask = 1 << 5, Texture_Cube_Array_mask = 1 << 6, Count_mask = 1 << 7
-    };
-
-    static const char* s_value_names[] = {
-        "Texture1D", "Texture2D", "Texture3D", "TextureCube", "Texture_1D_Array", "Texture_2D_Array", "Texture_Cube_Array", "Count"
-    };
-
-    static const char* ToString( Enum e ) {
-        return ((u32)e < Enum::Count ? s_value_names[(int)e] : "unsupported" );
-    }
-} // namespace TextureType
-
-//namespace ShaderStage {
-//    enum Enum {
-//        Vertex, Fragment, Geometry, Compute, Hull, Domain, Count
-//    };
-//
-//    enum Mask {
-//        Vertex_mask = 1 << 0, Fragment_mask = 1 << 1, Geometry_mask = 1 << 2, Compute_mask = 1 << 3, Hull_mask = 1 << 4, Domain_mask = 1 << 5, Count_mask = 1 << 6
-//    };
-//
-//    static const char* s_value_names[] = {
-//        "Vertex", "Fragment", "Geometry", "Compute", "Hull", "Domain", "Count"
-//    };
-//
-//    static const char* ToString( Enum e ) {
-//        return ((u32)e < Enum::Count ? s_value_names[(int)e] : "unsupported" );
-//    }
-//} // namespace ShaderStage
-
 namespace TextureFilter {
     enum Enum {
         Nearest, Linear, Count
@@ -411,26 +375,6 @@ enum DeviceExtensions {
     DeviceExtensions_DebugCallback                      = 1 << 0,
 };
 
-namespace TextureFlags {
-    enum Enum {
-        Default, RenderTarget, Compute, Sparse, ShadingRate, Count
-    };
-
-    enum Mask {
-        Default_mask = 1 << 0, RenderTarget_mask = 1 << 1, Compute_mask = 1 << 2, Sparse_mask = 1 << 3, ShadingRate_mask = 1 << 4
-    };
-
-    static const char* s_value_names[] = {
-        "Default", "RenderTarget", "Compute", "Count"
-    };
-
-    static const char* ToString( Enum e ) {
-        return ((u32)e < Enum::Count ? s_value_names[(int)e] : "unsupported" );
-    }
-
-} // namespace TextureFlags
-
-
 namespace PipelineStage {
 
     enum Enum {
@@ -499,5 +443,18 @@ enum class CommandQueueType : u8 {
 
 static constexpr u32 k_command_queue_count = (u32)CommandQueueType::Count;
 
+enum class ShaderLanguage : u8 {
+    Glsl = 0,
+    Slang = 1,
+    Count = 2
+}; // enum class ShaderLanguage
+
+inline cstring to_shader_language_name( ShaderLanguage language ) {
+    switch ( language ) {
+        case ShaderLanguage::Glsl:      return "glsl";
+        case ShaderLanguage::Slang:     return "slang";
+        default:                        return "unknown";
+    }
+}
 
 } // namespace raptor

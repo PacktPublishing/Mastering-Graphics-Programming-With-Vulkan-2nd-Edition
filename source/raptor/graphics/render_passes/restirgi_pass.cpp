@@ -144,15 +144,15 @@ void ReSTIRGIPass::update_psos( FrameGraphResourceContext& context, PipelineUpda
         {
         .stages = {
             {
-                .source_file_path = "glsl/chapter14/restir_gi.glsl",
+                .source = { .glsl = "glsl/chapter14/restir_gi.glsl" },
                 .type = VK_SHADER_STAGE_RAYGEN_BIT_KHR,
             },
             {
-                .source_file_path = "glsl/chapter14/restir_gi.glsl",
+                .source = { .glsl = "glsl/chapter14/restir_gi.glsl" },
                 .type = VK_SHADER_STAGE_CLOSEST_HIT_BIT_KHR,
             },
             {
-                .source_file_path = "glsl/chapter14/restir_gi.glsl",
+                .source = { .glsl = "glsl/chapter14/restir_gi.glsl" },
                 .type = VK_SHADER_STAGE_MISS_BIT_KHR,
             },
         },
@@ -175,7 +175,7 @@ void ReSTIRGIPass::update_psos( FrameGraphResourceContext& context, PipelineUpda
         {
         .stages = {
             {
-                .source_file_path = "glsl/chapter14/restir_gi.glsl",
+                .source = { .glsl = "glsl/chapter14/restir_gi.glsl" },
                 .type = VK_SHADER_STAGE_COMPUTE_BIT,
             },
         },
@@ -193,7 +193,7 @@ void ReSTIRGIPass::update_psos( FrameGraphResourceContext& context, PipelineUpda
         {
         .stages = {
             {
-                .source_file_path = "glsl/chapter14/restir_gi.glsl",
+                .source = { .glsl = "glsl/chapter14/restir_gi.glsl" },
                 .type = VK_SHADER_STAGE_COMPUTE_BIT,
             },
         },
@@ -209,6 +209,8 @@ void ReSTIRGIPass::update_psos( FrameGraphResourceContext& context, PipelineUpda
 }
 
 void ReSTIRGIPass::render( FrameGraphRenderContext& context ) {
+    const ShaderLanguage language = context.render_config->shader_language();
+
     if ( !enabled ) {
         return;
     }
@@ -291,13 +293,13 @@ void ReSTIRGIPass::render( FrameGraphRenderContext& context ) {
         });
     cb->flush_barriers();
 
-    cb->bind_pipeline( sample_generation_pipeline.pipeline );
+    cb->bind_pipeline( sample_generation_pipeline.active( language ) );
 
     DescriptorSetHandle descriptor_set = ping ? descriptor_set_ping : descriptor_set_pong;
     cb->bind_descriptor_set( { renderer->gpu->bindless_descriptor_set, descriptor_set },
                               { context.render_blackboard->scene_cb_offset, constants_offset, render_blackboard.lighting.lighting_constants_cb_offset } );
 
-    cb->trace_rays( sample_generation_pipeline.pipeline, restir_width, restir_height, 1 );
+    cb->trace_rays( sample_generation_pipeline.active( language ), restir_width, restir_height, 1 );
 
     cb->pop_marker();
 
@@ -323,7 +325,7 @@ void ReSTIRGIPass::render( FrameGraphRenderContext& context ) {
                           VK_IMAGE_LAYOUT_GENERAL } );
     cb->flush_barriers();
 
-    cb->bind_pipeline( spatial_sampling_pipeline.pipeline );
+    cb->bind_pipeline( spatial_sampling_pipeline.active( language ) );
     cb->bind_descriptor_set( { renderer->gpu->bindless_descriptor_set, descriptor_set },
                               { context.render_blackboard->scene_cb_offset, constants_offset, render_blackboard.lighting.lighting_constants_cb_offset } );
     cb->dispatch( ( restir_width + 7 ) / 8, ( restir_height + 7 ) / 8, 1 );
@@ -429,12 +431,18 @@ void ReSTIRGIPass::create_gpu_resources( FrameGraphResourceContext& context ) {
     ImageCreation texture_creation{ };
     const u32 adjusted_width = ceilu32( render_blackboard.render_width * texture_scale );
     const u32 adjusted_height = ceilu32( render_blackboard.render_height * texture_scale );
-    texture_creation.set_size( adjusted_width, adjusted_height, 1 )
-        .set_format_type( VK_FORMAT_R16G16B16A16_SFLOAT, TextureType::Texture2D )
-        .set_mips( 1 )
-        .set_layers( 1 )
-        .set_flags( TextureFlags::Compute_mask )
-        .set_name( "restirgi_output" );
+    texture_creation.image_type        = VK_IMAGE_TYPE_2D;
+    texture_creation.format            = VK_FORMAT_R16G16B16A16_SFLOAT;
+    texture_creation.width             = adjusted_width;
+    texture_creation.height            = adjusted_height;
+    texture_creation.depth             = 1;
+    texture_creation.mip_level_count   = 1;
+    texture_creation.array_layer_count = 1;
+    texture_creation.usage             = VK_IMAGE_USAGE_SAMPLED_BIT |
+                                         VK_IMAGE_USAGE_STORAGE_BIT |
+                                         VK_IMAGE_USAGE_TRANSFER_DST_BIT |
+                                         VK_IMAGE_USAGE_TRANSFER_SRC_BIT;
+    texture_creation.name              = "restirgi_output";
 
     output_texture = gpu.create_image( texture_creation );
 
@@ -567,7 +575,7 @@ void ReSTIRGIPass::create_descriptors( FrameGraphRenderContext& context ) {
     GpuDevice* gpu = renderer->gpu;
     RenderBlackboard& render_blackboard = *context.render_blackboard;
 
-    ShaderReflectionInfo* reflection_info = renderer->get_shader_reflection( sample_generation_pipeline.pipeline );
+    ShaderReflectionInfo* reflection_info = renderer->get_shader_reflection( sample_generation_pipeline.any() );
 
     DescriptorSetBinder descriptors;
     descriptors.dynamic_buffers.push( { 1, sizeof( ReSTIRGIConstants ) } );
@@ -575,7 +583,7 @@ void ReSTIRGIPass::create_descriptors( FrameGraphRenderContext& context ) {
     descriptors.bind_ssbo( temporal_reservoir_buffer[ 0 ], 31 );
     descriptors.bind_ssbo( temporal_reservoir_buffer[ 1 ], 32 );
     descriptors.name = "restirgi_ds_ping";
-    descriptor_set_ping = renderer->create_descriptor_set( descriptors, reflection_info, sample_generation_pipeline.pipeline, 0, render_blackboard );
+    descriptor_set_ping = renderer->create_descriptor_set( descriptors, reflection_info, sample_generation_pipeline.any(), 0, render_blackboard );
 
     descriptors.reset();
     descriptors.dynamic_buffers.push( { 1, sizeof( ReSTIRGIConstants ) } );
@@ -583,7 +591,7 @@ void ReSTIRGIPass::create_descriptors( FrameGraphRenderContext& context ) {
     descriptors.bind_ssbo( temporal_reservoir_buffer[ 1 ], 31 );
     descriptors.bind_ssbo( temporal_reservoir_buffer[ 0 ], 32 );
     descriptors.name = "restirgi_ds_pong";
-    descriptor_set_pong = renderer->create_descriptor_set( descriptors, reflection_info, sample_generation_pipeline.pipeline, 0, render_blackboard );
+    descriptor_set_pong = renderer->create_descriptor_set( descriptors, reflection_info, sample_generation_pipeline.any(), 0, render_blackboard );
 }
 
 void ReSTIRGIPass::create_descriptors( FrameGraphResourceContext& context ) {
@@ -591,7 +599,7 @@ void ReSTIRGIPass::create_descriptors( FrameGraphResourceContext& context ) {
     GpuDevice* gpu = renderer->gpu;
     RenderBlackboard& render_blackboard = *context.render_blackboard;
 
-    ShaderReflectionInfo* reflection_info = renderer->get_shader_reflection( sample_generation_pipeline.pipeline );
+    ShaderReflectionInfo* reflection_info = renderer->get_shader_reflection( sample_generation_pipeline.any() );
 
     DescriptorSetBinder descriptors;
     descriptors.dynamic_buffers.push( { 1, sizeof( ReSTIRGIConstants ) } );
@@ -599,7 +607,7 @@ void ReSTIRGIPass::create_descriptors( FrameGraphResourceContext& context ) {
     descriptors.bind_ssbo( temporal_reservoir_buffer[ 0 ], 31 );
     descriptors.bind_ssbo( temporal_reservoir_buffer[ 1 ], 32 );
     descriptors.name = "restirgi_ds_ping";
-    descriptor_set_ping = renderer->create_descriptor_set( descriptors, reflection_info, sample_generation_pipeline.pipeline, 0, render_blackboard );
+    descriptor_set_ping = renderer->create_descriptor_set( descriptors, reflection_info, sample_generation_pipeline.any(), 0, render_blackboard );
 
     descriptors.reset();
     descriptors.dynamic_buffers.push( { 1, sizeof( ReSTIRGIConstants ) } );
@@ -607,7 +615,7 @@ void ReSTIRGIPass::create_descriptors( FrameGraphResourceContext& context ) {
     descriptors.bind_ssbo( temporal_reservoir_buffer[ 1 ], 31 );
     descriptors.bind_ssbo( temporal_reservoir_buffer[ 0 ], 32 );
     descriptors.name = "restirgi_ds_pong";
-    descriptor_set_pong = renderer->create_descriptor_set( descriptors, reflection_info, sample_generation_pipeline.pipeline, 0, render_blackboard );
+    descriptor_set_pong = renderer->create_descriptor_set( descriptors, reflection_info, sample_generation_pipeline.any(), 0, render_blackboard );
 }
 
 } // namespace raptor

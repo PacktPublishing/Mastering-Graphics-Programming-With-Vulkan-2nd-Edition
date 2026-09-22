@@ -461,7 +461,15 @@ void NeuralMaterialTrainer::create_resources( Renderer* renderer, FrameGraph* fr
     int normal_components = 0;
     u8* normal_data = stbi_load( RAPTOR_DATA_FOLDER "/Car_Paint_normal.png", &normal_width, &normal_height, &normal_components, 4 );
     RASSERT( normal_data != nullptr );
-    material_normal.resource = renderer->create_texture( ImageCreation().set_data( normal_data ).set_format_type( VK_FORMAT_R8G8B8A8_UNORM, TextureType::Texture2D ).set_flags( 0 ).set_size( ( u16 )normal_width, ( u16 )normal_height, 1 ).set_layers( 1 ).set_mips( 1 ).set_name( RAPTOR_DATA_FOLDER "/Car_Paint_normal.png" ) );
+    material_normal.resource = renderer->create_texture( ImageCreation{
+        .image_type   = VK_IMAGE_TYPE_2D,
+        .format       = VK_FORMAT_R8G8B8A8_UNORM,
+        .width        = ( u32 )normal_width, .height = ( u32 )normal_height, .depth = 1,
+        .usage        = VK_IMAGE_USAGE_SAMPLED_BIT |
+                        VK_IMAGE_USAGE_TRANSFER_DST_BIT |
+                        VK_IMAGE_USAGE_TRANSFER_SRC_BIT,
+        .initial_data = normal_data,
+        .name         = RAPTOR_DATA_FOLDER "/Car_Paint_normal.png" } );
     stbi_image_free( normal_data );
     material_normal.texture = { material_normal.resource->image, material_normal.resource->image_view };
 
@@ -470,124 +478,139 @@ void NeuralMaterialTrainer::create_resources( Renderer* renderer, FrameGraph* fr
     int roughness_components = 0;
     u8* roughness_data = stbi_load( RAPTOR_DATA_FOLDER "/Car_Paint_roughness.png", &roughness_width, &roughness_height, &roughness_components, 4 );
     RASSERT( roughness_data != nullptr );
-    material_roughness.resource = renderer->create_texture( ImageCreation().set_data( roughness_data ).set_format_type( VK_FORMAT_R8G8B8A8_UNORM, TextureType::Texture2D ).set_flags( 0 ).set_size( ( u16 )roughness_width, ( u16 )roughness_height, 1 ).set_layers( 1 ).set_mips( 1 ).set_name( RAPTOR_DATA_FOLDER "/Car_Paint_roughness.png" ) );
+    material_roughness.resource = renderer->create_texture( ImageCreation{
+        .image_type   = VK_IMAGE_TYPE_2D,
+        .format       = VK_FORMAT_R8G8B8A8_UNORM,
+        .width        = ( u32 )roughness_width, .height = ( u32 )roughness_height, .depth = 1,
+        .usage        = VK_IMAGE_USAGE_SAMPLED_BIT |
+                        VK_IMAGE_USAGE_TRANSFER_DST_BIT |
+                        VK_IMAGE_USAGE_TRANSFER_SRC_BIT,
+        .initial_data = roughness_data,
+        .name         = RAPTOR_DATA_FOLDER "/Car_Paint_roughness.png" } );
     stbi_image_free( roughness_data );
     material_roughness.texture = { material_roughness.resource->image, material_roughness.resource->image_view };
 
     ShaderCompilationCreation random_batch_shader = {
-        .stages = { { .source_file_path = "slang/chapter15/neural_material_training.slang", .type = VK_SHADER_STAGE_COMPUTE_BIT } },
+        .stages = { { .source = { .slang = "slang/chapter15/neural_material_training.slang" }, .type = VK_SHADER_STAGE_COMPUTE_BIT } },
         .name = "compute_random_batch",
-        .slang_input = 1,
     };
     if ( gpu->cooperative_vector_supported ) {
         random_batch_shader.stages[ 0 ].defines.push( "RAPTOR_USE_COOPVEC" );
     }
     renderer->create_compute_pipeline_state( random_batch_shader, { .name = "compute_random_batch", .render_pass_name = "chapter15" }, "compute_random_batch", frame_graph, random_batch_pipeline );
-    random_batch_pso = random_batch_pipeline.pipeline;
+    random_batch_pso = random_batch_pipeline.any();
     random_batch_dsl = compute_random_batch::set_1::create_descriptor_set_layout( gpu );
     compute_random_batch::set_1::dynamic_buffers( sizeof( gpu::NMRandomBatchConstants ) );
     random_batch_ds = compute_random_batch::set_1::create_descriptor_set( gpu );
 
     ShaderCompilationCreation brdf_encoder_train_shader = {
-        .stages = { { .source_file_path = "slang/chapter15/neural_material_training.slang", .type = VK_SHADER_STAGE_COMPUTE_BIT } },
+        .stages = { { .source = { .slang = "slang/chapter15/neural_material_training.slang" }, .type = VK_SHADER_STAGE_COMPUTE_BIT } },
         .name = "train_brdf_with_encoder",
-        .slang_input = 1,
     };
     if ( gpu->cooperative_vector_supported ) {
         brdf_encoder_train_shader.stages[ 0 ].defines.push( "RAPTOR_USE_COOPVEC" );
     }
     renderer->create_compute_pipeline_state( brdf_encoder_train_shader, { .name = "train_brdf_with_encoder", .render_pass_name = "chapter15" }, "train_brdf_with_encoder", frame_graph, brdf_encoder_train_pipeline );
-    brdf_encoder_train_pso = brdf_encoder_train_pipeline.pipeline;
+    brdf_encoder_train_pso = brdf_encoder_train_pipeline.any();
     brdf_encoder_train_dsl = train_brdf_with_encoder::set_1::create_descriptor_set_layout( gpu );
     train_brdf_with_encoder::set_1::dynamic_buffers( sizeof( gpu::NMRandomBatchConstants ), sizeof( gpu::NMBrdfTrainingConstants ) );
     brdf_encoder_train_ds = train_brdf_with_encoder::set_1::create_descriptor_set( gpu );
 
     ShaderCompilationCreation brdf_latent_texture_train_shader = {
-        .stages = { { .source_file_path = "slang/chapter15/neural_material_training.slang", .type = VK_SHADER_STAGE_COMPUTE_BIT } },
+        .stages = { { .source = { .slang = "slang/chapter15/neural_material_training.slang" }, .type = VK_SHADER_STAGE_COMPUTE_BIT } },
         .name = "train_brdf_with_latent_texture",
-        .slang_input = 1,
     };
     if ( gpu->cooperative_vector_supported ) {
         brdf_latent_texture_train_shader.stages[ 0 ].defines.push( "RAPTOR_USE_COOPVEC" );
     }
     renderer->create_compute_pipeline_state( brdf_latent_texture_train_shader, { .name = "train_brdf_with_latent_texture", .render_pass_name = "chapter15" }, "train_brdf_with_latent_texture", frame_graph, brdf_latent_texture_train_pipeline );
-    brdf_latent_texture_train_pso = brdf_latent_texture_train_pipeline.pipeline;
+    brdf_latent_texture_train_pso = brdf_latent_texture_train_pipeline.any();
     brdf_latent_texture_train_dsl = train_brdf_with_latent_texture::set_1::create_descriptor_set_layout( gpu );
     train_brdf_with_latent_texture::set_1::dynamic_buffers( sizeof( gpu::NMRandomBatchConstants ), sizeof( gpu::NMBrdfLatentTrainingConstants ) );
     brdf_latent_texture_train_ds = train_brdf_with_latent_texture::set_1::create_descriptor_set( gpu );
 
     ShaderCompilationCreation copy_encoder_to_latent_shader = {
-        .stages = { { .source_file_path = "slang/chapter15/neural_material_training.slang", .type = VK_SHADER_STAGE_COMPUTE_BIT } },
+        .stages = { { .source = { .slang = "slang/chapter15/neural_material_training.slang" }, .type = VK_SHADER_STAGE_COMPUTE_BIT } },
         .name = "copy_encoder_to_latent_texture",
-        .slang_input = 1,
     };
     if ( gpu->cooperative_vector_supported ) {
         copy_encoder_to_latent_shader.stages[ 0 ].defines.push( "RAPTOR_USE_COOPVEC" );
     }
     renderer->create_compute_pipeline_state( copy_encoder_to_latent_shader, { .name = "copy_encoder_to_latent_texture", .render_pass_name = "chapter15" }, "copy_encoder_to_latent_texture", frame_graph, copy_encoder_to_latent_pipeline );
-    copy_encoder_to_latent_pso = copy_encoder_to_latent_pipeline.pipeline;
+    copy_encoder_to_latent_pso = copy_encoder_to_latent_pipeline.any();
     copy_encoder_to_latent_dsl = copy_encoder_to_latent_texture::set_1::create_descriptor_set_layout( gpu );
     copy_encoder_to_latent_texture::set_1::dynamic_buffers( sizeof( gpu::NMCopyEncoderToLatentConstants ) );
     copy_encoder_to_latent_ds = copy_encoder_to_latent_texture::set_1::create_descriptor_set( gpu );
 
     ShaderCompilationCreation optimizer_step_buffer_shader = {
-        .stages = { { .source_file_path = "slang/chapter15/neural_material_training.slang", .type = VK_SHADER_STAGE_COMPUTE_BIT } },
+        .stages = { { .source = { .slang = "slang/chapter15/neural_material_training.slang" }, .type = VK_SHADER_STAGE_COMPUTE_BIT } },
         .name = "optimizer_step_buffer",
-        .slang_input = 1,
     };
     if ( gpu->cooperative_vector_supported ) {
         optimizer_step_buffer_shader.stages[ 0 ].defines.push( "RAPTOR_USE_COOPVEC" );
     }
     renderer->create_compute_pipeline_state( optimizer_step_buffer_shader, { .name = "optimizer_step_buffer", .render_pass_name = "chapter15" }, "optimizer_step_buffer", frame_graph, optimizer_step_buffer_pipeline );
-    optimizer_step_buffer_pso = optimizer_step_buffer_pipeline.pipeline;
+    optimizer_step_buffer_pso = optimizer_step_buffer_pipeline.any();
     optimizer_step_buffer_dsl = optimizer_step_buffer::set_1::create_descriptor_set_layout( gpu );
     optimizer_step_buffer::set_1::dynamic_buffers( sizeof( gpu::NMOptimizerBufferConstants ) );
     optimizer_step_buffer_ds = optimizer_step_buffer::set_1::create_descriptor_set( gpu );
 
     ShaderCompilationCreation optimizer_step_texture_shader = {
-        .stages = { { .source_file_path = "slang/chapter15/neural_material_training.slang", .type = VK_SHADER_STAGE_COMPUTE_BIT } },
+        .stages = { { .source = { .slang = "slang/chapter15/neural_material_training.slang" }, .type = VK_SHADER_STAGE_COMPUTE_BIT } },
         .name = "optimizer_step_texture",
-        .slang_input = 1,
     };
     if ( gpu->cooperative_vector_supported ) {
         optimizer_step_texture_shader.stages[ 0 ].defines.push( "RAPTOR_USE_COOPVEC" );
     }
     renderer->create_compute_pipeline_state( optimizer_step_texture_shader, { .name = "optimizer_step_texture", .render_pass_name = "chapter15" }, "optimizer_step_texture", frame_graph, optimizer_step_texture_pipeline );
-    optimizer_step_texture_pso = optimizer_step_texture_pipeline.pipeline;
+    optimizer_step_texture_pso = optimizer_step_texture_pipeline.any();
     optimizer_step_texture_dsl = optimizer_step_texture::set_1::create_descriptor_set_layout( gpu );
     optimizer_step_texture::set_1::dynamic_buffers( sizeof( gpu::NMOptimizerTextureConstants ) );
     optimizer_step_texture_ds = optimizer_step_texture::set_1::create_descriptor_set( gpu );
 
     ShaderCompilationCreation downsample_latent_pyramid_shader = {
-        .stages = { { .source_file_path = "slang/chapter15/neural_material_training.slang", .type = VK_SHADER_STAGE_COMPUTE_BIT } },
+        .stages = { { .source = { .slang = "slang/chapter15/neural_material_training.slang" }, .type = VK_SHADER_STAGE_COMPUTE_BIT } },
         .name = "downsample_latent_pyramid",
-        .slang_input = 1,
     };
     if ( gpu->cooperative_vector_supported ) {
         downsample_latent_pyramid_shader.stages[ 0 ].defines.push( "RAPTOR_USE_COOPVEC" );
     }
     renderer->create_compute_pipeline_state( downsample_latent_pyramid_shader, { .name = "downsample_latent_pyramid", .render_pass_name = "chapter15" }, "downsample_latent_pyramid", frame_graph, downsample_latent_pyramid_pipeline );
-    downsample_latent_pyramid_pso = downsample_latent_pyramid_pipeline.pipeline;
+    downsample_latent_pyramid_pso = downsample_latent_pyramid_pipeline.any();
 
     ShaderCompilationCreation preview_brdf_shader = {
-        .stages = { { .source_file_path = "slang/chapter15/neural_material_inference.slang", .type = VK_SHADER_STAGE_COMPUTE_BIT } },
+        .stages = { { .source = { .slang = "slang/chapter15/neural_material_inference.slang" }, .type = VK_SHADER_STAGE_COMPUTE_BIT } },
         .name = "preview_brdf",
-        .slang_input = 1,
     };
     if ( gpu->cooperative_vector_supported ) {
         preview_brdf_shader.stages[ 0 ].defines.push( "RAPTOR_USE_COOPVEC" );
     }
     renderer->create_compute_pipeline_state( preview_brdf_shader, { .name = "preview_brdf", .render_pass_name = "chapter15" }, "preview_brdf", frame_graph, preview_brdf_pipeline );
-    preview_brdf_pso = preview_brdf_pipeline.pipeline;
+    preview_brdf_pso = preview_brdf_pipeline.any();
     preview_brdf_dsl = preview_brdf::set_1::create_descriptor_set_layout( gpu );
     preview_brdf::set_1::dynamic_buffers( sizeof( gpu::NMPreviewConstants ) );
     preview_brdf_ds = preview_brdf::set_1::create_descriptor_set( gpu );
 
-    TextureResource* preview_resource = renderer->create_texture( ImageCreation().set_size( ( u16 )NEURAL_PREVIEW_WIDTH, ( u16 )NEURAL_PREVIEW_HEIGHT, 1 ).set_layers( 1 ).set_mips( 1 ).set_format_type( VK_FORMAT_R16G16B16A16_SFLOAT, TextureType::Texture2D ).set_flags( TextureFlags::Compute_mask ).set_name( "preview_texture" ) );
+    TextureResource* preview_resource = renderer->create_texture( ImageCreation{
+        .image_type = VK_IMAGE_TYPE_2D,
+        .format     = VK_FORMAT_R16G16B16A16_SFLOAT,
+        .width      = ( u32 )NEURAL_PREVIEW_WIDTH, .height = ( u32 )NEURAL_PREVIEW_HEIGHT, .depth = 1,
+        .usage      = VK_IMAGE_USAGE_STORAGE_BIT |
+                      VK_IMAGE_USAGE_SAMPLED_BIT |
+                      VK_IMAGE_USAGE_TRANSFER_DST_BIT |
+                      VK_IMAGE_USAGE_TRANSFER_SRC_BIT,
+        .name       = "preview_texture" } );
     preview_texture = { preview_resource->image, preview_resource->image_view };
 
-    ImageCreation latent_tc;
-    latent_tc.set_layers( 1 ).set_mips( 1 ).set_format_type( VK_FORMAT_R32G32B32A32_SFLOAT, TextureType::Texture2D ).set_flags( TextureFlags::Compute_mask );
+    ImageCreation latent_tc{
+        .image_type        = VK_IMAGE_TYPE_2D,
+        .format            = VK_FORMAT_R32G32B32A32_SFLOAT,
+        .mip_level_count   = 1,
+        .array_layer_count = 1,
+        .usage             = VK_IMAGE_USAGE_SAMPLED_BIT |
+                             VK_IMAGE_USAGE_STORAGE_BIT |
+                             VK_IMAGE_USAGE_TRANSFER_DST_BIT |
+                             VK_IMAGE_USAGE_TRANSFER_SRC_BIT };
 
     BufferCreation latent_buffer_creation = { .usage = storage_buffer_usage, .memory_usage = VMA_MEMORY_USAGE_AUTO_PREFER_DEVICE };
 
@@ -596,8 +619,8 @@ void NeuralMaterialTrainer::create_resources( Renderer* renderer, FrameGraph* fr
     latent_pyramid.level_count = LATENT_PYRAMID_LEVELS;
     StaticString64 tex_name;
     for ( u32 level = 0; level < LATENT_PYRAMID_LEVELS; ++level ) {
-        latent_tc.width  = ( u16 )( LATENT_TEXTURE_SIZE >> level );
-        latent_tc.height = ( u16 )( LATENT_TEXTURE_SIZE >> level );
+        latent_tc.width  = ( u32 )( LATENT_TEXTURE_SIZE >> level );
+        latent_tc.height = ( u32 )( LATENT_TEXTURE_SIZE >> level );
         latent_buffer_creation.size = latent_tc.width * latent_tc.height * sizeof( f32 ) * 4;
 
         tex_name.format( "latent0_%u", level );

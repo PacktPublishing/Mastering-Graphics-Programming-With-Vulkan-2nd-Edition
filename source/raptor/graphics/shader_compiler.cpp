@@ -137,7 +137,7 @@ static void compute_slang_hash( ShaderCompilationStage& shader_stage, StringBuff
 
     u64 hashed_memory = 0;
 
-    cstring shader_path = path_buffer.append_use_f( "%s%s", RAPTOR_SHADER_FOLDER, shader_stage.source_file_path );
+    cstring shader_path = path_buffer.append_use_f( "%s%s", RAPTOR_SHADER_FOLDER, shader_stage.source.slang );
     FileReadResult shader_read_result = file_read_text( shader_path, temp_allocator );
     if ( shader_read_result.data ) {
         // NOTE(marco): do this here as strtok messes with the data
@@ -748,7 +748,7 @@ static i32 parse_line( cstring input, u32 input_size, u32 offset, u32* out_next_
     return line_offset;
 }
 
-void ShaderCompiler::read_source_from_file_and_add_hashes( ShaderCompilationStage& shader_stage, StringBuffer& shader_buffer, ArenaAllocator* temp_allocator ) {
+void ShaderCompiler::read_source_from_file_and_add_hashes( ShaderCompilationStage& shader_stage, ShaderLanguage language, StringBuffer& shader_buffer, ArenaAllocator* temp_allocator ) {
     // Read file and concatenate it
     // Cache current shader code beginning
     cstring source_code = shader_buffer.current();
@@ -759,16 +759,15 @@ void ShaderCompiler::read_source_from_file_and_add_hashes( ShaderCompilationStag
         shader_stage.shader_file_hashes.push( shader_file_hash );
     }
 
-    if ( shader_stage.source_file_path != nullptr ) {
-        if ( strstr( shader_stage.source_file_path, ".slang" ) != nullptr ) {
-            compute_slang_hash( shader_stage, path_buffer, shader_buffer, temp_allocator );
-        } else {
-            // Concatenate main shader code
-            u64 shader_file_hash = shader_concatenate_from_file( shader_stage.source_file_path, path_buffer, shader_buffer, temp_allocator );
-            // Cache main shader code hash
-            shader_stage.shader_file_hashes.push( shader_file_hash );
-            //rprint( " %016llx", shader_file_hash );
-        }
+    if ( language == ShaderLanguage::Slang ) {
+        compute_slang_hash( shader_stage, path_buffer, shader_buffer, temp_allocator );
+    }
+    else {
+        // Concatenate main shader code
+        u64 shader_file_hash = shader_concatenate_from_file( shader_stage.source.glsl, path_buffer, shader_buffer, temp_allocator );
+        // Cache main shader code hash
+        shader_stage.shader_file_hashes.push( shader_file_hash );
+        //rprint( " %016llx", shader_file_hash );
     }
     // Add terminator for final string.
     shader_buffer.close_current_string();
@@ -782,10 +781,13 @@ void ShaderCompiler::read_source_from_file_and_add_hashes( ShaderCompilationStag
     const u32 buffer_size = 256;
     char line[ buffer_size ]{ };
 
-    char relative_path_buffer[ 512 ]{ };
-    const char* relative_path = strrchr( shader_stage.source_file_path, '/' );
-    if ( relative_path ) {
-        strncpy( relative_path_buffer, shader_stage.source_file_path, relative_path - shader_stage.source_file_path + 1 );
+    char relative_path_buffer[ 512 ]{};
+    cstring source_path = shader_stage.source.path( language );
+    if ( source_path != nullptr ) {
+        const char* relative_path = strrchr( source_path, '/' );
+        if ( relative_path ) {
+            strncpy( relative_path_buffer, source_path, relative_path - source_path + 1 );
+        }
     }
 
     while ( ( read = parse_line( source_code, source_code_size, offset, &offset, line, buffer_size ) ) != -1) {
@@ -1199,7 +1201,7 @@ inline bool load_shader_reflection_binary( ShaderReflection& sr, cstring path,
 bool ShaderCompiler::compile_and_cache_shader( ShaderCompilationStage& compilation_stage, Span<const u32>& spirv_bytecode, cstring binary_data_folder,
                                                ArenaAllocator* temp_allocator, cstring technique_name, cstring shader_name,
                                                ShaderReflection* reflection, StringBuffer* name_buffer, bool use_cache,
-                                               bool slang_input, bool ignore_layout, bool& shader_changed ) {
+                                               ShaderLanguage language, bool ignore_layout, bool& shader_changed ) {
     // Do not compile shaders when parsing the parent technique
     bool compile_shader = true;
     cstring shader_spirv_path = nullptr;
@@ -1212,23 +1214,27 @@ bool ShaderCompiler::compile_and_cache_shader( ShaderCompilationStage& compilati
     if ( use_cache ) {
         // Check shader cache and eventually compile the code.
         path_buffer.clear();
-        shader_spirv_path = path_buffer.append_use_f( "%s/%s_%s_%s.spv",
-                                                        binary_data_folder, technique_name, shader_name,
+
+        // The language is part of the cache key.
+        cstring language_name = to_shader_language_name( language );
+
+        shader_spirv_path = path_buffer.append_use_f( "%s/%s_%s_%s_%s.spv",
+                                                        binary_data_folder, technique_name, shader_name, language_name,
                                                         to_compiler_extension( compilation_stage.type ) );
-        shader_hash_path = path_buffer.append_use_f( "%s/%s_%s_%s.hash.cache",
-                                                        binary_data_folder, technique_name, shader_name,
+        shader_hash_path = path_buffer.append_use_f( "%s/%s_%s_%s_%s.hash.cache",
+                                                        binary_data_folder, technique_name, shader_name, language_name,
                                                         to_compiler_extension( compilation_stage.type ) );
-        shader_layout_path = path_buffer.append_use_f( "%s/%s_%s_%s_layout.json",
-                                                        binary_data_folder, technique_name, shader_name,
+        shader_layout_path = path_buffer.append_use_f( "%s/%s_%s_%s_%s_layout.json",
+                                                        binary_data_folder, technique_name, shader_name, language_name,
                                                         to_compiler_extension( compilation_stage.type ) );
-        shader_reflection_path = path_buffer.append_use_f( "%s/%s_%s_%s_reflection.bin",
-                                                        binary_data_folder, technique_name, shader_name,
+        shader_reflection_path = path_buffer.append_use_f( "%s/%s_%s_%s_%s_reflection.bin",
+                                                        binary_data_folder, technique_name, shader_name, language_name,
                                                         to_compiler_extension( compilation_stage.type ) );
 
         bool cache_exists = file_exists( shader_hash_path );
 		cache_exists = cache_exists && file_exists( shader_spirv_path );
 
-        if ( slang_input ) {
+        if ( language == ShaderLanguage::Slang ) {
             cache_exists = cache_exists && file_exists( shader_layout_path );
         }
         cache_exists = cache_exists && file_exists( shader_reflection_path );
@@ -1263,7 +1269,7 @@ bool ShaderCompiler::compile_and_cache_shader( ShaderCompilationStage& compilati
     if ( compile_shader ) {
         slang::ProgramLayout* layout = nullptr;
         VkShaderModuleCreateInfo shader_create_info{ };
-        if ( slang_input ) {
+        if ( language == ShaderLanguage::Slang ) {
             shader_create_info = ShaderCompiler::compile_shader_slang(
                 compilation_stage.source_code.data, ( u32 )compilation_stage.source_code.size,
                 compilation_stage.type, shader_name, temp_allocator, &layout, compilation_stage.defines.as_span() );
@@ -1293,36 +1299,45 @@ bool ShaderCompiler::compile_and_cache_shader( ShaderCompilationStage& compilati
 
             // Reflect shader and write reflection to file
             if ( reflection && name_buffer ) {
-                if ( slang_input ) {
+                if ( language == ShaderLanguage::Slang ) {
                     reflect_slang_shader( layout, reflection, temp_allocator, name_buffer );
                 } else {
                     reflect_glsl_shader( shader_create_info, reflection, temp_allocator, name_buffer );
                 }
 
-                // Write reflection to file
-                save_shader_reflection_binary( *reflection, shader_reflection_path );
+                // Write reflection to file. Guarded by use_cache: without it the
+                // paths above were never built and this would write to a null path.
+                if ( use_cache ) {
+                    save_shader_reflection_binary( *reflection, shader_reflection_path );
+                }
             }
 
             // Only when compiling a shader we can say that it is changed.
             shader_changed = true;
         }
         else {
-            rprint( "Error compiling shader %s stage %s\n", shader_name, to_compiler_extension( compilation_stage.type ) );
-            __debugbreak();
+            rprint( "Error compiling %s shader %s, stage %s\n", to_shader_language_name( language ),
+                    shader_name, to_compiler_extension( compilation_stage.type ) );
             return false;
         }
     }
     else {
         // Shader is the same, read cached SpirV
         FileReadResult frr = file_read_binary( shader_spirv_path, temp_allocator );
+        if ( frr.data == nullptr || frr.size < sizeof( u32 ) ) {
+            rprint( "Error reading cached SPIR-V %s\n", shader_spirv_path );
+            return false;
+        }
 
         spirv_bytecode.data = reinterpret_cast< const u32* >( frr.data );
         spirv_bytecode.size = ( u32 )frr.size / sizeof( u32 );
 
-        load_shader_reflection_binary( *reflection, shader_reflection_path, name_buffer );
+        if ( reflection && name_buffer ) {
+            load_shader_reflection_binary( *reflection, shader_reflection_path, name_buffer );
+        }
     }
 
-    return true;
+    return spirv_bytecode.size > 0;
 }
 
 VkShaderModuleCreateInfo ShaderCompiler::compile_shader_glsl( cstring code, u32 code_size, VkShaderStageFlagBits stage,
@@ -1523,7 +1538,12 @@ VkShaderModuleCreateInfo ShaderCompiler::compile_shader_slang( cstring code, u32
     Slang::ComPtr<slang::IEntryPoint> entryPoint;
     SlangResult result = slangModule->findEntryPointByName( "main", entryPoint.writeRef());
     if ( SLANG_FAILED( result ) ) {
-
+        // Almost always means the #if guard inside the .slang file does not match
+        // the define derived from the pipeline name: the body is preprocessed away
+        // and what is left is a module without a main. This branch used to be
+        // empty, so the pipeline ended up doing nothing without a single message.
+        rprint( "Slang: no entry point 'main' in %s. Check the #if guard against the "
+                "define generated from the pipeline name.\n", name );
     } else {
 
         if ( layout != nullptr ) {

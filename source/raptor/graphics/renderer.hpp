@@ -73,35 +73,57 @@ struct ShaderReflectionInfo {
 }; // struct ShaderReflectionInfo
 
 // PipelineStates ////////////////////////////////////////////////////////
+
 //
 //
-struct GraphicsPipelineState {
+struct PipelineVariant {
 
     ShaderStateHandle               shader;
     PipelineLayoutHandle            layout;
     PipelineHandle                  pipeline;
 
-}; // struct GraphicsPipelineState
+}; // struct PipelineVariant
 
 //
 //
-struct ComputePipelineState {
+struct PipelineVariants {
 
-    ShaderStateHandle               shader;
-    PipelineLayoutHandle            layout;
-    PipelineHandle                  pipeline;
+    PipelineVariant                 variants[ ( u32 )ShaderLanguage::Count ];
 
-}; // struct GraphicsPipelineState
+    const PipelineVariant&          active_variant( ShaderLanguage language ) const;
+    PipelineHandle                  active( ShaderLanguage language ) const;
+
+    const PipelineVariant&          any_variant() const;
+    PipelineHandle                  any() const;
+
+    bool                            is_valid() const;
+
+}; // struct PipelineVariants
 
 //
 //
-struct RayTracingPipelineState {
+template <typename Tag>
+struct PipelineState {
 
-    ShaderStateHandle               shader;
-    PipelineLayoutHandle            layout;
-    PipelineHandle                  pipeline;
+    PipelineVariants                pipelines;
 
-}; // struct GraphicsPipelineState
+    cstring                         name = nullptr;
+
+    const PipelineVariant&          active_variant( ShaderLanguage language ) const { return pipelines.active_variant( language ); }
+    PipelineHandle                  active( ShaderLanguage language ) const         { return pipelines.active( language ); }
+    
+    const PipelineVariant&          any_variant() const     { return pipelines.any_variant(); }
+    PipelineHandle                  any() const             { return pipelines.any(); }
+
+
+    bool                            is_valid() const        { return pipelines.is_valid(); }
+
+
+}; // struct PipelineState
+
+using GraphicsPipelineState = PipelineState<struct GraphicsPipelineTag>;
+using ComputePipelineState = PipelineState<struct ComputePipelineTag>;
+using RayTracingPipelineState = PipelineState<struct RayTracingPipelineTag>;
 
 // PipelineStatesTransaction /////////////////////////////////////////////
 //
@@ -168,7 +190,7 @@ struct ResourceCache {
     FlatHashMap<u64, BufferResource*>  buffers;
     FlatHashMap<u64, SamplerResource*> samplers;
     FlatHashMap<u64, ShaderReflectionInfo*> shader_reflections;
-    FlatHashMap<u64, PipelineHandle>   pipelines;
+    FlatHashMap<u64, PipelineVariants>   pipelines;
 
     char                            binary_data_folder[512];
 
@@ -311,10 +333,10 @@ struct Renderer : public Service {
                                                                RayTracingPipelineState& out_pipeline_state );
 
     // Lower-level methods to create GpuResources
-    ShaderStateHandle           create_shader_state( const ShaderCompilationCreation& creation,
-                                                     cstring technique_name, ShaderReflection* out_reflection );
+    ShaderStateHandle           create_shader_state( const ShaderCompilationCreation& creation, cstring technique_name,
+                                                     ShaderLanguage language, ShaderReflection* out_reflection );
     PipelineLayoutHandle        create_pipeline_layout( const ShaderReflection& reflection );
-    PipelineHandle              create_pipeline( const ShaderReflection& reflection, PipelineCreation& creation );
+    PipelineHandle              create_pipeline( const ShaderReflection& reflection, PipelineCreation& creation, ShaderLanguage language = ShaderLanguage::Glsl );
 
     DescriptorSetHandle         create_descriptor_set( DescriptorSetBinder& binder, ShaderReflectionInfo* reflection_info, 
                                                        PipelineHandle pipeline, u32 frame_index, RenderBlackboard& render_blackboard );

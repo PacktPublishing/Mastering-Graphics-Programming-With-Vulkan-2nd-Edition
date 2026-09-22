@@ -224,7 +224,6 @@ struct PostProcessRenderingFeature {
 
     GraphicsPipelineState   passthrough_pipeline;
     GraphicsPipelineState   main_post_pipeline;
-    GraphicsPipelineState   main_post_pipeline_slang;
 
     u32                     post_cb_offset;
 

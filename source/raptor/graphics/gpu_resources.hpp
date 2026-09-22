@@ -178,6 +178,7 @@ struct RasterizationCreation {
 }; // struct RasterizationCreation
 
 //
+//
 struct BufferCreation {
     VkDeviceSize                    size                = 0;
     VkBufferUsageFlags              usage               = 0;
@@ -193,35 +194,24 @@ struct BufferCreation {
 //
 struct ImageCreation {
 
-    void*                           initial_data    = nullptr;
-    u16                             width           = 1;
-    u16                             height          = 1;
-    u16                             depth           = 1;
-    u16                             array_layer_count = 1;
-    u8                              mip_level_count = 1;
-    u8                              flags           = 0;    // TextureFlags bitmasks
-    u16                             owner_queue_family = u16_max;
-
+    // VkImageCreateInfo
+    VkImageCreateFlags              create_flags    = 0;
+    VkImageType                     image_type      = VK_IMAGE_TYPE_2D;
     VkFormat                        format          = VK_FORMAT_UNDEFINED;
-    TextureType::Enum               type            = TextureType::Texture2D;
+    u32                             width           = 1;    // VkExtent3D::width
+    u32                             height          = 1;    // VkExtent3D::height
+    u32                             depth           = 1;    // VkExtent3D::depth
+    u32                             mip_level_count = 1;
+    u32                             array_layer_count = 1;
+    VkImageUsageFlags               usage           = 0;    // No default: zero is invalid, you must choose.
 
-    ImageHandle                     alias;
+    void*                           initial_data    = nullptr;  // Needs VK_IMAGE_USAGE_TRANSFER_DST_BIT.
+    ImageHandle                     alias;                      // When valid, aliases that image's memory.
+    u16                             owner_queue_family = u16_max;
 
     cstring                         name            = nullptr;
 
-    ImageCreation&                  reset();
-    ImageCreation&                  set_size( u16 width, u16 height, u16 depth );
-    ImageCreation&                  set_flags( u8 flags );
-    ImageCreation&                  set_mips( u32 mip_level_count );
-    ImageCreation&                  set_layers( u32 layer_count );
-    ImageCreation&                  set_format_type( VkFormat format, TextureType::Enum type );
-    ImageCreation&                  set_name( cstring name );
-    ImageCreation&                  set_data( void* data );
-    ImageCreation&                  set_alias( ImageHandle alias );
-    ImageCreation&                  set_owner( u32 value );
-
 }; // struct ImageCreation
-
 
 //
 //
@@ -266,20 +256,27 @@ struct SamplerCreation {
 
     cstring                         name        = nullptr;
 
-    SamplerCreation&                set_min_mag_mip( VkFilter min, VkFilter mag, VkSamplerMipmapMode mip );
-    SamplerCreation&                set_address_mode_u( VkSamplerAddressMode u );
-    SamplerCreation&                set_address_mode_uv( VkSamplerAddressMode u, VkSamplerAddressMode v );
-    SamplerCreation&                set_address_mode_uvw( VkSamplerAddressMode u, VkSamplerAddressMode v, VkSamplerAddressMode w );
-    SamplerCreation&                set_reduction_mode( VkSamplerReductionMode mode );
-    SamplerCreation&                set_name( const char* name );
-
 }; // struct SamplerCreation
 
+//
+//
+struct ShaderSource {
+
+    cstring                         glsl = nullptr;
+    cstring                         slang = nullptr;
+
+    cstring                         path( ShaderLanguage language = ShaderLanguage::Glsl ) const;
+
+    bool                            has( ShaderLanguage language ) const;
+
+}; // struct ShaderSource
+
+//
 //
 struct ShaderCompilationStage {
 
     StringView                      source_code;
-    cstring                         source_file_path = nullptr;
+    ShaderSource                    source;
 
     StaticArray<cstring, k_max_headers> headers;  // Headers used in the shader.
     StaticArray<u64, k_max_headers + 1> shader_file_hashes;
@@ -295,7 +292,9 @@ struct ShaderCompilationCreation {
 
     StaticArray<ShaderCompilationStage, k_max_shader_stages> stages;
     StringView                      name;
-    u16                             slang_input = 0;
+
+    bool                            has( ShaderLanguage language ) const;
+
 }; // struct ShaderCompilationCreation
 
 //
@@ -731,14 +730,14 @@ struct Image {
     u16                             depth           = 1;
     u16                             array_layer_count = 1;
     u8                              mip_level_count = 1;
-    u8                              flags           = 0;
     u16                             mip_base_level  = 0;    // Not 0 when texture is a view.
     u16                             array_base_layer = 0;   // Not 0 when texture is a view.
     bool                            sparse = false;
 
     ImageHandle                     handle;
     ImageHandle                     alias_image;
-    TextureType::Enum               type    = TextureType::Texture2D;
+    VkImageCreateFlags              vk_create_flags = 0;
+    VkImageType                     vk_image_type   = VK_IMAGE_TYPE_2D;
 
     ImageSyncState                  sync_state{};
 
@@ -966,9 +965,6 @@ struct ResolutionInfo {
 // Enum translations. Use tables or switches depending on the case. ///////
 cstring                     to_compiler_extension( VkShaderStageFlagBits value );
 cstring                     to_stage_defines( VkShaderStageFlagBits value );
-
-VkImageType                 to_vk_image_type( TextureType::Enum type );
-VkImageViewType             to_vk_image_view_type( TextureType::Enum type );
 
 VkFormat                    to_vk_vertex_format( VertexComponentFormat::Enum value );
 

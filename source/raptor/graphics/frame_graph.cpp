@@ -691,7 +691,15 @@ void FrameGraph::compile() {
                         }
                     }
 
-                    TextureFlags::Mask texture_creation_flags = info.texture.compute ? ( TextureFlags::Mask )(TextureFlags::RenderTarget_mask | TextureFlags::Compute_mask) : TextureFlags::RenderTarget_mask;
+                    // Frame graph resources are always render targets that can also be
+                    // sampled, and the aliasing pass blits between them - hence the two
+                    // transfer bits. A depth format is a depth attachment, never a color one.
+                    const bool is_depth_resource = TextureFormat::has_depth_or_stencil( info.texture.format );
+                    VkImageUsageFlags texture_usage = VK_IMAGE_USAGE_SAMPLED_BIT |
+                                                      VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT |
+                                                      ( is_depth_resource ? VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT
+                                                                          : VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT );
+                    texture_usage |= info.texture.compute ? VK_IMAGE_USAGE_STORAGE_BIT : 0;
 
                     bool found_suitable_free_resource = false;
                     // Avoid memory aliasing for persistent resources
@@ -712,15 +720,25 @@ void FrameGraph::compile() {
                                 alias_image = builder->device->get_image( alias_image_handle );
                             }
 
-                            ImageCreation texture_creation{ };
-                            texture_creation.set_data( nullptr ).set_alias( alias_image_handle ).set_name( resource->name ).set_format_type( info.texture.format, TextureType::Enum::Texture2D ).set_size( info.texture.width, info.texture.height, info.texture.depth ).set_flags( texture_creation_flags );
+                            // TODO: a resource declared with depth > 1 is still created as a
+                            // VK_IMAGE_TYPE_2D image here, exactly as before. That combination is
+                            // invalid Vulkan and vulkan_validate_image_creation now says so.
+                            ImageCreation texture_creation{
+                                .image_type = VK_IMAGE_TYPE_2D,
+                                .format     = info.texture.format,
+                                .width      = info.texture.width,
+                                .height     = info.texture.height,
+                                .depth      = info.texture.depth,
+                                .usage      = texture_usage,
+                                .alias      = alias_image_handle,
+                                .name       = resource->name };
                             ImageHandle handle = builder->device->create_image( texture_creation );
 
                             VkImageAspectFlags image_view_flag = TextureFormat::has_depth( texture_creation.format ) ? VK_IMAGE_ASPECT_DEPTH_BIT : VK_IMAGE_ASPECT_COLOR_BIT;
 
                             ImageViewHandle view_handle = builder->device->create_image_view( {
                                 .parent_image = handle,
-                                .view_type = to_vk_image_view_type( texture_creation.type ),
+                                .view_type = VK_IMAGE_VIEW_TYPE_2D,
                                 .sub_resource = { image_view_flag, 0, 1, 0, 1 },
                                 .name = resource->name } );
 
@@ -736,15 +754,21 @@ void FrameGraph::compile() {
                     }
 
                     if ( !found_suitable_free_resource ) {
-                        ImageCreation image_creation{ };
-                        image_creation.set_data( nullptr ).set_name( resource->name ).set_format_type( info.texture.format, TextureType::Enum::Texture2D ).set_size( info.texture.width, info.texture.height, info.texture.depth ).set_flags( texture_creation_flags );
+                        ImageCreation image_creation{
+                            .image_type = VK_IMAGE_TYPE_2D,
+                            .format     = info.texture.format,
+                            .width      = info.texture.width,
+                            .height     = info.texture.height,
+                            .depth      = info.texture.depth,
+                            .usage      = texture_usage,
+                            .name       = resource->name };
                         ImageHandle handle = builder->device->create_image( image_creation );
 
                         VkImageAspectFlags image_view_flag = TextureFormat::has_depth( image_creation.format ) ? VK_IMAGE_ASPECT_DEPTH_BIT : VK_IMAGE_ASPECT_COLOR_BIT;
 
                         ImageViewCreation image_view_creation = {
                             .parent_image = handle,
-                            .view_type = to_vk_image_view_type( image_creation.type ),
+                            .view_type = VK_IMAGE_VIEW_TYPE_2D,
                             .sub_resource = { image_view_flag, 0, 1, 0, 1 },
                             .name = resource->name };
                         ImageViewHandle view_handle = builder->device->create_image_view( image_view_creation );

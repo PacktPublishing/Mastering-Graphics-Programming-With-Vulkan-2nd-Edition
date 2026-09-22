@@ -130,6 +130,10 @@ void main() {
 
 int8_t to_int8( float value ) {
     float round = (value >= 0 ? 0.5f : -0.5f);
+
+    value = (value >= -1) ? value : -1;
+    value = (value <= +1) ? value : +1;
+
     return int8_t( value * 127.0f + round );
 }
 
@@ -190,13 +194,19 @@ void main() {
     cone_min = subgroupMin( cone_min );
     cone_max = subgroupMax( cone_max );
 
-    vec3 cone = subgroupBroadcastFirst( ( cone_min + cone_max ) * 0.5 );
-    cone = normalize( cone );
+    vec3 cone_avg = subgroupBroadcastFirst( ( cone_min + cone_max ) * 0.5 );
+    float cone_len2 = dot( cone_avg, cone_avg );
 
-    float cutoff = 1e10;
-    for (uint i = 0; i < cache_count; i++)
-    {
-        cutoff = min( cutoff, dot( cached_normals[ i ], cone ) );
+    vec3 cone = vec3(0.0);
+    float cutoff = 1.0;
+
+    if (cone_len2 > 1e-6) {
+        cone = cone_avg * inversesqrt( cone_len2 );
+
+        for (uint i = 0; i < cache_count; i++)
+        {
+            cutoff = min( cutoff, dot( cached_normals[ i ], cone ) );
+        }
     }
     cutoff = subgroupMin( cutoff );
 
@@ -204,10 +214,30 @@ void main() {
     {
         meshlets[ global_meshlet_index ].center = pos_min + 0.5 * ( pos_max - pos_min );
         meshlets[ global_meshlet_index ].radius = length( pos_max - pos_min ) * 0.5;
-        meshlets[ global_meshlet_index ].cone_axis[0] = to_int8( cone.x );
-        meshlets[ global_meshlet_index ].cone_axis[1] = to_int8( cone.y );
-        meshlets[ global_meshlet_index ].cone_axis[2] = to_int8( cone.z );
-        meshlets[ global_meshlet_index ].cone_cutoff = to_int8( sqrt( 1.0 - cutoff * cutoff ) );
+
+        if (cutoff <= 0.1) {
+            meshlets[ global_meshlet_index ].cone_axis[0] = int8_t(0);
+            meshlets[ global_meshlet_index ].cone_axis[1] = int8_t(0);
+            meshlets[ global_meshlet_index ].cone_axis[2] = int8_t(0);
+            meshlets[ global_meshlet_index ].cone_cutoff = int8_t(127);
+        } else {
+            // Same code as meshoptimizer
+            int8_t cone_axis_x = to_int8( cone.x );
+            int8_t cone_axis_y = to_int8( cone.y );
+            int8_t cone_axis_z = to_int8( cone.z );
+
+            float cone_axis_s8_e0 = abs( cone_axis_x / 127.f - cone.x );
+            float cone_axis_s8_e1 = abs( cone_axis_y / 127.f - cone.y );
+            float cone_axis_s8_e2 = abs( cone_axis_z / 127.f - cone.z );
+
+            meshlets[ global_meshlet_index ].cone_axis[0] = to_int8( cone.x );
+            meshlets[ global_meshlet_index ].cone_axis[1] = to_int8( cone.y );
+            meshlets[ global_meshlet_index ].cone_axis[2] = to_int8( cone.z );
+
+            float cone_cutoff = sqrt( 1.0 - cutoff * cutoff );
+            int cone_cutoff_s8 = int(127 * (cone_cutoff + cone_axis_s8_e0 + cone_axis_s8_e1 + cone_axis_s8_e2) + 1);
+            meshlets[ global_meshlet_index ].cone_cutoff = cone_cutoff_s8 > 127 ? int8_t(127) : int8_t(cone_cutoff_s8);
+        }
     }
 }
 

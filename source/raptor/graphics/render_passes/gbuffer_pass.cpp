@@ -115,6 +115,18 @@ void GBufferPass::declare_frame_graph_node( FrameGraphResourceContext& context )
                     .texture = {
                         .scale_width = 1.0f,
                         .scale_height = 1.0f,
+                        .format = VK_FORMAT_B8G8R8A8_UNORM,
+                        .load_op = VK_ATTACHMENT_LOAD_OP_CLEAR
+                    }
+                },
+                .name = "gbuffer_debug",
+            } ),
+            builder.create_output_handle( {
+                .type = FrameGraphResourceType_Attachment,
+                .resource_info{
+                    .texture = {
+                        .scale_width = 1.0f,
+                        .scale_height = 1.0f,
                         .format = VK_FORMAT_D32_SFLOAT,
                         .load_op = VK_ATTACHMENT_LOAD_OP_CLEAR,
                         .clear_values = { 1.0f, 0.0f, 0.0f, 0.0f },
@@ -135,7 +147,6 @@ void GBufferPass::update_psos( FrameGraphResourceContext& context, PipelineUpdat
 
     if ( phase == PipelineUpdatePhase::Destroy ) {
         renderer->destroy_graphics_pipeline_state( meshlet_draw_pipeline );
-        renderer->destroy_graphics_pipeline_state( meshlet_draw_pipeline_slang );
         renderer->destroy_graphics_pipeline_state( skinning_pipeline );
 
         return;
@@ -144,14 +155,10 @@ void GBufferPass::update_psos( FrameGraphResourceContext& context, PipelineUpdat
     GraphicsPipelineTransaction transaction( renderer );
 
     GraphicsPipelineState& new_pipeline = transaction.add( meshlet_draw_pipeline );
-    GraphicsPipelineState& new_pipeline_slang = transaction.add( meshlet_draw_pipeline_slang );
     GraphicsPipelineState& new_pipeline_skinning = transaction.add( skinning_pipeline );
 
     renderer->create_graphics_pipeline_state( scc_meshlet_gbuffer_culling, pc_meshlet_gbuffer_culling,
                                               "meshlet", context.frame_graph, new_pipeline );
-
-    renderer->create_graphics_pipeline_state( scc_meshlet_gbuffer_culling_slang, pc_meshlet_gbuffer_culling_slang,
-                                              "meshlet_slang", context.frame_graph, new_pipeline_slang );
 
     renderer->create_graphics_pipeline_state( scc_mesh_gbuffer_skinning, pc_mesh_gbuffer_skinning,
                                               "gbuffer_skinning", context.frame_graph, new_pipeline_skinning );
@@ -222,6 +229,8 @@ void GBufferPass::pre_render( FrameGraphRenderContext& context ) {
 }
 
 void GBufferPass::render( FrameGraphRenderContext& context ) {
+    const ShaderLanguage language = context.render_config->shader_language();
+
     if ( !enabled )
         return;
 
@@ -248,21 +257,11 @@ void GBufferPass::render( FrameGraphRenderContext& context ) {
         gpu_commands->draw_indexed_indirect( gpu_culling.meshlet_indirect_early_commands_sb[ current_frame_index ], 1, offsetof( GpuMeshDrawCommand, indirect ), sizeof( GpuMeshDrawCommand ) );
     } else if ( context.render_config->meshlets.use_meshlets ) {
 
-        if ( context.render_config->use_slang_shaders ) {
-            gpu_commands->bind_pipeline( meshlet_draw_pipeline_slang.pipeline );
+        gpu_commands->bind_pipeline( meshlet_draw_pipeline.active( language ) );
 
-            gpu_commands->bind_descriptor_set(
-                { renderer->gpu->bindless_descriptor_set, meshlets.meshlets_early_draw_descriptor_set_slang[ current_frame_index ] },
-                { render_blackboard.scene_cb_offset } );
-        }
-        else
-        {
-            gpu_commands->bind_pipeline( meshlet_draw_pipeline.pipeline );
-
-            gpu_commands->bind_descriptor_set(
-                { renderer->gpu->bindless_descriptor_set, meshlets.meshlets_early_draw_descriptor_set[ current_frame_index ] },
-                { render_blackboard.scene_cb_offset } );
-        }
+        gpu_commands->bind_descriptor_set(
+            { renderer->gpu->bindless_descriptor_set, meshlets.meshlets_early_draw_descriptor_set[ current_frame_index ] },
+            { render_blackboard.scene_cb_offset } );
 
         gpu_commands->draw_mesh_task_indirect_count(
             gpu_culling.meshlet_indirect_early_commands_sb[ current_frame_index ], offsetof( GpuMeshDrawCommand, indirectMS ),
@@ -289,7 +288,7 @@ void GBufferPass::render( FrameGraphRenderContext& context ) {
 #if 0
     RenderView* render_view = context.render_view;
 
-    gpu_commands->bind_pipeline( skinning_pipeline.pipeline );
+    gpu_commands->bind_pipeline( skinning_pipeline.active( language ) );
 
     for ( RenderItem& render_mesh : render_view->opaque_items ) {
         MeshInstance* mesh_instance = render_mesh.mesh_instance;
@@ -493,33 +492,6 @@ void LateGBufferPass::create_gpu_resources( FrameGraphResourceContext& context )
     if ( !enabled )
         return;
 
-    //const u64 hashed_name = hash_calculate( "main" );
-    //GpuTechnique* main_technique = renderer->resource_cache.techniques.get( hashed_name );
-
-    //mesh_instance_draws.init( resident_allocator, 16 );
-
-    //// Copy all mesh draws and change only material.
-    //for ( u32 i = 0; i < scene.mesh_instances.size; ++i ) {
-
-    //    MeshInstance& mesh_instance = scene.mesh_instances[ i ];
-    //    Mesh& mesh = scene.meshes[ mesh_instance.mesh_index ];
-    //    if ( mesh.is_transparent() ) {
-    //        continue;
-    //    }
-
-    //    MeshInstanceDraw mesh_instance_draw{};
-    //    mesh_instance_draw.mesh_instance = &mesh_instance;
-    //    mesh_instance_draw.material_pass_index = mesh.has_skinning() ? main_technique->get_pass_index( "gbuffer_skinning" ) : main_technique->get_pass_index( "gbuffer_cull" );
-
-    //    mesh_instance_draws.push( mesh_instance_draw );
-    //}
-
-    //// Cache meshlet technique index
-    //if ( renderer->gpu->mesh_shaders_extension_present ) {
-    //    GpuTechnique* main_technique = renderer->resource_cache.techniques.get( k_technique_hash );
-    //    meshlet_technique_index = main_technique->get_pass_index( k_gbuffer_culling );
-    //    meshlet_technique_slang_index = main_technique->get_pass_index( k_gbuffer_culling_slang );
-    //}
 }
 
 void LateGBufferPass::destroy_gpu_resources( FrameGraphResourceContext& context ) {
@@ -571,6 +543,10 @@ void LateGBufferPass::declare_frame_graph_node( FrameGraphResourceContext& conte
             },
             {
                 .type = FrameGraphResourceType_Attachment,
+                .handle = builder.get_output_handle( "gbuffer_pass_early", "gbuffer_debug" )
+            },
+            {
+                .type = FrameGraphResourceType_Attachment,
                 .handle = builder.get_output_handle( "gbuffer_pass_early", "depth" )
             },
             {
@@ -601,6 +577,9 @@ void LateGBufferPass::declare_frame_graph_node( FrameGraphResourceContext& conte
                 builder.get_output_handle( "gbuffer_pass_early", "linear_z_dd" ),
                 FrameGraphResourceType_Reference ),
             builder.create_output_reference(
+                builder.get_output_handle( "gbuffer_pass_early", "gbuffer_debug" ),
+                FrameGraphResourceType_Reference ),
+            builder.create_output_reference(
                 builder.get_output_handle( "gbuffer_pass_early", "depth" ),
                 FrameGraphResourceType_Reference ),
         },
@@ -623,23 +602,12 @@ void LateGBufferPass::render( FrameGraphRenderContext& context ) {
 
     if ( context.render_config->meshlets.use_meshlets ) {
 
-        if ( context.render_config->use_slang_shaders ) {
-            PipelineHandle pipeline = renderer->resource_cache.pipelines.get( hash_calculate( pc_meshlet_gbuffer_culling_slang.name ));
-            gpu_commands->bind_pipeline( pipeline );
+        PipelineHandle pipeline = renderer->resource_cache.pipelines.get( hash_calculate( pc_meshlet_gbuffer_culling.name ) ).any();
+        gpu_commands->bind_pipeline( pipeline );
 
-            gpu_commands->bind_descriptor_set(
-                { renderer->gpu->bindless_descriptor_set, render_blackboard.meshlets.meshlets_late_draw_descriptor_set_slang[ current_frame_index ] },
-                { render_blackboard.scene_cb_offset } );
-        }
-        else
-        {
-            PipelineHandle pipeline = renderer->resource_cache.pipelines.get( hash_calculate( pc_meshlet_gbuffer_culling.name ) );
-            gpu_commands->bind_pipeline( pipeline );
-
-            gpu_commands->bind_descriptor_set(
-                { renderer->gpu->bindless_descriptor_set, render_blackboard.meshlets.meshlets_late_draw_descriptor_set[ current_frame_index ] },
-                { render_blackboard.scene_cb_offset } );
-        }
+        gpu_commands->bind_descriptor_set(
+            { renderer->gpu->bindless_descriptor_set, render_blackboard.meshlets.meshlets_late_draw_descriptor_set[ current_frame_index ] },
+            { render_blackboard.scene_cb_offset } );
 
         gpu_commands->draw_mesh_task_indirect_count(
             gpu_culling.meshlet_indirect_late_commands_sb[ current_frame_index ], offsetof( GpuMeshDrawCommand, indirectMS ),

@@ -46,6 +46,7 @@ namespace raptor {
         FrameGraphResource*     roughness_texture;
         FrameGraphResource*     depth_texture;
         FrameGraphResource*     emissive_texture;
+        FrameGraphResource*     debug_texture;
 
         FrameGraphResource*     output_texture;
     }; // struct LightPass

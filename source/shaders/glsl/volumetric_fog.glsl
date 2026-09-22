@@ -212,6 +212,14 @@ float decode_local_z(float depth, float radius, float rcp_n_minus_f) {
     return numerator / denominator;
 }
 
+float attenuation_square_falloff_clamped( vec3 position_to_light, float light_inverse_radius, float min_distance ) {
+    const float distance_square = dot( position_to_light, position_to_light );
+    const float factor = distance_square * light_inverse_radius * light_inverse_radius;
+    const float smoothFactor = max( 1.0 - factor * factor, 0.0 );
+    
+    return ( smoothFactor * smoothFactor ) / max( distance_square, min_distance * min_distance );
+}
+
 layout (local_size_x = FROXEL_DISPATCH_X, local_size_y = FROXEL_DISPATCH_Y, local_size_z = FROXEL_DISPATCH_Z) in;
 void main() {
 
@@ -248,10 +256,10 @@ void main() {
         // Read clustered lighting data
         // Calculate linear depth.
         float linear_d = slice_to_exponential_depth(vfog.froxel_near, vfog.froxel_far, froxel_coord.z, int(vfog.froxel_dimensions.z));
-        linear_d /= vfog.froxel_far;
+        linear_d = ( linear_d - frame.z_near ) / ( frame.z_far - frame.z_near );
 
         // Select bin
-        int bin_index = int( linear_d / BIN_WIDTH );
+        int bin_index = clamp( int( linear_d * NUM_BINS ), 0, int( NUM_BINS ) - 1 );
         uint bin_value = bins[ bin_index ];
 
         uint min_light_id = bin_value & 0xFFFF;
@@ -262,7 +270,6 @@ void main() {
 
         uint px = uint(clamp(fx * frame.resolution.x, 0.0, float(frame.resolution.x - 1)));
         uint py = uint(clamp(fy * frame.resolution.y, 0.0, float(frame.resolution.y - 1)));
-        py = (uint(frame.resolution.y) - 1u) - py;
 
         uvec2 position = uvec2(px, py);
         uint address = get_tile_address( position );
@@ -274,7 +281,7 @@ void main() {
                 uint word_id = light_id / 32;
                 uint bit_id = light_id % 32;
 
-                if ( ( tiles[ address + word_id ] & ( 1 << bit_id ) ) != 0u ) {
+                if ( ( tiles[ address + word_id ] & ( 1u << bit_id ) ) != 0u ) {
                     uint global_light_index = light_indices[ light_id ];
                     Light point_light = lights[ global_light_index ];
 
@@ -282,9 +289,17 @@ void main() {
 
                     // TODO: properly use light clustering.
                     vec3 light_position = point_light.world_position;
-                    float light_radius = point_light.radius;
-                    if (length(world_position - light_position) < light_radius) {
+                    const vec3 position_to_light = light_position - world_position;
+                    const float light_radius = point_light.radius;
+                    
+                    // Give some room as attenuation has a singularity in the center.
+                    const float min_dist = min( slice_thickness * 0.5, light_radius * 0.25 );
+                    const float falloff = attenuation_square_falloff_clamped( position_to_light, 1.0f / light_radius, min_dist );
+                    if ( falloff <= 0.0001f ) {
+                        continue;
+                    }
 
+                    {
                         uint shadow_light_index = global_light_index;
                         vec3 v = world_position - light_position;
 
@@ -305,7 +320,8 @@ void main() {
                             vec2 disk_offset = vogel_disk_offset(i, samples, 0.1f);
                             vec3 sampling_position = v + (t * disk_offset.x + b * disk_offset.y) * pcf_radius;
 
-                            float closest_depth = texture( global_textures_cubemaps_array[nonuniformEXT(light_cb.cubemap_shadows_index)], vec4(sampling_position, shadow_light_index) ).r;
+                            float closest_depth = textureLod( global_textures_cubemaps_array[nonuniformEXT(light_cb.cubemap_shadows_index)], 
+                                                              vec4(sampling_position, shadow_light_index), point_light.shadow_mip_level ).r;
                             float closest_local_z = decode_local_z( closest_depth, light_radius, point_light.rcp_n_minus_f );
 
                             // bias in local_z space
@@ -317,8 +333,8 @@ void main() {
                         }
                         shadow /= samples;
 
-                        const vec3 L = normalize(light_position - world_position);
-                        float attenuation = attenuation_square_falloff(L, 1.0f / light_radius) * shadow;
+                        const vec3 L = normalize( position_to_light );
+                        float attenuation = falloff * shadow;
 
                         lighting += point_light.color * point_light.intensity * phase_function(V, -L, vfog.phase_anisotropy_01) * attenuation;
                     }

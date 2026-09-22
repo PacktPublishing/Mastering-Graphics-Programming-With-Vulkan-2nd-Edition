@@ -164,7 +164,7 @@ int main( int argc, char** argv ) {
     task_scheduler.Initialize( config );
 
     // window
-    WindowConfiguration wconf{ 1280, 800, "Chapter 12: Ray Tracing Shadows", &MemoryService::instance()->system_allocator};
+    WindowConfiguration wconf{ 1920, 1080, "Chapter 12: Ray Tracing Shadows", &MemoryService::instance()->system_allocator};
     raptor::Window window;
     window.init( &wconf );
 
@@ -176,7 +176,7 @@ int main( int argc, char** argv ) {
 
     // graphics
     GpuDeviceCreation dc;
-    dc.debug_options.set_validation();
+    dc.debug_options.set_default();
     dc.enable_bindless = true;
     dc.enable_ray_tracing = true;
     dc.set_window( window.width, window.height, window.platform_handle ).set_allocator( &MemoryService::instance()->system_allocator )
@@ -205,7 +205,7 @@ int main( int argc, char** argv ) {
     imgui->init( &imgui_config );
 
     GameCamera game_camera;
-    game_camera.camera.init_perpective( 0.1f, 1000.f, 60.f, wconf.width * 1.f / wconf.height );
+    game_camera.camera.init_perpective( 0.1f, 100.f, 60.f, wconf.width * 1.f / wconf.height );
     game_camera.init( true, 20.f, 6.f, 0.1f );
 
     time_service_init();
@@ -359,7 +359,7 @@ int main( int argc, char** argv ) {
         FlatHashMapIterator it = renderer.resource_cache.pipelines.find( hash_calculate( "gbuffer_culling" ) );
         RASSERT( it.is_valid() );
 
-        PipelineHandle gbuffer_pipeline = renderer.resource_cache.pipelines.get( it );
+        PipelineHandle gbuffer_pipeline = renderer.resource_cache.pipelines.get( it ).any();
         DescriptorSetLayoutHandle gbuffer_layout_handle = gpu.get_descriptor_set_layout( gbuffer_pipeline, k_material_descriptor_set_index );
         ShaderReflectionInfo* gbuffer_reflection_info = renderer.get_shader_reflection( gbuffer_pipeline );
 

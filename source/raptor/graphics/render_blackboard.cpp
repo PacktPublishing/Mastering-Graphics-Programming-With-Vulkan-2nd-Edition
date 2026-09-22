@@ -282,6 +282,7 @@ void RaytracedShadowsConfig::draw_imgui() {
         }
         ImGui::SliderFloat( "RT Light Radius", &light_radius, 0.01f, 10.f );
         ImGui::SliderFloat3( "RT Light Position", &light_position[ 0 ], -10.f, 10.f, "%2.2f" );
+        ImGui::SliderFloat( "Softness (source radius, m)", &light_source_radius, 0.0f, 1.f );
         if ( light_type == 0 ) {
             ImGui::EndDisabled();
         }
@@ -291,6 +292,7 @@ void RaytracedShadowsConfig::draw_imgui() {
             ImGui::BeginDisabled();
         }
         ImGui::SliderFloat3( "RT Directional Direction", &light_direction[ 0 ], -1.f, 1.f, "%2.2f" );
+        ImGui::SliderFloat( "Softness (angular diameter, deg)", &light_angular_radius, 0.0f, 1.f );
         if ( light_type == 1 ) {
             ImGui::EndDisabled();
         }

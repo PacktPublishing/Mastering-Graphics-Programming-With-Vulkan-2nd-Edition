@@ -9,12 +9,11 @@ namespace raptor {
 static ShaderCompilationCreation scc_motion_vector = {
     .stages = {
         {
-            .source_file_path = "glsl/motion_vectors.glsl",
+            .source = { .glsl = "glsl/motion_vectors.glsl" },
             .type = VK_SHADER_STAGE_COMPUTE_BIT,
         },
     },
     .name = "composite_camera_motion",
-    .slang_input = 0,
 };
 
 // MotionVectorPass ////////////////////////////////////////////////////////
@@ -26,6 +25,7 @@ struct MotionVectorPushConstants {
 };
 
 void MotionVectorPass::render( FrameGraphRenderContext& context ) {
+    const ShaderLanguage language = context.render_config->shader_language();
 
     if ( !enabled ) {
         return;
@@ -35,7 +35,7 @@ void MotionVectorPass::render( FrameGraphRenderContext& context ) {
     Renderer* renderer = context.renderer;
     RenderBlackboard& render_blackboard = *context.render_blackboard;
 
-    cb->bind_pipeline( camera_composite_pipeline.pipeline );
+    cb->bind_pipeline( camera_composite_pipeline.active( language ) );
 
     VkImageSubresourceRange range = range_aspect( VK_IMAGE_ASPECT_COLOR_BIT,
                                                   0, VK_REMAINING_MIP_LEVELS,
@@ -54,7 +54,7 @@ void MotionVectorPass::render( FrameGraphRenderContext& context ) {
         .normals_index = gbuffer_normals_resource->resource_info.texture.image_view.index()
     };
 
-    cb->push_constants( camera_composite_pipeline.pipeline, 0, sizeof( MotionVectorPushConstants ), &push_constants );
+    cb->push_constants( camera_composite_pipeline.active( language ), 0, sizeof( MotionVectorPushConstants ), &push_constants );
 
     cb->dispatch( raptor::ceilu32( render_blackboard.render_width / 8.0f ), 
                   raptor::ceilu32( render_blackboard.render_height / 8.0f ), 1 );
@@ -152,7 +152,7 @@ void MotionVectorPass::create_gpu_resources( FrameGraphResourceContext& context 
     FrameGraphResource* gbuffer_normals_resource = frame_graph->get_resource( "gbuffer_normals" );
     RASSERT( gbuffer_normals_resource != nullptr );
 
-    ShaderReflectionInfo* shader_reflection = renderer->get_shader_reflection( camera_composite_pipeline.pipeline );
+    ShaderReflectionInfo* shader_reflection = renderer->get_shader_reflection( camera_composite_pipeline.any() );
     RASSERT( shader_reflection != nullptr );
 
     DescriptorSetBinder descriptors;
@@ -160,7 +160,7 @@ void MotionVectorPass::create_gpu_resources( FrameGraphResourceContext& context 
     descriptors.name = "motion_vector_ds";
 
     camera_composite_descriptor_set = renderer->create_descriptor_set( descriptors, shader_reflection,
-                                                                       camera_composite_pipeline.pipeline, 0, 
+                                                                       camera_composite_pipeline.any(), 0, 
                                                                        render_blackboard );
 }
 

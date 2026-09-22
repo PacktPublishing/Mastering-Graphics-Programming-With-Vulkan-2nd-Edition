@@ -51,6 +51,8 @@ void RaytracedReflectionsPass::pre_render( FrameGraphRenderContext& context ) {
 i32 generate_brdf_counter = 10;
 
 void RaytracedReflectionsPass::render( FrameGraphRenderContext& context ) {
+    const ShaderLanguage language = context.render_config->shader_language();
+
     if ( !enabled )
         return;
 
@@ -81,13 +83,13 @@ void RaytracedReflectionsPass::render( FrameGraphRenderContext& context ) {
                                            VK_IMAGE_LAYOUT_GENERAL } );
         gpu_commands->flush_barriers();
 
-        gpu_commands->bind_pipeline( brdf_lut_generation_pipeline.pipeline );
+        gpu_commands->bind_pipeline( brdf_lut_generation_pipeline.active( language ) );
         gpu_commands->bind_descriptor_set(
             { renderer->gpu->bindless_descriptor_set, brdf_lut_generation_descriptor_set },
             { render_blackboard.scene_cb_offset } );
 
         u32 push_constants[] = { brdf_lut_image_view.index(), 512 };
-        gpu_commands->push_constants( brdf_lut_generation_pipeline.pipeline, 0, 8, &push_constants );
+        gpu_commands->push_constants( brdf_lut_generation_pipeline.active( language ), 0, 8, &push_constants );
 
         gpu_commands->dispatch( 512 / 8, 512 / 8, 1 );
 
@@ -100,16 +102,16 @@ void RaytracedReflectionsPass::render( FrameGraphRenderContext& context ) {
 
     // TODO(marco): clear
     //gpu_commands->issue_texture_barrier( reflections_image, RESOURCE_STATE_UNORDERED_ACCESS, 0, 1 );
-    gpu_commands->bind_pipeline( reflections_pipeline.pipeline );
+    gpu_commands->bind_pipeline( reflections_pipeline.active( language ) );
     gpu_commands->bind_descriptor_set(
         { renderer->gpu->bindless_descriptor_set, reflections_descriptor_set },
         { render_blackboard.scene_cb_offset, render_blackboard.lighting.lighting_constants_cb_offset,
           constants_offset/*, render_blackboard.ddgi_constants_offset */ } );
 
     f32 push_constants = 1.f / texture_scale;
-    gpu_commands->push_constants( reflections_pipeline.pipeline, 0, 4, &push_constants );
+    gpu_commands->push_constants( reflections_pipeline.active( language ), 0, 4, &push_constants );
 
-    gpu_commands->trace_rays( reflections_pipeline.pipeline, ceilu32( render_blackboard.render_width * texture_scale ), ceilu32( render_blackboard.render_height * texture_scale ), 1 );
+    gpu_commands->trace_rays( reflections_pipeline.active( language ), ceilu32( render_blackboard.render_width * texture_scale ), ceilu32( render_blackboard.render_height * texture_scale ), 1 );
 }
 
 void RaytracedReflectionsPass::on_resize( FrameGraphResourceContext& context, u32 new_width, u32 new_height ) {
@@ -161,7 +163,18 @@ void RaytracedReflectionsPass::create_gpu_resources( FrameGraphResourceContext& 
     ImageCreation texture_creation{ };
     u32 adjusted_width = ceilu32( render_blackboard.render_width * texture_scale );
     u32 adjusted_height = ceilu32( render_blackboard.render_height * texture_scale );
-    texture_creation.set_size( adjusted_width, adjusted_height, 1 ).set_format_type( VK_FORMAT_B10G11R11_UFLOAT_PACK32, TextureType::Texture2D ).set_mips( 1 ).set_layers( 1 ).set_flags( TextureFlags::Compute_mask ).set_name( "reflections_texture" );
+    texture_creation.image_type        = VK_IMAGE_TYPE_2D;
+    texture_creation.format            = VK_FORMAT_B10G11R11_UFLOAT_PACK32;
+    texture_creation.width             = adjusted_width;
+    texture_creation.height            = adjusted_height;
+    texture_creation.depth             = 1;
+    texture_creation.mip_level_count   = 1;
+    texture_creation.array_layer_count = 1;
+    texture_creation.usage             = VK_IMAGE_USAGE_SAMPLED_BIT |
+                                         VK_IMAGE_USAGE_STORAGE_BIT |
+                                         VK_IMAGE_USAGE_TRANSFER_DST_BIT |
+                                         VK_IMAGE_USAGE_TRANSFER_SRC_BIT;
+    texture_creation.name              = "reflections_texture";
 
     reflections_image = gpu.create_image( texture_creation );
 
@@ -174,8 +187,17 @@ void RaytracedReflectionsPass::create_gpu_resources( FrameGraphResourceContext& 
     resource->resource_info.set_external_texture_2d( adjusted_width, adjusted_height, VK_FORMAT_B10G11R11_UFLOAT_PACK32, 0, reflections_image, reflections_image_view );
 
     // Create BRDF Lut texture
-    texture_creation.reset().set_size( 512, 512, 1 ).set_format_type( VK_FORMAT_R16G16_SFLOAT, TextureType::Texture2D )
-        .set_name( "brdf_lut" ).set_flags( TextureFlags::Compute_mask );
+    texture_creation = {};   // was reset()
+    texture_creation.image_type = VK_IMAGE_TYPE_2D;
+    texture_creation.format     = VK_FORMAT_R16G16_SFLOAT;
+    texture_creation.width      = 512;
+    texture_creation.height     = 512;
+    texture_creation.depth      = 1;
+    texture_creation.usage      = VK_IMAGE_USAGE_SAMPLED_BIT |
+                                  VK_IMAGE_USAGE_STORAGE_BIT |
+                                  VK_IMAGE_USAGE_TRANSFER_DST_BIT |
+                                  VK_IMAGE_USAGE_TRANSFER_SRC_BIT;
+    texture_creation.name       = "brdf_lut";
     brdf_lut_image = gpu.create_image( texture_creation );
 
     brdf_lut_image_view = gpu.create_image_view( {
@@ -240,15 +262,15 @@ void RaytracedReflectionsPass::update_psos( FrameGraphResourceContext& context, 
         {
         .stages = {
             {
-                .source_file_path = "glsl/reflections.glsl",
+                .source = { .glsl = "glsl/reflections.glsl" },
                 .type = VK_SHADER_STAGE_RAYGEN_BIT_KHR,
             },
             {
-                .source_file_path = "glsl/reflections.glsl",
+                .source = { .glsl = "glsl/reflections.glsl" },
                 .type = VK_SHADER_STAGE_CLOSEST_HIT_BIT_KHR,
             },
             {
-                .source_file_path = "glsl/reflections.glsl",
+                .source = { .glsl = "glsl/reflections.glsl" },
                 .type = VK_SHADER_STAGE_MISS_BIT_KHR,
             },
         },
@@ -270,7 +292,7 @@ void RaytracedReflectionsPass::update_psos( FrameGraphResourceContext& context, 
         {
         .stages = {
             {
-                .source_file_path = "glsl/reflections.glsl",
+                .source = { .glsl = "glsl/reflections.glsl" },
                 .type = VK_SHADER_STAGE_COMPUTE_BIT,
             },
         },
@@ -300,22 +322,22 @@ void RaytracedReflectionsPass::create_descriptors( Renderer* renderer, RenderBla
     gpu->destroy_descriptor_set( reflections_descriptor_set );
     gpu->destroy_descriptor_set( brdf_lut_generation_descriptor_set );
 
-    ShaderReflectionInfo* reflection_info = renderer->get_shader_reflection( reflections_pipeline.pipeline );
+    ShaderReflectionInfo* reflection_info = renderer->get_shader_reflection( reflections_pipeline.any() );
 
     DescriptorSetBinder descriptors;
     descriptors.dynamic_buffers.push( { 40, sizeof( GpuReflectionsConstants ) } );
     // descriptors.dynamic_buffers.push( { 55, sizeof( GpuDDGIConstants ) } );
     descriptors.name = "rt_reflections_ds";
 
-    reflections_descriptor_set = renderer->create_descriptor_set( descriptors, reflection_info, reflections_pipeline.pipeline, 0, *render_blackboard );
+    reflections_descriptor_set = renderer->create_descriptor_set( descriptors, reflection_info, reflections_pipeline.any(), 0, *render_blackboard );
 
     // BRDF LUT generation
-    reflection_info = renderer->get_shader_reflection( brdf_lut_generation_pipeline.pipeline );
+    reflection_info = renderer->get_shader_reflection( brdf_lut_generation_pipeline.any() );
 
     descriptors.reset();
     descriptors.name = "brdf_lut_generation_ds";
 
-    brdf_lut_generation_descriptor_set = renderer->create_descriptor_set( descriptors, reflection_info, brdf_lut_generation_pipeline.pipeline, 0, *render_blackboard );;
+    brdf_lut_generation_descriptor_set = renderer->create_descriptor_set( descriptors, reflection_info, brdf_lut_generation_pipeline.any(), 0, *render_blackboard );;
 }
 
 } // namespace raptor

@@ -32,6 +32,8 @@
 #define RESTIR_DEBUG_TEMPORAL_REUSE         4
 // Visualizes the energy of the temporal reservoir before spatial reuse.
 #define RESTIR_DEBUG_TEMPORAL_WEIGHT        5
+// No reuse, show only the current frame's candidate sample.
+#define RESTIR_DEBUG_SAMPLE_ONLY            6
 
 // RESTIR_DEBUG_TEMPORAL_REUSE color coding
 // black = invalid previous reservoir
@@ -331,7 +333,7 @@ vec3 evaluate_brdf_with_reflection( vec3 wo, vec3 wi, vec3 albedo, vec3 position
     return mix( dielectric_brdf, metal_brdf, metalness );
 }
 
-vec3 evaluate_brdf_diffuse( vec3 wo, vec3 wi, vec3 albedo, vec3 position, 
+vec3 evaluate_brdf_diffuse( vec3 wo, vec3 wi, vec3 albedo, vec3 position,
                             vec3 normal, float metalness, float roughness ) {
 
     return ( 1.0 - metalness ) * albedo * INV_PI;
@@ -704,7 +706,7 @@ void main() {
                        normals_buffer[ i2 * 3 + 2 ].v );
 
         vec3 object_normal = a * n0 + b * n1 + c * n2;
-        
+
         //vec3 triangle_normal = normalize( cross( p1_world.xyz - p0_world.xyz, p2_world.xyz - p0_world.xyz ) );
 
         const mat3 normal_transform = mat3(instance.model_inverse);
@@ -785,17 +787,23 @@ void main() {
                     debug_phat_valid = phat_valid;
 #endif
 
+#if RESTIR_DEBUG_MODE != RESTIR_DEBUG_SAMPLE_ONLY
                     merge_reservoir( temporal_reservoir, previous_reservoir, p_hat_q, rand( rng_state ) );
+#endif // RESTIR_DEBUG_SAMPLE_ONLY
                 }
             }
         }
     }
 
     // Pixel hashed validation period to distribute the signal across frames
+#if RESTIR_DEBUG_MODE == RESTIR_DEBUG_SAMPLE_ONLY
+    bool validation_frame = false;
+#else
     const uint validation_period = 6u;
     uint validation_phase = seed( uvec2( restir_xy ) ) % validation_period;
     bool validation_frame = ( frame.current_frame % validation_period ) == validation_phase;
     //validation_frame = ( frame.current_frame % 6u ) == 0u;
+#endif
 
     if ( validation_frame ) {
         temporal_reservoir = validate_reservoir( temporal_reservoir, xv, nv, wo, albedo.rgb, orm.g, orm.b );
@@ -807,6 +815,7 @@ void main() {
         reservoir_update( temporal_reservoir, reservoirSample, wnew, rand( rng_state ) );
     }
 
+#if RESTIR_DEBUG_MODE != RESTIR_DEBUG_SAMPLE_ONLY
     if ( temporal_reservoir.M > 0u ) {
         if ( !reevaluate_selected_target( temporal_reservoir, xv, nv, wo, albedo, orm.b, orm.g ) ) {
             temporal_reservoir = empty_reservoir();
@@ -824,6 +833,7 @@ void main() {
     } else {
         temporal_reservoir.W = 0.0;
     }
+#endif
 
 
 #if RESTIR_DEBUG_MODE == RESTIR_DEBUG_TEMPORAL_SIMILARITY
@@ -922,6 +932,14 @@ void main() {
     const int reservoir_index = int( restir_xy.y * restir_gi.resolution.x + restir_xy.x );
 
     Reservoir spatial_reservoir = unpack_reservoir( temporal_reservoirs_write[reservoir_index] );
+
+#if RESTIR_DEBUG_MODE == RESTIR_DEBUG_SAMPLE_ONLY
+    vec3 color = spatial_reservoir.z.lo;
+
+    imageStore( global_images_2d[ restir_gi.output_indirect_texture_index ], restir_xy, vec4( color, 1.0 ) );
+
+    return;
+#endif
 
 #if RESTIR_DEBUG_MODE == RESTIR_DEBUG_TEMPORAL_REUSE
     uint debug = spatial_reservoir.debug;

@@ -9,6 +9,7 @@ namespace raptor {
 
 // MeshletAnimationPass /////////////////////////////////////////////////////////
 void MeshletAnimationPass::render( FrameGraphRenderContext& context ) {
+    const ShaderLanguage language = context.render_config->shader_language();
 
     if ( !enabled )
         return;
@@ -30,13 +31,13 @@ void MeshletAnimationPass::render( FrameGraphRenderContext& context ) {
 
     cb->flush_barriers();
 
-    cb->bind_pipeline( vertex_update_pipeline.pipeline );
+    cb->bind_pipeline( vertex_update_pipeline.active( language ) );
 
     for ( u32 i = 0; i < animated_mesh_indices.size; ++i ) {
         u32 mesh_index = animated_mesh_indices[ i ];
         Mesh& mesh = render_scene->meshes[ mesh_index ];
 
-        cb->push_constants( vertex_update_pipeline.pipeline, 0, 4, &mesh_index );
+        cb->push_constants( vertex_update_pipeline.active( language ), 0, 4, &mesh_index );
         cb->bind_descriptor_set( { renderer->gpu->bindless_descriptor_set, vertex_update_descriptor_set[ current_frame_index ][ mesh.skin_index ] },
                                   { render_blackboard.scene_cb_offset } );
 
@@ -57,17 +58,17 @@ void MeshletAnimationPass::render( FrameGraphRenderContext& context ) {
 
     cb->flush_barriers();
 
-    cb->bind_pipeline( meshlet_update_pipeline.pipeline );
+    cb->bind_pipeline( meshlet_update_pipeline.active( language ) );
 
     for ( u32 i = 0; i < animated_mesh_indices.size; ++i ) {
         u32 mesh_index = animated_mesh_indices[ i ];
         Mesh& mesh = render_scene->meshes[ mesh_index ];
 
-        cb->push_constants( meshlet_update_pipeline.pipeline, 0, 4, &mesh_index );
+        cb->push_constants( meshlet_update_pipeline.active( language ), 0, 4, &mesh_index );
         cb->bind_descriptor_set( { renderer->gpu->bindless_descriptor_set, meshlet_update_descriptor_set[ current_frame_index ] },
                                   { render_blackboard.scene_cb_offset } );
 
-        cb->dispatch( mesh.meshlet_count, 1, 1 );
+        cb->dispatch( ( mesh.meshlet_count + 31 ) / 32, 1, 1 );
     }
 
     cb->add_buffer_barrier( meshlets.meshlets_sb_gpu[ current_frame_index ], 0, VK_WHOLE_SIZE,
@@ -99,24 +100,22 @@ void MeshletAnimationPass::declare_frame_graph_node( FrameGraphResourceContext& 
 ShaderCompilationCreation scc_vertex_update = {
     .stages = {
         {
-            .source_file_path = "glsl/animated_meshlet.glsl",
+            .source = { .glsl = "glsl/animated_meshlet.glsl" },
             .type = VK_SHADER_STAGE_COMPUTE_BIT,
         },
     },
     .name = "animated_meshlet_vertex_update",
-    .slang_input = 0,
 };
 
 
 ShaderCompilationCreation scc_meshlet_update = {
     .stages = {
         {
-            .source_file_path = "glsl/animated_meshlet.glsl",
+            .source = { .glsl = "glsl/animated_meshlet.glsl" },
             .type = VK_SHADER_STAGE_COMPUTE_BIT,
         },
     },
     .name = "animated_meshlet_update",
-    .slang_input = 0,
 };
 
 void MeshletAnimationPass::update_psos( FrameGraphResourceContext& context, PipelineUpdatePhase phase ) {
@@ -190,10 +189,10 @@ void MeshletAnimationPass::create_gpu_resources( FrameGraphResourceContext& cont
     mesh_list_buffer = gpu.create_buffer( bc );*/
 
     // Cache frustum cull shader
-    DescriptorSetLayoutHandle layout = gpu.get_descriptor_set_layout( vertex_update_pipeline.pipeline, k_material_descriptor_set_index );
+    DescriptorSetLayoutHandle layout = gpu.get_descriptor_set_layout( vertex_update_pipeline.any(), k_material_descriptor_set_index );
     DescriptorSetBinder descriptors;
 
-    ShaderReflectionInfo* shader_reflection = renderer->get_shader_reflection( vertex_update_pipeline.pipeline );
+    ShaderReflectionInfo* shader_reflection = renderer->get_shader_reflection( vertex_update_pipeline.any() );
 
     for ( u32 i = 0; i < k_max_frames; ++i ) {
         vertex_update_descriptor_set[ i ].init( gpu.allocator, render_scene->skins.size, render_scene->skins.size );
@@ -211,7 +210,7 @@ void MeshletAnimationPass::create_gpu_resources( FrameGraphResourceContext& cont
             descriptors.ssbos.push( { gpu_culling.meshlet_indirect_early_count_sb[ i ], 15 } );
 
             vertex_update_descriptor_set[ i ][ s ] = renderer->create_descriptor_set( descriptors, shader_reflection,
-                vertex_update_pipeline.pipeline, i, render_blackboard );
+                vertex_update_pipeline.any(), i, render_blackboard );
         }
 
         descriptors.reset();
@@ -220,7 +219,7 @@ void MeshletAnimationPass::create_gpu_resources( FrameGraphResourceContext& cont
         descriptors.ssbos.push( { gpu_culling.meshlet_indirect_early_count_sb[ i ], 15 } );
 
         meshlet_update_descriptor_set[ i ] = renderer->create_descriptor_set( descriptors, shader_reflection,
-            meshlet_update_pipeline.pipeline, i, render_blackboard );
+            meshlet_update_pipeline.any(), i, render_blackboard );
     }
 }
 

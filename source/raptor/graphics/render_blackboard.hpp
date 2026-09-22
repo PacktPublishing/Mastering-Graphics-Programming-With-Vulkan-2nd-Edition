@@ -267,6 +267,9 @@ struct RaytracedShadowsConfig {
     glm::vec3               light_color = glm::vec3(1, 1, 1);
     i32                     light_type = 0; // 0 = directional, 1 = point
 
+    f32                     light_angular_radius = 0.5f; // used by directional lights, in radiants
+    f32                     light_source_radius = 0.5f;  // point, world unit
+
     u32                     max_samples = 4;
     
     bool                    enabled = false;
@@ -334,6 +337,10 @@ struct RenderConfig {
     // PBR
     f32                     forced_metalness = -1.f;
     f32                     forced_roughness = -1.f;
+
+    ShaderLanguage          shader_language() const {
+        return use_slang_shaders ? ShaderLanguage::Slang : ShaderLanguage::Glsl;
+    }
 }; // struct RenderConfig
 
 //
@@ -375,9 +382,7 @@ struct MeshletsRuntimeData {
 
     DescriptorSetHandle     meshlets_emulation_draw_descriptor_set[ k_max_frames ];
     DescriptorSetHandle     meshlets_early_draw_descriptor_set[ k_max_frames ];
-    DescriptorSetHandle     meshlets_early_draw_descriptor_set_slang[ k_max_frames ];
     DescriptorSetHandle     meshlets_late_draw_descriptor_set[ k_max_frames ];
-    DescriptorSetHandle     meshlets_late_draw_descriptor_set_slang[ k_max_frames ];
     DescriptorSetHandle     meshlets_transparent_draw_descriptor_set[ k_max_frames ];
     Array<DescriptorSetHandle> skinning_descriptor_set[ k_max_frames ];
 

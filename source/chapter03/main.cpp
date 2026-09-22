@@ -161,7 +161,7 @@ namespace chapter3 {
             depth_prepass_shader = renderer->create_shader_state( {
                 .stages = {
                     {
-                        .source_file_path = "glsl/chapter3/mesh_depth.glsl",
+                        .source = { .glsl = "glsl/chapter3/mesh_depth.glsl" },
                         .headers = {
                             "glsl/platform.h", "glsl/chapter3/scene_mesh_data.h"
                         },
@@ -169,7 +169,7 @@ namespace chapter3 {
                     },
                 },
                 .name = "depth_prepass" },
-                "depth_prepass", &depth_prepass_reflection );
+                "depth_prepass", ShaderLanguage::Glsl, &depth_prepass_reflection );
 
             pipeline_layout = renderer->create_pipeline_layout( depth_prepass_reflection );
 
@@ -319,7 +319,7 @@ namespace chapter3 {
             gbuffer_shader = renderer->create_shader_state( {
                 .stages = {
                     {
-                        .source_file_path = "glsl/chapter3/mesh_gbuffer.glsl",
+                        .source = { .glsl = "glsl/chapter3/mesh_gbuffer.glsl" },
                         .headers = {
                             "glsl/platform.h",
                             "glsl/chapter3/common.h",
@@ -328,7 +328,7 @@ namespace chapter3 {
                         .type = VK_SHADER_STAGE_VERTEX_BIT,
                     },
                     {
-                        .source_file_path = "glsl/chapter3/mesh_gbuffer.glsl",
+                        .source = { .glsl = "glsl/chapter3/mesh_gbuffer.glsl" },
                         .headers = {
                             "glsl/platform.h",
                             "glsl/chapter3/common.h",
@@ -338,7 +338,7 @@ namespace chapter3 {
                     },
                 },
                 .name = "gbuffer" },
-                "gbuffer", &gbuffer_reflection );
+                "gbuffer", ShaderLanguage::Glsl, &gbuffer_reflection );
 
             pipeline_layout = renderer->create_pipeline_layout( gbuffer_reflection );
 
@@ -492,7 +492,7 @@ namespace chapter3 {
             pbr_lighting_shader = renderer->create_shader_state( {
                 .stages = {
                     {
-                        .source_file_path = "glsl/chapter3/post_pbr_lighting.glsl",
+                        .source = { .glsl = "glsl/chapter3/post_pbr_lighting.glsl" },
                         .headers = {
                             "glsl/platform.h",
                             "glsl/chapter3/common.h",
@@ -500,7 +500,7 @@ namespace chapter3 {
                         .type = VK_SHADER_STAGE_VERTEX_BIT,
                     },
                     {
-                        .source_file_path = "glsl/chapter3/post_pbr_lighting.glsl",
+                        .source = { .glsl = "glsl/chapter3/post_pbr_lighting.glsl" },
                         .headers = {
                             "glsl/platform.h",
                             "glsl/chapter3/common.h",
@@ -509,7 +509,7 @@ namespace chapter3 {
                     },
                 },
                 .name = "pbr_lighting" },
-                "pbr_lighting", &pbr_lighting_reflection );
+                "pbr_lighting", ShaderLanguage::Glsl, &pbr_lighting_reflection );
 
             pipeline_layout = renderer->create_pipeline_layout( pbr_lighting_reflection );
             PipelineCreation pbr_lighting_creation = {
@@ -650,7 +650,7 @@ namespace chapter3 {
             transparent_shader = renderer->create_shader_state( {
                 .stages = {
                     {
-                        .source_file_path = "glsl/chapter3/mesh_transparent.glsl",
+                        .source = { .glsl = "glsl/chapter3/mesh_transparent.glsl" },
                         .headers = {
                             "glsl/platform.h",
                             "glsl/chapter3/common.h",
@@ -659,7 +659,7 @@ namespace chapter3 {
                         .type = VK_SHADER_STAGE_VERTEX_BIT,
                     },
                     {
-                        .source_file_path = "glsl/chapter3/mesh_transparent.glsl",
+                        .source = { .glsl = "glsl/chapter3/mesh_transparent.glsl" },
                         .headers = {
                             "glsl/platform.h",
                             "glsl/chapter3/common.h",
@@ -669,7 +669,7 @@ namespace chapter3 {
                     },
                 },
                 .name = "transparent" },
-                "transparent", &transparent_reflection );
+                "transparent", ShaderLanguage::Glsl, &transparent_reflection );
 
             pipeline_layout = renderer->create_pipeline_layout( transparent_reflection );
             PipelineCreation transparent_creation = {
@@ -839,14 +839,14 @@ namespace chapter3 {
             dof_shader = renderer->create_shader_state( {
                 .stages = {
                     {
-                        .source_file_path = "glsl/chapter3/post_dof.glsl",
+                        .source = { .glsl = "glsl/chapter3/post_dof.glsl" },
                         .headers = {
                             "glsl/platform.h"
                         },
                         .type = VK_SHADER_STAGE_VERTEX_BIT,
                     },
                     {
-                        .source_file_path = "glsl/chapter3/post_dof.glsl",
+                        .source = { .glsl = "glsl/chapter3/post_dof.glsl" },
                         .headers = {
                             "glsl/platform.h"
                         },
@@ -854,7 +854,7 @@ namespace chapter3 {
                     },
                 },
                 .name = "dof" },
-                "dof", &dof_reflection );
+                "dof", ShaderLanguage::Glsl, &dof_reflection );
 
             pipeline_layout = renderer->create_pipeline_layout( dof_reflection );
             PipelineCreation dof_creation = {
@@ -945,12 +945,15 @@ namespace chapter3 {
 
             // Reuse cached texture creation and create new scene mips.
             ImageCreation dof_scene_tc {
-                .initial_data = nullptr,
-                .width = ( u16 )new_width,
-                .height = ( u16 )new_height,
-                .mip_level_count = ( u8 )mips,
-                .format = info.texture.format,
-                .name = "scene_mips",
+                .image_type      = VK_IMAGE_TYPE_2D,
+                .format          = info.texture.format,
+                .width           = ( u32 )new_width,
+                .height          = ( u32 )new_height,
+                .mip_level_count = mips,
+                .usage           = VK_IMAGE_USAGE_SAMPLED_BIT |
+                                   VK_IMAGE_USAGE_TRANSFER_DST_BIT |
+                                   VK_IMAGE_USAGE_TRANSFER_SRC_BIT,
+                .name            = "scene_mips",
             };
             scene_mips = renderer->create_texture( dof_scene_tc );
             gpu.link_image_sampler( scene_mips->image, mips_sampler );
@@ -1000,12 +1003,15 @@ namespace chapter3 {
             }
 
             ImageCreation dof_scene_tc {
-                .initial_data = nullptr,
-                .width = ( u16 )info.texture.width,
-                .height = ( u16 )info.texture.height,
-                .mip_level_count = ( u8 )mips,
-                .format = info.texture.format,
-                .name = "scene_mips",
+                .image_type      = VK_IMAGE_TYPE_2D,
+                .format          = info.texture.format,
+                .width           = ( u32 )info.texture.width,
+                .height          = ( u32 )info.texture.height,
+                .mip_level_count = mips,
+                .usage           = VK_IMAGE_USAGE_SAMPLED_BIT |
+                                   VK_IMAGE_USAGE_TRANSFER_DST_BIT |
+                                   VK_IMAGE_USAGE_TRANSFER_SRC_BIT,
+                .name            = "scene_mips",
             };
             scene_mips = renderer->create_texture( dof_scene_tc );
 
@@ -1156,7 +1162,7 @@ int main( int argc, char** argv ) {
     imgui->init( &imgui_config );
 
     GameCamera game_camera;
-    game_camera.camera.init_perpective( 0.1f, 1000.f, 60.f, wconf.width * 1.f / wconf.height );
+    game_camera.camera.init_perpective( 0.1f, 100.f, 60.f, wconf.width * 1.f / wconf.height );
     game_camera.init( true, 20.f, 6.f, 0.1f );
 
     time_service_init();

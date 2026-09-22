@@ -13,12 +13,12 @@ namespace raptor {
 ShaderCompilationCreation scc_inject_data = {
     .stages = {
         {
-            .source_file_path = "glsl/volumetric_fog.glsl",
+            .source = { .glsl = "glsl/volumetric_fog.glsl",
+                        .slang = "slang/volumetric_fog.slang" },
             .type = VK_SHADER_STAGE_COMPUTE_BIT,
         },
     },
     .name = "inject_data",
-    .slang_input = 0,
 };
 
 PipelineCreation pc_inject_data = {
@@ -26,31 +26,15 @@ PipelineCreation pc_inject_data = {
     .render_pass_name = "volumetric_fog_pass",
 };
 
-ShaderCompilationCreation scc_inject_data_slang = {
-    .stages = {
-        {
-            .source_file_path = "slang/volumetric_fog.slang",
-            .type = VK_SHADER_STAGE_COMPUTE_BIT,
-        },
-    },
-    .name = "inject_data_slang",
-    .slang_input = 1,
-};
-
-PipelineCreation pc_inject_data_slang = {
-    .name = "inject_data_slang",
-    .render_pass_name = "volumetric_fog_pass",
-};
-
 ShaderCompilationCreation scc_light_scattering = {
     .stages = {
         {
-            .source_file_path = "glsl/volumetric_fog.glsl",
+            .source = { .glsl = "glsl/volumetric_fog.glsl",
+                        .slang = "slang/volumetric_fog.slang" },
             .type = VK_SHADER_STAGE_COMPUTE_BIT,
         },
     },
     .name = "light_scattering",
-    .slang_input = 0,
 };
 
 PipelineCreation pc_light_scattering = {
@@ -58,31 +42,15 @@ PipelineCreation pc_light_scattering = {
     .render_pass_name = "volumetric_fog_pass",
 };
 
-ShaderCompilationCreation scc_light_scattering_slang = {
-    .stages = {
-        {
-            .source_file_path = "slang/volumetric_fog.slang",
-            .type = VK_SHADER_STAGE_COMPUTE_BIT,
-        },
-    },
-    .name = "light_scattering_slang",
-    .slang_input = 1,
-};
-
-PipelineCreation pc_light_scattering_slang = {
-    .name = "light_scattering_slang",
-    .render_pass_name = "volumetric_fog_pass",
-};
-
 ShaderCompilationCreation scc_light_integration = {
     .stages = {
         {
-            .source_file_path = "glsl/volumetric_fog.glsl",
+            .source = { .glsl = "glsl/volumetric_fog.glsl",
+                        .slang = "slang/volumetric_fog.slang" },
             .type = VK_SHADER_STAGE_COMPUTE_BIT,
         },
     },
     .name = "light_integration",
-    .slang_input = 0,
 };
 
 PipelineCreation pc_light_integration = {
@@ -90,31 +58,15 @@ PipelineCreation pc_light_integration = {
     .render_pass_name = "volumetric_fog_pass",
 };
 
-ShaderCompilationCreation scc_light_integration_slang = {
-    .stages = {
-        {
-            .source_file_path = "slang/volumetric_fog.slang",
-            .type = VK_SHADER_STAGE_COMPUTE_BIT,
-        },
-    },
-    .name = "light_integration_slang",
-    .slang_input = 1,
-};
-
-PipelineCreation pc_light_integration_slang = {
-    .name = "light_integration_slang",
-    .render_pass_name = "volumetric_fog_pass",
-};
-
 ShaderCompilationCreation scc_spatial_filtering = {
     .stages = {
         {
-            .source_file_path = "glsl/volumetric_fog.glsl",
+            .source = { .glsl = "glsl/volumetric_fog.glsl",
+                        .slang = "slang/volumetric_fog.slang" },
             .type = VK_SHADER_STAGE_COMPUTE_BIT,
         },
     },
     .name = "spatial_filtering",
-    .slang_input = 0,
 };
 
 PipelineCreation pc_spatial_filtering = {
@@ -122,31 +74,15 @@ PipelineCreation pc_spatial_filtering = {
     .render_pass_name = "volumetric_fog_pass",
 };
 
-ShaderCompilationCreation scc_spatial_filtering_slang = {
-    .stages = {
-        {
-            .source_file_path = "slang/volumetric_fog.slang",
-            .type = VK_SHADER_STAGE_COMPUTE_BIT,
-        },
-    },
-    .name = "spatial_filtering_slang",
-    .slang_input = 1,
-};
-
-PipelineCreation pc_spatial_filtering_slang = {
-    .name = "spatial_filtering_slang",
-    .render_pass_name = "volumetric_fog_pass",
-};
-
 ShaderCompilationCreation scc_temporal_filtering = {
     .stages = {
         {
-            .source_file_path = "glsl/volumetric_fog.glsl",
+            .source = { .glsl = "glsl/volumetric_fog.glsl",
+                        .slang = "slang/volumetric_fog.slang" },
             .type = VK_SHADER_STAGE_COMPUTE_BIT,
         },
     },
     .name = "temporal_filtering",
-    .slang_input = 0,
 };
 
 PipelineCreation pc_temporal_filtering = {
@@ -154,54 +90,21 @@ PipelineCreation pc_temporal_filtering = {
     .render_pass_name = "volumetric_fog_pass",
 };
 
-ShaderCompilationCreation scc_temporal_filtering_slang = {
-    .stages = {
-        {
-            .source_file_path = "slang/volumetric_fog.slang",
-            .type = VK_SHADER_STAGE_COMPUTE_BIT,
-        },
-    },
-    .name = "temporal_filtering_slang",
-    .slang_input = 1,
-};
-
-PipelineCreation pc_temporal_filtering_slang = {
-    .name = "temporal_filtering_slang",
-    .render_pass_name = "volumetric_fog_pass",
-};
-
 ShaderCompilationCreation scc_volumetric_noise_baking = {
     .stages = {
         {
-            .source_file_path = "glsl/volumetric_fog.glsl",
+            .source = { .glsl = "glsl/volumetric_fog.glsl",
+                        .slang = "slang/volumetric_fog.slang" },
             .type = VK_SHADER_STAGE_COMPUTE_BIT,
         },
     },
     .name = "volumetric_noise_baking",
-    .slang_input = 0,
 };
 
 PipelineCreation pc_volumetric_noise_baking = {
     .name = "volumetric_noise_baking",
     .render_pass_name = "volumetric_fog_pass",
 };
-
-ShaderCompilationCreation scc_volumetric_noise_baking_slang = {
-    .stages = {
-        {
-            .source_file_path = "slang/volumetric_fog.slang",
-            .type = VK_SHADER_STAGE_COMPUTE_BIT,
-        },
-    },
-    .name = "volumetric_noise_baking_slang",
-    .slang_input = 1,
-};
-
-PipelineCreation pc_volumetric_noise_baking_slang = {
-    .name = "volumetric_noise_baking_slang",
-    .render_pass_name = "volumetric_fog_pass",
-};
-
 
 void VolumetricFogPass::declare_frame_graph_node( FrameGraphResourceContext& context ) {
     FrameGraphBuilder& builder = *context.frame_graph->builder;
@@ -236,22 +139,11 @@ void VolumetricFogPass::update_psos( FrameGraphResourceContext& context,
     if ( phase == PipelineUpdatePhase::Destroy ) {
 
         renderer->destroy_compute_pipeline_state( inject_data_pipeline );
-        renderer->destroy_compute_pipeline_state( inject_data_pipeline_slang );
-
         renderer->destroy_compute_pipeline_state( light_scattering_pipeline );
-        renderer->destroy_compute_pipeline_state( light_scattering_pipeline_slang );
-
         renderer->destroy_compute_pipeline_state( light_integration_pipeline );
-        renderer->destroy_compute_pipeline_state( light_integration_pipeline_slang );
-
         renderer->destroy_compute_pipeline_state( spatial_filtering_pipeline );
-        renderer->destroy_compute_pipeline_state( spatial_filtering_pipeline_slang );
-
         renderer->destroy_compute_pipeline_state( temporal_filtering_pipeline );
-        renderer->destroy_compute_pipeline_state( temporal_filtering_pipeline_slang );
-
         renderer->destroy_compute_pipeline_state( volumetric_noise_baking_pipeline );
-        renderer->destroy_compute_pipeline_state( volumetric_noise_baking_pipeline_slang );
 
         return;
     }
@@ -260,39 +152,21 @@ void VolumetricFogPass::update_psos( FrameGraphResourceContext& context,
     // Inject data
     renderer->create_compute_pipeline_state( scc_inject_data, pc_inject_data, "inject_data",
                                              context.frame_graph, tx.add( inject_data_pipeline ) );
-
-    renderer->create_compute_pipeline_state( scc_inject_data_slang, pc_inject_data_slang, "inject_data",
-                                             context.frame_graph, tx.add( inject_data_pipeline_slang ) );
     // Light scattering
     renderer->create_compute_pipeline_state( scc_light_scattering, pc_light_scattering, "light_scattering",
                                              context.frame_graph, tx.add( light_scattering_pipeline ) );
-
-    renderer->create_compute_pipeline_state( scc_light_scattering_slang, pc_light_scattering_slang, "light_scattering",
-                                             context.frame_graph, tx.add( light_scattering_pipeline_slang ) );
     // Light integration
     renderer->create_compute_pipeline_state( scc_light_integration, pc_light_integration, "light_integration",
                                              context.frame_graph, tx.add( light_integration_pipeline ) );
-
-    renderer->create_compute_pipeline_state( scc_light_integration_slang, pc_light_integration_slang, "light_integration",
-                                             context.frame_graph, tx.add( light_integration_pipeline_slang ) );
     // Spatial filtering
     renderer->create_compute_pipeline_state( scc_spatial_filtering, pc_spatial_filtering, "spatial_filtering",
                                              context.frame_graph, tx.add( spatial_filtering_pipeline ) );
-
-    renderer->create_compute_pipeline_state( scc_spatial_filtering_slang, pc_spatial_filtering_slang, "spatial_filtering",
-                                             context.frame_graph, tx.add( spatial_filtering_pipeline_slang ) );
     // Temporal filtering
     renderer->create_compute_pipeline_state( scc_temporal_filtering, pc_temporal_filtering, "temporal_filtering",
                                              context.frame_graph, tx.add( temporal_filtering_pipeline ) );
-
-    renderer->create_compute_pipeline_state( scc_temporal_filtering_slang, pc_temporal_filtering_slang, "temporal_filtering",
-                                             context.frame_graph, tx.add( temporal_filtering_pipeline_slang ) );
     // Volumetric noise baking
     renderer->create_compute_pipeline_state( scc_volumetric_noise_baking, pc_volumetric_noise_baking, "volumetric_noise_baking",
                                              context.frame_graph, tx.add( volumetric_noise_baking_pipeline ) );
-
-    renderer->create_compute_pipeline_state( scc_volumetric_noise_baking_slang, pc_volumetric_noise_baking_slang, "volumetric_noise_baking",
-                                             context.frame_graph, tx.add( volumetric_noise_baking_pipeline_slang ) );
 
     tx.commit_or_rollback();
 }
@@ -311,6 +185,8 @@ void VolumetricFogPass::pre_render( FrameGraphRenderContext& context ) {
                                                     0, VK_REMAINING_MIP_LEVELS,
                                                     0, VK_REMAINING_ARRAY_LAYERS );
 
+    const ShaderLanguage language = context.render_config->shader_language();
+
     static i32 times = 3;
     if ( times >= 0 ) {
         --times;
@@ -323,19 +199,12 @@ void VolumetricFogPass::pre_render( FrameGraphRenderContext& context ) {
 
         gpu_commands->flush_barriers();
 
-        if ( context.render_config->use_slang_shaders ) {
-            gpu_commands->bind_pipeline( volumetric_noise_baking_pipeline_slang.pipeline );
-            gpu_commands->bind_descriptor_set( { renderer->gpu->bindless_descriptor_set },
-                                                {  } );
-        }
-        else {
-            gpu_commands->bind_pipeline( volumetric_noise_baking_pipeline.pipeline );
-            gpu_commands->bind_descriptor_set( { renderer->gpu->bindless_descriptor_set, fog_descriptor_set },
-                                                { render_blackboard.scene_cb_offset, fog_constants_offset } );
-        }
+        gpu_commands->bind_pipeline( volumetric_noise_baking_pipeline.active( language ) );
+        gpu_commands->bind_descriptor_set( { renderer->gpu->bindless_descriptor_set, fog_descriptor_set },
+                                           { render_blackboard.scene_cb_offset, fog_constants_offset } );
 
         u32 image_view_index = volumetric_noise_image_view.index();
-        gpu_commands->push_constants( volumetric_noise_baking_pipeline.pipeline, 0, 4, &image_view_index );
+        gpu_commands->push_constants( volumetric_noise_baking_pipeline.active( language ), 0, 4, &image_view_index );
         gpu_commands->dispatch( 64 / 8, 64 / 8, 64 );
 
         gpu_commands->add_memory_barrier( VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, VK_ACCESS_2_SHADER_WRITE_BIT,
@@ -358,7 +227,7 @@ void VolumetricFogPass::pre_render( FrameGraphRenderContext& context ) {
                                       VK_IMAGE_LAYOUT_GENERAL } );
     gpu_commands->flush_barriers();
 
-    gpu_commands->bind_pipeline( context.render_config->use_slang_shaders ? inject_data_pipeline_slang.pipeline : inject_data_pipeline.pipeline );
+    gpu_commands->bind_pipeline( inject_data_pipeline.active( language ) );
     gpu_commands->bind_descriptor_set( { renderer->gpu->bindless_descriptor_set, fog_descriptor_set },
                                         { render_blackboard.scene_cb_offset, fog_constants_offset } );
 
@@ -390,16 +259,9 @@ void VolumetricFogPass::pre_render( FrameGraphRenderContext& context ) {
 
     gpu_commands->flush_barriers();
 
-    if ( context.render_config->use_slang_shaders ) {
-        gpu_commands->bind_pipeline( light_scattering_pipeline_slang.pipeline );
-        gpu_commands->bind_descriptor_set( { renderer->gpu->bindless_descriptor_set, light_scattering_descriptor_set_slang[ current_frame_index ] },
-                                            { render_blackboard.scene_cb_offset, render_blackboard.lighting.lighting_constants_cb_offset, fog_constants_offset } );
-    }
-    else {
-        gpu_commands->bind_pipeline( light_scattering_pipeline.pipeline );
-        gpu_commands->bind_descriptor_set( { renderer->gpu->bindless_descriptor_set, light_scattering_descriptor_set[ current_frame_index ] },
-                                            { render_blackboard.scene_cb_offset, render_blackboard.lighting.lighting_constants_cb_offset, fog_constants_offset } );
-    }
+    gpu_commands->bind_pipeline( light_scattering_pipeline.active( language ) );
+    gpu_commands->bind_descriptor_set( { renderer->gpu->bindless_descriptor_set, light_scattering_descriptor_set[ current_frame_index ] },
+                                       { render_blackboard.scene_cb_offset, render_blackboard.lighting.lighting_constants_cb_offset, fog_constants_offset } );
 
     gpu_commands->dispatch( dispatch_group_x, dispatch_group_y, context.render_config->volumetric_fog.slices );
 
@@ -426,7 +288,7 @@ void VolumetricFogPass::pre_render( FrameGraphRenderContext& context ) {
 
     gpu_commands->flush_barriers();
 
-    gpu_commands->bind_pipeline( context.render_config->use_slang_shaders ? spatial_filtering_pipeline_slang.pipeline : spatial_filtering_pipeline.pipeline );
+    gpu_commands->bind_pipeline( spatial_filtering_pipeline.active( language ) );
     gpu_commands->bind_descriptor_set( { renderer->gpu->bindless_descriptor_set, fog_descriptor_set },
                                         { render_blackboard.scene_cb_offset, fog_constants_offset } );
     gpu_commands->dispatch( dispatch_group_x, dispatch_group_y, context.render_config->volumetric_fog.slices );
@@ -452,7 +314,7 @@ void VolumetricFogPass::pre_render( FrameGraphRenderContext& context ) {
 
     gpu_commands->flush_barriers();
     // Light integration
-    gpu_commands->bind_pipeline( context.render_config->use_slang_shaders ? light_integration_pipeline_slang.pipeline : light_integration_pipeline.pipeline );
+    gpu_commands->bind_pipeline( light_integration_pipeline.active( language ) );
     gpu_commands->bind_descriptor_set( { renderer->gpu->bindless_descriptor_set, fog_descriptor_set },
                                         { render_blackboard.scene_cb_offset, fog_constants_offset } );
 
@@ -486,7 +348,7 @@ void VolumetricFogPass::pre_render( FrameGraphRenderContext& context ) {
     gpu_commands->flush_barriers();
     // Temporal filtering
     // Reads froxel_data_0 and writes light scattering texture
-    gpu_commands->bind_pipeline( context.render_config->use_slang_shaders ? temporal_filtering_pipeline_slang.pipeline : temporal_filtering_pipeline.pipeline );
+    gpu_commands->bind_pipeline( temporal_filtering_pipeline.active( language ) );
     gpu_commands->bind_descriptor_set( { renderer->gpu->bindless_descriptor_set, fog_descriptor_set },
                                         { render_blackboard.scene_cb_offset, fog_constants_offset } );
     gpu_commands->dispatch( dispatch_group_x, dispatch_group_y, context.render_config->volumetric_fog.slices );
@@ -537,9 +399,17 @@ void VolumetricFogPass::create_gpu_resources( FrameGraphResourceContext& context
     context.render_config->volumetric_fog.tile_count_x = ceilu32( ( f32 )render_blackboard.render_width / context.render_config->volumetric_fog.tile_size );
     context.render_config->volumetric_fog.tile_count_y = ceilu32( ( f32 )render_blackboard.render_height / context.render_config->volumetric_fog.tile_size );
 
-    raptor::ImageCreation texture_creation;
-    texture_creation.reset().set_size( context.render_config->volumetric_fog.tile_count_x, context.render_config->volumetric_fog.tile_count_y, context.render_config->volumetric_fog.slices )
-        .set_format_type( VK_FORMAT_R16G16B16A16_SFLOAT, TextureType::Texture3D ).set_flags( raptor::TextureFlags::Compute_mask ).set_name( "froxel_data_texture_0" );
+    raptor::ImageCreation texture_creation{
+        .image_type = VK_IMAGE_TYPE_3D,
+        .format     = VK_FORMAT_R16G16B16A16_SFLOAT,
+        .width      = context.render_config->volumetric_fog.tile_count_x,
+        .height     = context.render_config->volumetric_fog.tile_count_y,
+        .depth      = context.render_config->volumetric_fog.slices,
+        .usage      = VK_IMAGE_USAGE_SAMPLED_BIT |
+                      VK_IMAGE_USAGE_STORAGE_BIT |
+                      VK_IMAGE_USAGE_TRANSFER_DST_BIT |
+                      VK_IMAGE_USAGE_TRANSFER_SRC_BIT,
+        .name       = "froxel_data_texture_0" };
 
     froxel_data_image_0 = gpu.create_image( texture_creation );
 
@@ -548,21 +418,21 @@ void VolumetricFogPass::create_gpu_resources( FrameGraphResourceContext& context
         .sub_resource = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1 }, .name = texture_creation.name } );
 
     // Temporal reprojection uses those two textures.
-    texture_creation.set_name( "vol_fog_temporal_history_0" );
+    texture_creation.name = "vol_fog_temporal_history_0";
     temporal_history_image[ 0 ] = gpu.create_image( texture_creation );
 
     temporal_history_image_view[ 0 ] = gpu.create_image_view( {
         .parent_image = temporal_history_image[ 0 ], .view_type = VK_IMAGE_VIEW_TYPE_3D,
         .sub_resource = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1 }, .name = texture_creation.name } );
 
-    texture_creation.set_name( "vol_fog_temporal_history_1" );
+    texture_creation.name = "vol_fog_temporal_history_1";
     temporal_history_image[ 1 ] = gpu.create_image( texture_creation );
 
     temporal_history_image_view[ 1 ] = gpu.create_image_view( {
         .parent_image = temporal_history_image[ 1 ], .view_type = VK_IMAGE_VIEW_TYPE_3D,
         .sub_resource = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1 }, .name = texture_creation.name } );
 
-    texture_creation.set_name( "raw_light_scattering_texture" );
+    texture_creation.name = "raw_light_scattering_texture";
     raw_light_scattering_image = gpu.create_image( texture_creation );
 
     raw_light_scattering_image_view = gpu.create_image_view( {
@@ -570,8 +440,17 @@ void VolumetricFogPass::create_gpu_resources( FrameGraphResourceContext& context
         .sub_resource = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1 }, .name = texture_creation.name } );
 
     // Create volumetric noise texture
-    texture_creation.reset().set_size( 64, 64, 64 ).set_format_type( VK_FORMAT_R8_UNORM, TextureType::Texture3D )
-        .set_flags( raptor::TextureFlags::Compute_mask ).set_name( "volumetric_noise" );
+    texture_creation = {};   // was reset()
+    texture_creation.image_type = VK_IMAGE_TYPE_3D;
+    texture_creation.format     = VK_FORMAT_R8_UNORM;
+    texture_creation.width      = 64;
+    texture_creation.height     = 64;
+    texture_creation.depth      = 64;
+    texture_creation.usage      = VK_IMAGE_USAGE_SAMPLED_BIT |
+                                  VK_IMAGE_USAGE_STORAGE_BIT |
+                                  VK_IMAGE_USAGE_TRANSFER_DST_BIT |
+                                  VK_IMAGE_USAGE_TRANSFER_SRC_BIT;
+    texture_creation.name       = "volumetric_noise";
     volumetric_noise_image = gpu.create_image( texture_creation );
 
     volumetric_noise_image_view = gpu.create_image_view( {
@@ -584,13 +463,14 @@ void VolumetricFogPass::create_gpu_resources( FrameGraphResourceContext& context
     gpu.add_image_view_to_bindless( raw_light_scattering_image_view );
     gpu.add_image_view_to_bindless( volumetric_noise_image_view );
 
-    SamplerCreation fog_sampler_creation;
-    fog_sampler_creation.set_address_mode_uvw( VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE,
-                               VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE, VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE )
-                        .set_min_mag_mip( VK_FILTER_LINEAR, VK_FILTER_LINEAR, VK_SAMPLER_MIPMAP_MODE_NEAREST )
-                        .set_name( "volumetric_fog_linear_sampler" );
-
-    volumetric_fog_sampler = gpu.create_sampler( fog_sampler_creation );
+    volumetric_fog_sampler = gpu.create_sampler( {
+        .min_filter = VK_FILTER_LINEAR,
+        .mag_filter = VK_FILTER_LINEAR,
+        .mip_filter = VK_SAMPLER_MIPMAP_MODE_NEAREST,
+        .address_mode_u = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE,
+        .address_mode_v = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE,
+        .address_mode_w = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE,
+        .name = "volumetric_fog_linear_sampler" } );
 
     // Link sampler to all 3D fog images that you sample with texture()/textureLod()
     gpu.link_image_sampler( froxel_data_image_0, volumetric_fog_sampler );
@@ -599,10 +479,14 @@ void VolumetricFogPass::create_gpu_resources( FrameGraphResourceContext& context
     gpu.link_image_sampler( raw_light_scattering_image, volumetric_fog_sampler );
 
     // Create tiling sampler for volumetric noise texture
-    SamplerCreation sampler_creation;
-    sampler_creation.set_address_mode_uvw( VK_SAMPLER_ADDRESS_MODE_REPEAT, VK_SAMPLER_ADDRESS_MODE_REPEAT, VK_SAMPLER_ADDRESS_MODE_REPEAT )
-        .set_min_mag_mip( VK_FILTER_LINEAR, VK_FILTER_LINEAR, VK_SAMPLER_MIPMAP_MODE_LINEAR ).set_name( "volumetric_tiling_sampler" );
-    volumetric_tiling_sampler = gpu.create_sampler( sampler_creation );
+    volumetric_tiling_sampler = gpu.create_sampler( {
+        .min_filter = VK_FILTER_LINEAR,
+        .mag_filter = VK_FILTER_LINEAR,
+        .mip_filter = VK_SAMPLER_MIPMAP_MODE_LINEAR,
+        .address_mode_u = VK_SAMPLER_ADDRESS_MODE_REPEAT,
+        .address_mode_v = VK_SAMPLER_ADDRESS_MODE_REPEAT,
+        .address_mode_w = VK_SAMPLER_ADDRESS_MODE_REPEAT,
+        .name = "volumetric_tiling_sampler" } );
     gpu.link_image_sampler( volumetric_noise_image, volumetric_tiling_sampler );
 
     // Cache texture index
@@ -610,8 +494,8 @@ void VolumetricFogPass::create_gpu_resources( FrameGraphResourceContext& context
 
     // NEW
     // Layout for simpler shaders. For now just light scattering needs lighting bindings.
-    DescriptorSetLayoutHandle common_layout = gpu.get_descriptor_set_layout( inject_data_pipeline.pipeline, k_material_descriptor_set_index );
-    ShaderReflectionInfo* reflection_info = renderer->get_shader_reflection( inject_data_pipeline.pipeline );
+    DescriptorSetLayoutHandle common_layout = gpu.get_descriptor_set_layout( inject_data_pipeline.any(), k_material_descriptor_set_index );
+    ShaderReflectionInfo* reflection_info = renderer->get_shader_reflection( inject_data_pipeline.any() );
 
     u32 constants_index = renderer->get_binding_index( reflection_info, "VolumetricFogConstants" );
 
@@ -619,7 +503,7 @@ void VolumetricFogPass::create_gpu_resources( FrameGraphResourceContext& context
     descriptors.dynamic_buffers.push( { constants_index, sizeof( GpuVolumetricFogConstants ) } );
     descriptors.name = "vol_fog_ds";
 
-    fog_descriptor_set = renderer->create_descriptor_set( descriptors, reflection_info, inject_data_pipeline.pipeline, 0, render_blackboard );
+    fog_descriptor_set = renderer->create_descriptor_set( descriptors, reflection_info, inject_data_pipeline.any(), 0, render_blackboard );
     create_descriptors( context );
 
     // TODO: create methods ?
@@ -719,7 +603,6 @@ void VolumetricFogPass::destroy_gpu_resources( FrameGraphResourceContext& contex
 
     for ( u32 i = 0; i < k_max_frames; ++i ) {
         gpu.destroy_descriptor_set( light_scattering_descriptor_set[ i ] );
-        gpu.destroy_descriptor_set( light_scattering_descriptor_set_slang[ i ] );
     }
 
     gpu.destroy_sampler( volumetric_tiling_sampler );
@@ -741,13 +624,12 @@ void VolumetricFogPass::create_descriptors( FrameGraphResourceContext& context )
     GpuDevice* gpu = renderer->gpu;
     RenderBlackboard& render_blackboard = *context.render_blackboard;
 
-    ShaderReflectionInfo* reflection_info = renderer->get_shader_reflection( light_scattering_pipeline.pipeline );
-    DescriptorSetLayoutHandle light_scattering_layout = gpu->get_descriptor_set_layout( light_scattering_pipeline.pipeline, k_material_descriptor_set_index );
+    ShaderReflectionInfo* reflection_info = renderer->get_shader_reflection( light_scattering_pipeline.any() );
+    DescriptorSetLayoutHandle light_scattering_layout = gpu->get_descriptor_set_layout( light_scattering_pipeline.any(), k_material_descriptor_set_index );
     DescriptorSetBinder descriptors;
 
     for ( u32 i = 0; i < k_max_frames; ++i ) {
         gpu->destroy_descriptor_set( light_scattering_descriptor_set[ i ] );
-        gpu->destroy_descriptor_set( light_scattering_descriptor_set_slang[ i ] );
     }
 
     u32 constants_index = renderer->get_binding_index( reflection_info, "VolumetricFogConstants" );
@@ -760,21 +642,7 @@ void VolumetricFogPass::create_descriptors( FrameGraphResourceContext& context )
         descriptors.dynamic_buffers.push( { constants_index, sizeof( GpuVolumetricFogConstants ) } );
         descriptors.name = "vol_fog_scattering_ds";
 
-        light_scattering_descriptor_set[ i ] = renderer->create_descriptor_set( descriptors, reflection_info, light_scattering_pipeline.pipeline, i, render_blackboard );
-    }
-
-    reflection_info = renderer->get_shader_reflection( light_scattering_pipeline_slang.pipeline );
-    light_scattering_layout = gpu->get_descriptor_set_layout( light_scattering_pipeline_slang.pipeline, k_material_descriptor_set_index );
-
-    for ( u32 i = 0; i < k_max_frames; ++i ) {
-
-        gpu->destroy_descriptor_set( light_scattering_descriptor_set_slang[ i ] );
-
-        descriptors.reset();
-        descriptors.dynamic_buffers.push( { constants_index, sizeof( GpuVolumetricFogConstants ) } );
-        descriptors.name = "vol_fog_scattering_slang_ds";
-
-        light_scattering_descriptor_set_slang[ i ] = renderer->create_descriptor_set( descriptors, reflection_info, light_scattering_pipeline_slang.pipeline, i, render_blackboard );
+        light_scattering_descriptor_set[ i ] = renderer->create_descriptor_set( descriptors, reflection_info, light_scattering_pipeline.any(), i, render_blackboard );
     }
 }
 

@@ -7,18 +7,17 @@ namespace raptor {
 static ShaderCompilationCreation scc_mesh_gbuffer_no_cull = {
     .stages = {
         ShaderCompilationStage{
-            .source_file_path = "gbuffer.glsl",
+            .source = { .glsl = "gbuffer.glsl" },
             .headers = { "platform.h", "scene.h", "mesh.h" },
             .type = VK_SHADER_STAGE_VERTEX_BIT,
         },
         ShaderCompilationStage{
-            .source_file_path = "gbuffer.glsl",
+            .source = { .glsl = "gbuffer.glsl" },
             .headers = { "platform.h", "scene.h", "mesh.h" },
             .type = VK_SHADER_STAGE_FRAGMENT_BIT,
         },
     },
     .name = "mesh_gbuffer_no_cull",
-    .slang_input = 0,
 };
 
 static PipelineCreation pc_mesh_gbuffer_no_cull = {
@@ -58,18 +57,17 @@ static PipelineCreation pc_mesh_gbuffer_no_cull = {
 static ShaderCompilationCreation scc_mesh_gbuffer_cull = {
     .stages = {
         ShaderCompilationStage{
-            .source_file_path = "gbuffer.glsl",
+            .source = { .glsl = "gbuffer.glsl" },
             .headers = { "platform.h", "scene.h", "mesh.h" },
             .type = VK_SHADER_STAGE_VERTEX_BIT,
         },
         ShaderCompilationStage{
-            .source_file_path = "gbuffer.glsl",
+            .source = { .glsl = "gbuffer.glsl" },
             .headers = { "platform.h", "scene.h", "mesh.h" },
             .type = VK_SHADER_STAGE_FRAGMENT_BIT,
         },
     },
     .name = "mesh_gbuffer_cull",
-    .slang_input = 0,
 };
 
 static PipelineCreation pc_mesh_gbuffer_cull = {
@@ -109,18 +107,17 @@ static PipelineCreation pc_mesh_gbuffer_cull = {
 static ShaderCompilationCreation scc_mesh_gbuffer_skinning = {
     .stages = {
         ShaderCompilationStage{
-            .source_file_path = "glsl/skinning.glsl",
+            .source = { .glsl = "glsl/skinning.glsl" },
             // .headers = { "platform.h", "scene.h", "mesh.h" },
             .type = VK_SHADER_STAGE_VERTEX_BIT,
         },
         ShaderCompilationStage{
-            .source_file_path = "glsl/meshlet.glsl",
+            .source = { .glsl = "glsl/meshlet.glsl" },
             // .headers = { "platform.h", "scene.h", "mesh.h" },
             .type = VK_SHADER_STAGE_FRAGMENT_BIT,
         },
     },
     .name = "gbuffer_skinning",
-    .slang_input = 0,
 };
 
 static PipelineCreation pc_mesh_gbuffer_skinning = {
@@ -162,18 +159,17 @@ static PipelineCreation pc_mesh_gbuffer_skinning = {
 static ShaderCompilationCreation scc_mesh_transparent_no_cull = {
     .stages = {
         ShaderCompilationStage{
-            .source_file_path = "transparent.glsl",
+            .source = { .glsl = "transparent.glsl" },
             .headers = { "platform.h", "scene.h", "mesh.h" },
             .type = VK_SHADER_STAGE_VERTEX_BIT,
         },
         ShaderCompilationStage{
-            .source_file_path = "transparent.glsl",
+            .source = { .glsl = "transparent.glsl" },
             .headers = { "platform.h", "scene.h", "mesh.h", "lighting.h" },
             .type = VK_SHADER_STAGE_FRAGMENT_BIT,
         },
     },
     .name = "mesh_transparent_no_cull",
-    .slang_input = 0,
 };
 
 static PipelineCreation pc_mesh_transparent_no_cull = {
@@ -228,18 +224,17 @@ static PipelineCreation pc_mesh_transparent_no_cull = {
 static ShaderCompilationCreation scc_mesh_transparent_cull = {
     .stages = {
         ShaderCompilationStage{
-            .source_file_path = "transparent.glsl",
+            .source = { .glsl = "transparent.glsl" },
             .headers = { "platform.h", "scene.h", "mesh.h" },
             .type = VK_SHADER_STAGE_VERTEX_BIT,
         },
         ShaderCompilationStage{
-            .source_file_path = "transparent.glsl",
+            .source = { .glsl = "transparent.glsl" },
             .headers = { "platform.h", "scene.h", "mesh.h", "lighting.h" },
             .type = VK_SHADER_STAGE_FRAGMENT_BIT,
         },
     },
     .name = "mesh_transparent_cull",
-    .slang_input = 0,
 };
 
 static PipelineCreation pc_mesh_transparent_cull = {
@@ -294,18 +289,17 @@ static PipelineCreation pc_mesh_transparent_cull = {
 static ShaderCompilationCreation scc_mesh_transparent_skinning_no_cull = {
     .stages = {
         ShaderCompilationStage{
-            .source_file_path = "skinning.glsl",
+            .source = { .glsl = "skinning.glsl" },
             .headers = { "platform.h", "scene.h", "mesh.h" },
             .type = VK_SHADER_STAGE_VERTEX_BIT,
         },
         ShaderCompilationStage{
-            .source_file_path = "transparent.glsl",
+            .source = { .glsl = "transparent.glsl" },
             .headers = { "platform.h", "scene.h", "mesh.h", "lighting.h" },
             .type = VK_SHADER_STAGE_FRAGMENT_BIT,
         },
     },
     .name = "mesh_transparent_skinning_no_cull",
-    .slang_input = 0,
 };
 
 static PipelineCreation pc_mesh_transparent_skinning_no_cull = {

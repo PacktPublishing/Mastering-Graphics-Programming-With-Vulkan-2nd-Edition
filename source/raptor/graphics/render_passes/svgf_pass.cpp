@@ -167,7 +167,6 @@ void SVGFGuideDownsamplePass::declare_frame_graph_node( FrameGraphResourceContex
                         .scale_width = texture_scale,
                         .scale_height = texture_scale,
                         .format = VK_FORMAT_R16G16B16A16_SFLOAT,
-                        .flags = TextureFlags::Compute_mask,
                         .compute = true
                     }
                 },
@@ -182,7 +181,6 @@ void SVGFGuideDownsamplePass::declare_frame_graph_node( FrameGraphResourceContex
                         .scale_width = texture_scale,
                         .scale_height = texture_scale,
                         .format = VK_FORMAT_R32_UINT,
-                        .flags = TextureFlags::Compute_mask,
                         .compute = true
                     }
                 },
@@ -197,7 +195,6 @@ void SVGFGuideDownsamplePass::declare_frame_graph_node( FrameGraphResourceContex
                         .scale_width = texture_scale,
                         .scale_height = texture_scale,
                         .format = VK_FORMAT_R16G16_SFLOAT,
-                        .flags = TextureFlags::Compute_mask,
                         .compute = true
                     }
                 },
@@ -212,7 +209,6 @@ void SVGFGuideDownsamplePass::declare_frame_graph_node( FrameGraphResourceContex
                         .scale_width = texture_scale,
                         .scale_height = texture_scale,
                         .format = VK_FORMAT_R16G16_SFLOAT,
-                        .flags = TextureFlags::Compute_mask,
                         .compute = true
                     }
                 },
@@ -227,7 +223,6 @@ void SVGFGuideDownsamplePass::declare_frame_graph_node( FrameGraphResourceContex
                         .scale_width = texture_scale,
                         .scale_height = texture_scale,
                         .format = VK_FORMAT_R16G16_SFLOAT,
-                        .flags = TextureFlags::Compute_mask,
                         .compute = true
                     }
                 },
@@ -257,7 +252,7 @@ void SVGFGuideDownsamplePass::update_psos( FrameGraphResourceContext& context, P
         {
         .stages = {
             {
-                .source_file_path = "glsl/svgf.glsl",
+                .source = { .glsl = "glsl/svgf.glsl" },
                 .type = VK_SHADER_STAGE_COMPUTE_BIT,
             },
         },
@@ -273,6 +268,8 @@ void SVGFGuideDownsamplePass::update_psos( FrameGraphResourceContext& context, P
 }
 
 void SVGFGuideDownsamplePass::render( FrameGraphRenderContext& context ) {
+    const ShaderLanguage language = context.render_config->shader_language();
+
     if ( !enabled ) {
         return;
     }
@@ -280,7 +277,7 @@ void SVGFGuideDownsamplePass::render( FrameGraphRenderContext& context ) {
     CommandBuffer* gpu_commands = context.gpu_commands;
     RenderBlackboard& render_blackboard = *context.render_blackboard;
 
-    gpu_commands->bind_pipeline( pipeline.pipeline );
+    gpu_commands->bind_pipeline( pipeline.active( language ) );
 
     SVGFPushConstants push_constants;
     push_constants.step_size = 0;
@@ -288,7 +285,7 @@ void SVGFGuideDownsamplePass::render( FrameGraphRenderContext& context ) {
     push_constants.sigma_n = 0.0f;
     push_constants.sigma_z = 0.0f;
 
-    gpu_commands->push_constants( pipeline.pipeline, 0, sizeof( SVGFPushConstants ), &push_constants );
+    gpu_commands->push_constants( pipeline.active( language ), 0, sizeof( SVGFPushConstants ), &push_constants );
 
     gpu_commands->bind_descriptor_set( { renderer->gpu->bindless_descriptor_set, descriptor_set },
         { render_blackboard.scene_cb_offset, constants_offset } );
@@ -381,13 +378,13 @@ void SVGFGuideDownsamplePass::create_descriptors( FrameGraphResourceContext& con
     GpuDevice* gpu = renderer->gpu;
     RenderBlackboard& render_blackboard = *context.render_blackboard;
 
-    ShaderReflectionInfo* reflection_info = renderer->get_shader_reflection( pipeline.pipeline );
+    ShaderReflectionInfo* reflection_info = renderer->get_shader_reflection( pipeline.any() );
 
     DescriptorSetBinder descriptors;
     descriptors.dynamic_buffers.push( { 40, sizeof( SVGFConstants ) } );
     descriptors.name = "svgf_guide_downsample_ds";
 
-    descriptor_set = renderer->create_descriptor_set( descriptors, reflection_info, pipeline.pipeline, 0, render_blackboard );
+    descriptor_set = renderer->create_descriptor_set( descriptors, reflection_info, pipeline.any(), 0, render_blackboard );
 }
 
 // SVGFAccumulationPass ///////////////////////////////////////////////////////////
@@ -437,7 +434,6 @@ void SVGFAccumulationPass::declare_frame_graph_node( FrameGraphResourceContext& 
                         .scale_width = texture_scale,
                         .scale_height = texture_scale,
                         .format = VK_FORMAT_R16G16B16A16_SFLOAT,
-                        .flags = TextureFlags::Compute_mask,
                         .compute = true
                     }
                 },
@@ -450,7 +446,6 @@ void SVGFAccumulationPass::declare_frame_graph_node( FrameGraphResourceContext& 
                         .scale_width = texture_scale,
                         .scale_height = texture_scale,
                         .format = VK_FORMAT_R16G16B16A16_SFLOAT,
-                        .flags = TextureFlags::Compute_mask,
                         .compute = true
                     }
                 },
@@ -462,8 +457,7 @@ void SVGFAccumulationPass::declare_frame_graph_node( FrameGraphResourceContext& 
                     .texture = {
                         .scale_width = texture_scale,
                         .scale_height = texture_scale,
-                        .format = VK_FORMAT_R16G16_SFLOAT,
-                        .flags = TextureFlags::Compute_mask,
+                        .format = VK_FORMAT_R32G32_SFLOAT,
                         .compute = true
                     }
                 },
@@ -475,8 +469,7 @@ void SVGFAccumulationPass::declare_frame_graph_node( FrameGraphResourceContext& 
                     .texture = {
                         .scale_width = texture_scale,
                         .scale_height = texture_scale,
-                        .format = VK_FORMAT_R16G16_SFLOAT,
-                        .flags = TextureFlags::Compute_mask,
+                        .format = VK_FORMAT_R32G32_SFLOAT,
                         .compute = true
                     }
                 },
@@ -555,7 +548,7 @@ void SVGFAccumulationPass::update_psos( FrameGraphResourceContext& context, Pipe
         {
         .stages = {
             {
-                .source_file_path = "glsl/svgf.glsl",
+                .source = { .glsl = "glsl/svgf.glsl" },
                 .type = VK_SHADER_STAGE_COMPUTE_BIT,
             },
         },
@@ -577,6 +570,8 @@ void SVGFAccumulationPass::pre_render( FrameGraphRenderContext& context ) {
 }
 
 void SVGFAccumulationPass::render( FrameGraphRenderContext& context ) {
+    const ShaderLanguage language = context.render_config->shader_language();
+
     if ( !enabled ) {
         return;
     }
@@ -589,7 +584,7 @@ void SVGFAccumulationPass::render( FrameGraphRenderContext& context ) {
         return;
     }
 
-    gpu_commands->bind_pipeline( pipeline.pipeline );
+    gpu_commands->bind_pipeline( pipeline.active( language ) );
 
     SVGFPushConstants push_constants;
     push_constants.step_size = reset_history;
@@ -597,7 +592,7 @@ void SVGFAccumulationPass::render( FrameGraphRenderContext& context ) {
         reset_history = false;
     }
 
-    gpu_commands->push_constants( pipeline.pipeline, 0, sizeof( SVGFPushConstants ), &push_constants );
+    gpu_commands->push_constants( pipeline.active( language ), 0, sizeof( SVGFPushConstants ), &push_constants );
 
     gpu_commands->bind_descriptor_set(
         { renderer->gpu->bindless_descriptor_set, descriptor_set },
@@ -664,13 +659,19 @@ void SVGFAccumulationPass::on_resize(FrameGraphResourceContext& context, u32 new
 static void create_2d_texture_and_add_to_framegraph( GpuDevice& gpu, FrameGraph* frame_graph, u32 width, u32 height,
     VkFormat format, cstring texture_name, cstring graph_name, ImageHandle& out_texture, ImageViewHandle& out_image_view ) {
 
-    ImageCreation texture_creation{ };
-    texture_creation.set_size( width, height, 1 )
-                    .set_format_type( format, TextureType::Texture2D )
-                    .set_mips( 1 )
-                    .set_layers( 1 )
-                    .set_flags( TextureFlags::Compute_mask )
-                    .set_name( texture_name );
+    ImageCreation texture_creation{
+        .image_type        = VK_IMAGE_TYPE_2D,
+        .format            = format,
+        .width             = width,
+        .height            = height,
+        .depth             = 1,
+        .mip_level_count   = 1,
+        .array_layer_count = 1,
+        .usage             = VK_IMAGE_USAGE_SAMPLED_BIT |
+                             VK_IMAGE_USAGE_STORAGE_BIT |
+                             VK_IMAGE_USAGE_TRANSFER_DST_BIT |
+                             VK_IMAGE_USAGE_TRANSFER_SRC_BIT,
+        .name              = texture_name };
     out_texture = gpu.create_image( texture_creation );
 
     out_image_view = gpu.create_image_view( {
@@ -710,9 +711,9 @@ void SVGFAccumulationPass::create_gpu_resources( FrameGraphResourceContext& cont
     const u32 adjusted_height = ceilu32( render_blackboard.render_height * texture_scale );
 
     create_2d_texture_and_add_to_framegraph( gpu, frame_graph, adjusted_width, adjusted_height, VK_FORMAT_R16G16B16A16_SFLOAT, "reflections_history", "reflections_history", output.reflections_history_texture, output.reflections_history_image_view );
-    create_2d_texture_and_add_to_framegraph( gpu, frame_graph, adjusted_width, adjusted_height, VK_FORMAT_R16G16_SFLOAT, "reflections_moments_history", "reflections_moments_history", output.reflections_moments_history_texture, output.reflections_moments_history_image_view );
+    create_2d_texture_and_add_to_framegraph( gpu, frame_graph, adjusted_width, adjusted_height, VK_FORMAT_R32G32_SFLOAT, "reflections_moments_history", "reflections_moments_history", output.reflections_moments_history_texture, output.reflections_moments_history_image_view );
     create_2d_texture_and_add_to_framegraph( gpu, frame_graph, adjusted_width, adjusted_height, VK_FORMAT_R16G16B16A16_SFLOAT, "restirgi_history", "restirgi_history", output.restirgi_history_texture, output.restirgi_history_image_view );
-    create_2d_texture_and_add_to_framegraph( gpu, frame_graph, adjusted_width, adjusted_height, VK_FORMAT_R16G16_SFLOAT, "restirgi_moments_history", "restirgi_moments_history", output.restirgi_moments_history_texture, output.restirgi_moments_history_image_view );
+    create_2d_texture_and_add_to_framegraph( gpu, frame_graph, adjusted_width, adjusted_height, VK_FORMAT_R32G32_SFLOAT, "restirgi_moments_history", "restirgi_moments_history", output.restirgi_moments_history_texture, output.restirgi_moments_history_image_view );
     create_2d_texture_and_add_to_framegraph( gpu, frame_graph, adjusted_width, adjusted_height, VK_FORMAT_R16G16B16A16_SFLOAT, "normals_history", "normals_history", output.last_frame_normals_texture, output.last_frame_normals_image_view );
     create_2d_texture_and_add_to_framegraph( gpu, frame_graph, adjusted_width, adjusted_height, VK_FORMAT_R16G16_SFLOAT, "linear_depth_history", "linear_depth_history", output.last_frame_linear_depth_texture, output.last_frame_linear_depth_image_view );
     create_2d_texture_and_add_to_framegraph( gpu, frame_graph, adjusted_width, adjusted_height, VK_FORMAT_R32_UINT, "mesh_id_history", "mesh_id_history", output.last_frame_mesh_id_texture, output.last_frame_mesh_id_image_view );
@@ -824,13 +825,13 @@ void SVGFAccumulationPass::create_descriptors( FrameGraphResourceContext& contex
     GpuDevice* gpu = renderer->gpu;
     RenderBlackboard& render_blackboard = *context.render_blackboard;
 
-    ShaderReflectionInfo* reflection_info = renderer->get_shader_reflection( pipeline.pipeline );
+    ShaderReflectionInfo* reflection_info = renderer->get_shader_reflection( pipeline.any() );
 
     DescriptorSetBinder descriptors;
     descriptors.dynamic_buffers.push( { 40, sizeof( SVGFDenoiseGpuConstants ) } );
     descriptors.name = "svgf_accumulation_pass_ds";
 
-    descriptor_set = renderer->create_descriptor_set( descriptors, reflection_info, pipeline.pipeline, 0, render_blackboard );
+    descriptor_set = renderer->create_descriptor_set( descriptors, reflection_info, pipeline.any(), 0, render_blackboard );
 }
 
 // SVGFVariancePass ///////////////////////////////////////////////////////////
@@ -883,7 +884,7 @@ void SVGFVariancePass::declare_frame_graph_node( FrameGraphResourceContext& cont
                         .height = ceilu32( render_blackboard.render_height * texture_scale ),
                         .scale_width = texture_scale,
                         .scale_height = texture_scale,
-                        .format = VK_FORMAT_R16G16B16A16_SFLOAT,
+                        .format = VK_FORMAT_R32_SFLOAT,
                         .compute = true
                     }
                 },
@@ -897,7 +898,7 @@ void SVGFVariancePass::declare_frame_graph_node( FrameGraphResourceContext& cont
                         .height = ceilu32( render_blackboard.render_height * texture_scale ),
                         .scale_width = texture_scale,
                         .scale_height = texture_scale,
-                        .format = VK_FORMAT_R16G16B16A16_SFLOAT,
+                        .format = VK_FORMAT_R32_SFLOAT,
                         .compute = true,
                     }
                 },
@@ -927,7 +928,7 @@ void SVGFVariancePass::update_psos( FrameGraphResourceContext& context, Pipeline
         {
         .stages = {
             {
-                .source_file_path = "glsl/svgf.glsl",
+                .source = { .glsl = "glsl/svgf.glsl" },
                 .type = VK_SHADER_STAGE_COMPUTE_BIT,
             },
         },
@@ -949,6 +950,8 @@ void SVGFVariancePass::pre_render( FrameGraphRenderContext& context ) {
 }
 
 void SVGFVariancePass::render( FrameGraphRenderContext& context ) {
+    const ShaderLanguage language = context.render_config->shader_language();
+
     if ( !enabled ) {
         return;
     }
@@ -966,9 +969,9 @@ void SVGFVariancePass::render( FrameGraphRenderContext& context ) {
     push_constants.sigma_z = context.render_config->raytraced_reflections.wavelet_sigma_z;
 
 
-    gpu_commands->bind_pipeline( pipeline.pipeline );
+    gpu_commands->bind_pipeline( pipeline.active( language ) );
 
-    gpu_commands->push_constants( pipeline.pipeline, 0, sizeof( SVGFPushConstants ), &push_constants );
+    gpu_commands->push_constants( pipeline.active( language ), 0, sizeof( SVGFPushConstants ), &push_constants );
 
     gpu_commands->bind_descriptor_set(
         { renderer->gpu->bindless_descriptor_set, descriptor_set },
@@ -1070,13 +1073,13 @@ void SVGFVariancePass::create_descriptors( FrameGraphResourceContext& context ) 
     GpuDevice* gpu = renderer->gpu;
     RenderBlackboard& render_blackboard = *context.render_blackboard;
 
-    ShaderReflectionInfo* reflection_info = renderer->get_shader_reflection( pipeline.pipeline );
+    ShaderReflectionInfo* reflection_info = renderer->get_shader_reflection( pipeline.any() );
 
     DescriptorSetBinder descriptors;
     descriptors.dynamic_buffers.push( { 40, sizeof( SVGFDenoiseGpuConstants ) } );
     descriptors.name = "svgf_variance_ds";
 
-    descriptor_set = renderer->create_descriptor_set( descriptors, reflection_info, pipeline.pipeline, 0, render_blackboard );
+    descriptor_set = renderer->create_descriptor_set( descriptors, reflection_info, pipeline.any(), 0, render_blackboard );
 }
 
 // SVGFWaveletPass ///////////////////////////////////////////////////////////
@@ -1157,7 +1160,7 @@ void SVGFWaveletPass::update_psos( FrameGraphResourceContext& context, PipelineU
         {
         .stages = {
             {
-                .source_file_path = "glsl/svgf.glsl",
+                .source = { .glsl = "glsl/svgf.glsl" },
                 .type = VK_SHADER_STAGE_COMPUTE_BIT,
             },
         },
@@ -1179,6 +1182,8 @@ void SVGFWaveletPass::pre_render( FrameGraphRenderContext& context ) {
 }
 
 void SVGFWaveletPass::render( FrameGraphRenderContext& context ) {
+    const ShaderLanguage language = context.render_config->shader_language();
+
     if ( !enabled ) {
         return;
     }
@@ -1191,14 +1196,21 @@ void SVGFWaveletPass::render( FrameGraphRenderContext& context ) {
         return;
     }
 
-    gpu_commands->bind_pipeline( pipeline.pipeline );
+    gpu_commands->bind_pipeline( pipeline.active( language ) );
 
     SVGFPushConstants push_constants;
     push_constants.sigma_l = context.render_config->raytraced_reflections.wavelet_sigma_l;
     push_constants.sigma_n = context.render_config->raytraced_reflections.wavelet_sigma_n;
     push_constants.sigma_z = context.render_config->raytraced_reflections.wavelet_sigma_z;
 
+    StaticString64 name_str;
+
     for ( u32 i = 0; i < k_num_passes; ++i ) {
+
+        name_str.clear();
+        name_str.append( "Wavelet pass %d", i );
+        gpu_commands->push_marker( name_str.c_str() );
+
         gpu_commands->bind_descriptor_set(
             { renderer->gpu->bindless_descriptor_set, descriptor_set[ i ] },
             { render_blackboard.scene_cb_offset, constant_offsets[ i ] } );
@@ -1276,7 +1288,7 @@ void SVGFWaveletPass::render( FrameGraphRenderContext& context ) {
 
         push_constants.step_size = 1 << i;
 
-        gpu_commands->push_constants( pipeline.pipeline, 0, sizeof( SVGFPushConstants ), &push_constants );
+        gpu_commands->push_constants( pipeline.active( language ), 0, sizeof( SVGFPushConstants ), &push_constants );
         gpu_commands->dispatch( raptor::ceilu32( render_blackboard.render_width * texture_scale / 8.0f ), raptor::ceilu32( render_blackboard.render_height * texture_scale / 8.0f ), 1 );
 
         if ( i == 0 ) {
@@ -1285,8 +1297,11 @@ void SVGFWaveletPass::render( FrameGraphRenderContext& context ) {
             gpu_commands->copy_image( restirgi_ping_pong_color_image, accumulation_input.restirgi_history_texture,
                 { VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, VK_ACCESS_2_SHADER_READ_BIT, VK_IMAGE_LAYOUT_READ_ONLY_OPTIMAL } );
         }
+
+        gpu_commands->pop_marker();
     }
 
+    gpu_commands->push_marker( "Copy images" );
     // Current half-res guide -> previous-frame history guide
     gpu_commands->copy_image( guide.normals_texture,
         accumulation_input.last_frame_normals_texture,
@@ -1318,6 +1333,7 @@ void SVGFWaveletPass::render( FrameGraphRenderContext& context ) {
         { VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
           VK_ACCESS_2_SHADER_READ_BIT,
           VK_IMAGE_LAYOUT_READ_ONLY_OPTIMAL } );
+    gpu_commands->pop_marker();
 }
 
 void SVGFWaveletPass::on_resize(FrameGraphResourceContext& context, u32 new_width, u32 new_height ) {
@@ -1371,8 +1387,17 @@ void SVGFWaveletPass::create_gpu_resources( FrameGraphResourceContext& context )
     create_2d_texture_and_add_to_framegraph( gpu, frame_graph, adjusted_width, adjusted_height, VK_FORMAT_R16G16B16A16_SFLOAT, "reflections_denoised_output", "reflections_denoised_output", reflections_ping_pong_color_image, reflections_ping_pong_color_image_view );
     create_2d_texture_and_add_to_framegraph( gpu, frame_graph, adjusted_width, adjusted_height, VK_FORMAT_R16G16B16A16_SFLOAT, "restirgi_denoised_output", "restirgi_denoised_output", restirgi_ping_pong_color_image, restirgi_ping_pong_color_image_view );
 
-    ImageCreation texture_creation{ };
-    texture_creation.set_size( adjusted_width, adjusted_height, 1 ).set_format_type( VK_FORMAT_R32_SFLOAT, TextureType::Texture2D ).set_flags( TextureFlags::Compute_mask ).set_name( "reflections_ping_pong_variance_texture" );
+    ImageCreation texture_creation{
+        .image_type = VK_IMAGE_TYPE_2D,
+        .format     = VK_FORMAT_R32_SFLOAT,
+        .width      = adjusted_width,
+        .height     = adjusted_height,
+        .depth      = 1,
+        .usage      = VK_IMAGE_USAGE_SAMPLED_BIT |
+                      VK_IMAGE_USAGE_STORAGE_BIT |
+                      VK_IMAGE_USAGE_TRANSFER_DST_BIT |
+                      VK_IMAGE_USAGE_TRANSFER_SRC_BIT,
+        .name       = "reflections_ping_pong_variance_texture" };
     reflections_ping_pong_variance_image = gpu.create_image( texture_creation );
 
     reflections_ping_pong_variance_image_view = gpu.create_image_view( {
@@ -1382,7 +1407,7 @@ void SVGFWaveletPass::create_gpu_resources( FrameGraphResourceContext& context )
 
     gpu.add_image_view_to_bindless( reflections_ping_pong_variance_image_view );
 
-    texture_creation.set_name( "restirgi_ping_pong_variance_texture" );
+    texture_creation.name = "restirgi_ping_pong_variance_texture";
     restirgi_ping_pong_variance_image = gpu.create_image( texture_creation );
 
     restirgi_ping_pong_variance_image_view = gpu.create_image_view( {
@@ -1471,7 +1496,7 @@ void SVGFWaveletPass::create_descriptors( FrameGraphResourceContext& context ) {
     GpuDevice* gpu = renderer->gpu;
     RenderBlackboard& render_blackboard = *context.render_blackboard;
 
-    ShaderReflectionInfo* reflection_info = renderer->get_shader_reflection( pipeline.pipeline );
+    ShaderReflectionInfo* reflection_info = renderer->get_shader_reflection( pipeline.any() );
 
     DescriptorSetBinder descriptors;
 
@@ -1483,7 +1508,7 @@ void SVGFWaveletPass::create_descriptors( FrameGraphResourceContext& context ) {
         descriptors.dynamic_buffers.push( { 40, sizeof( SVGFDenoiseGpuConstants ) } );
         descriptors.name = "svgf_wavelet_ds";
 
-        descriptor_set[ i ] = renderer->create_descriptor_set( descriptors, reflection_info, pipeline.pipeline, 0, render_blackboard );
+        descriptor_set[ i ] = renderer->create_descriptor_set( descriptors, reflection_info, pipeline.any(), 0, render_blackboard );
     }
 }
 

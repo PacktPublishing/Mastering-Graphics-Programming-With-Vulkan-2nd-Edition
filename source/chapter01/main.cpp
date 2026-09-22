@@ -526,8 +526,18 @@ int main( int argc, char** argv ) {
             ++mip_levels;
         }
 
-        ImageCreation tc;
-        tc.set_data( image_data ).set_format_type( VK_FORMAT_R8G8B8A8_UNORM, TextureType::Texture2D ).set_flags( 0 ).set_size( ( u16 )width, ( u16 )height, 1 ).set_name( image.uri ).set_mips( mip_levels );
+        ImageCreation tc{
+            .image_type      = VK_IMAGE_TYPE_2D,
+            .format          = VK_FORMAT_R8G8B8A8_UNORM,
+            .width           = ( u32 )width,
+            .height          = ( u32 )height,
+            .depth           = 1,
+            .mip_level_count = mip_levels,
+            .usage           = VK_IMAGE_USAGE_SAMPLED_BIT |
+                               VK_IMAGE_USAGE_TRANSFER_DST_BIT |
+                               VK_IMAGE_USAGE_TRANSFER_SRC_BIT,
+            .initial_data    = image_data,
+            .name            = image.uri };
         TextureResource* tr = renderer.create_texture( tc );
         RASSERT( tr != nullptr );
 
@@ -536,7 +546,16 @@ int main( int argc, char** argv ) {
 
     ImageCreation texture_creation{ };
     u32 zero_value = 0;
-    texture_creation.set_name( "dummy_texture" ).set_size( 1, 1, 1 ).set_format_type( VK_FORMAT_R8G8B8A8_UNORM, TextureType::Texture2D ).set_flags( 1 ).set_data( &zero_value );
+    texture_creation.image_type   = VK_IMAGE_TYPE_2D;
+    texture_creation.format       = VK_FORMAT_R8G8B8A8_UNORM;
+    texture_creation.width        = 1;
+    texture_creation.height       = 1;
+    texture_creation.depth        = 1;
+    texture_creation.usage        = VK_IMAGE_USAGE_SAMPLED_BIT |
+                                    VK_IMAGE_USAGE_TRANSFER_DST_BIT |
+                                    VK_IMAGE_USAGE_TRANSFER_SRC_BIT;
+    texture_creation.initial_data = &zero_value;
+    texture_creation.name         = "dummy_texture";
     ImageHandle dummy_texture = gpu.create_image( texture_creation );
     ImageViewHandle dummy_texture_view = gpu.create_image_view( {
         .parent_image = dummy_texture, .view_type = VK_IMAGE_VIEW_TYPE_2D,
@@ -748,7 +767,7 @@ int main( int argc, char** argv ) {
             bool result = ShaderCompiler::compile_and_cache_shader( shader_compilation_stage, spirv_bytecode, renderer.resource_cache.binary_data_folder,
                                                                     &scratch_allocator, "default_technique",
                                                                     shader_compilation_creation.name.data, nullptr, nullptr, false,
-                                                                    shader_compilation_creation.slang_input, false, shader_changed );
+                                                                    ShaderLanguage::Glsl, false, shader_changed );
             if ( !result ) {
                 RASSERTM( false, "Failed to compile shader stage %s", shader_compilation_creation.name );
                 exit( -1 );

@@ -104,6 +104,9 @@ layout ( std140, set = MATERIAL_SET, binding = 1 ) uniform LightingConstants {
     uint        output_width;
     uint        output_height;
     uint        emissive_index;
+
+    uint        debug_texture_index;
+    uint        _pad[ 3 ];
 };
 
 layout (local_size_x = 8, local_size_y = 8, local_size_z = 1) in;
@@ -195,7 +198,7 @@ void main() {
             imageStore(global_images_2d[light_cb.debug_texture_index], pos.xy, vec4(current_depth, current_depth2, closest_depth, 1));
         }
         else if ( light_cb.debug_modes == 7 ) {
-            
+
             Light light = lights[ 0 ];
             const vec3 position_to_light = pixel_world_position - light.world_position;
 
@@ -228,6 +231,8 @@ void main() {
             vec3 indirect_irradiance = textureLod(global_textures[nonuniformEXT(light_cb.indirect_lighting_texture_index)], screen_uv, 0).rgb;
             color.rgb = indirect_irradiance * base_colour.rgb;
         }
+
+        // color = vec4( texelFetch(global_textures[debug_texture_index], pos.xy, 0).rgb, 1.0 );
     }
 
     imageStore(global_images_2d[output_index], pos.xy, color);

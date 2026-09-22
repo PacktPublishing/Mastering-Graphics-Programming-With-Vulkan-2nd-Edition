@@ -12,6 +12,7 @@ struct RayTracingTestGpuData {
 }; // RayTracingTestGpuData
 
 void RayTracingTestPass::render( FrameGraphRenderContext& context ) {
+    const ShaderLanguage language = context.render_config->shader_language();
 
     if ( !enabled )
         return;
@@ -30,27 +31,27 @@ void RayTracingTestPass::render( FrameGraphRenderContext& context ) {
     if ( needs_resources_creation ) {
 
         GpuDevice& gpu = *renderer->gpu;
-        DescriptorSetLayoutHandle layout = gpu.get_descriptor_set_layout( pipeline.pipeline, k_material_descriptor_set_index );
+        DescriptorSetLayoutHandle layout = gpu.get_descriptor_set_layout( pipeline.any(), k_material_descriptor_set_index );
         DescriptorSetBinder descriptors;
 
-        ShaderReflectionInfo* shader_reflection = renderer->get_shader_reflection( pipeline.pipeline );
+        ShaderReflectionInfo* shader_reflection = renderer->get_shader_reflection( pipeline.any() );
         descriptors.reset();
         descriptors.dynamic_buffers.push( { renderer->get_binding_index( shader_reflection, "rayParams" ), sizeof( RayTracingTestGpuData ) } );
         descriptors.name = "ray_tracing_test_ds";
 
-        descriptor_set = renderer->create_descriptor_set( descriptors, shader_reflection, pipeline.pipeline, 0, render_blackboard );
+        descriptor_set = renderer->create_descriptor_set( descriptors, shader_reflection, pipeline.any(), 0, render_blackboard );
 
         needs_resources_creation = false;
     }
 
-    cb->bind_pipeline( pipeline.pipeline );
+    cb->bind_pipeline( pipeline.active( language ) );
 
     cb->bind_descriptor_set( { renderer->gpu->bindless_descriptor_set, descriptor_set },
                               { render_blackboard.scene_cb_offset, constants_offset } );
 
     FrameGraphResource* output_resource = context.frame_graph->get_resource( "ray_tracing_test_output" );
 
-    cb->trace_rays( pipeline.pipeline, output_resource->resource_info.texture.width, output_resource->resource_info.texture.height, 1 );
+    cb->trace_rays( pipeline.active( language ), output_resource->resource_info.texture.width, output_resource->resource_info.texture.height, 1 );
 }
 
 void RayTracingTestPass::declare_frame_graph_node( FrameGraphResourceContext& context ) {
@@ -87,20 +88,19 @@ void RayTracingTestPass::declare_frame_graph_node( FrameGraphResourceContext& co
 ShaderCompilationCreation scc_ray_tracing_test = {
     .stages = {
         {
-            .source_file_path = "glsl/ray_tracing.glsl",
+            .source = { .glsl = "glsl/ray_tracing.glsl" },
             .type = VK_SHADER_STAGE_RAYGEN_BIT_KHR,
         },
         {
-            .source_file_path = "glsl/ray_tracing.glsl",
+            .source = { .glsl = "glsl/ray_tracing.glsl" },
             .type = VK_SHADER_STAGE_CLOSEST_HIT_BIT_KHR,
         },
         {
-            .source_file_path = "glsl/ray_tracing.glsl",
+            .source = { .glsl = "glsl/ray_tracing.glsl" },
             .type = VK_SHADER_STAGE_MISS_BIT_KHR,
         },
     },
     .name = "ray_tracing_test_shader",
-    .slang_input = 0,
 };
 
 void RayTracingTestPass::update_psos( FrameGraphResourceContext& context, PipelineUpdatePhase phase ) {

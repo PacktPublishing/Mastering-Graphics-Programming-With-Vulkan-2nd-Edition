@@ -34,23 +34,22 @@ GpuTechniquePassCreation tpc_probe_rt = {
     .shader_compilation = {
         .stages = {
             {
-                .source_file_path = "ddgi.glsl",
+                .source = { .glsl = "ddgi.glsl" },
                 .headers = { "platform.h", "scene.h", "mesh.h", "ddgi.h" },
                 .type = VK_SHADER_STAGE_RAYGEN_BIT_KHR,
             },
             {
-                .source_file_path = "ddgi.glsl",
+                .source = { .glsl = "ddgi.glsl" },
                 .headers = { "platform.h", "scene.h", "mesh.h", "ddgi.h" },
                 .type = VK_SHADER_STAGE_CLOSEST_HIT_BIT_KHR,
             },
             {
-                .source_file_path = "ddgi.glsl",
+                .source = { .glsl = "ddgi.glsl" },
                 .headers = { "platform.h", "ddgi.h" },
                 .type = VK_SHADER_STAGE_MISS_BIT_KHR,
             },
         },
         .name = k_ddgi_step_names[ (u32)DDGISteps::ProbeRaytrace ],
-        .slang_input = 0,
     },
     .pipeline_creation = {
         .name = k_ddgi_step_names[ (u32)DDGISteps::ProbeRaytrace ],
@@ -62,23 +61,23 @@ GpuTechniquePassCreation tpc_probe_rt_slang = {
     .shader_compilation = {
         .stages = {
             {
-                .source_file_path = "slang/ddgi.slang",
+                .source = { .slang = "slang/ddgi.slang" },
                 .headers = { /* no includes in JSON */ },
                 .type = VK_SHADER_STAGE_RAYGEN_BIT_KHR,
             },
             {
-                .source_file_path = "slang/ddgi.slang",
+                .source = { .slang = "slang/ddgi.slang" },
                 .headers = { /* no includes in JSON */ },
                 .type = VK_SHADER_STAGE_CLOSEST_HIT_BIT_KHR,
             },
             {
-                .source_file_path = "slang/ddgi.slang",
+                .source = { .slang = "slang/ddgi.slang" },
                 .headers = { /* no includes in JSON */ },
                 .type = VK_SHADER_STAGE_MISS_BIT_KHR,
             },
         },
         .name = k_ddgi_step_names[ (u32)DDGISteps::ProbeRaytraceSlang ],
-        .slang_input = 1, // language: "slang"
+        // language: "slang"
     },
     .pipeline_creation = {
         .name = k_ddgi_step_names[ (u32)DDGISteps::ProbeRaytraceSlang ],
@@ -90,13 +89,12 @@ GpuTechniquePassCreation tpc_probe_update_irradiance = {
     .shader_compilation = {
         .stages = {
             {
-                .source_file_path = "ddgi.glsl",
+                .source = { .glsl = "ddgi.glsl" },
                 .headers = { "platform.h", "scene.h", "ddgi.h" },
                 .type = VK_SHADER_STAGE_COMPUTE_BIT,
             },
         },
         .name = k_ddgi_step_names[ (u32)DDGISteps::UpdateIrradiance ],
-        .slang_input = 0,
     },
     .pipeline_creation = {
         .name = k_ddgi_step_names[ (u32)DDGISteps::UpdateIrradiance ],
@@ -108,13 +106,12 @@ GpuTechniquePassCreation tpc_probe_update_visibility = {
     .shader_compilation = {
         .stages = {
             {
-                .source_file_path = "ddgi.glsl",
+                .source = { .glsl = "ddgi.glsl" },
                 .headers = { "platform.h", "scene.h", "ddgi.h" },
                 .type = VK_SHADER_STAGE_COMPUTE_BIT,
             },
         },
         .name = k_ddgi_step_names[ (u32)DDGISteps::UpdateVisibility ],
-        .slang_input = 0,
     },
     .pipeline_creation = {
         .name = k_ddgi_step_names[ (u32)DDGISteps::UpdateVisibility ],
@@ -126,13 +123,12 @@ GpuTechniquePassCreation tpc_calculate_probe_offsets = {
     .shader_compilation = {
         .stages = {
             {
-                .source_file_path = "ddgi.glsl",
+                .source = { .glsl = "ddgi.glsl" },
                 .headers = { "platform.h", "scene.h", "ddgi.h" },
                 .type = VK_SHADER_STAGE_COMPUTE_BIT,
             },
         },
         .name = k_ddgi_step_names[ (u32)DDGISteps::CalculateProbeOffsets ],
-        .slang_input = 0,
     },
     .pipeline_creation = {
         .name = k_ddgi_step_names[ (u32)DDGISteps::CalculateProbeOffsets ],
@@ -144,13 +140,12 @@ GpuTechniquePassCreation tpc_calculate_probe_statuses = {
     .shader_compilation = {
         .stages = {
             {
-                .source_file_path = "ddgi.glsl",
+                .source = { .glsl = "ddgi.glsl" },
                 .headers = { "platform.h", "scene.h", "ddgi.h" },
                 .type = VK_SHADER_STAGE_COMPUTE_BIT,
             },
         },
         .name = k_ddgi_step_names[ (u32)DDGISteps::CalculateProbeStatuses ],
-        .slang_input = 0,
     },
     .pipeline_creation = {
         .name = k_ddgi_step_names[ (u32)DDGISteps::CalculateProbeStatuses ],
@@ -162,13 +157,12 @@ GpuTechniquePassCreation tpc_sample_irradiance = {
     .shader_compilation = {
         .stages = {
             {
-                .source_file_path = "ddgi.glsl",
+                .source = { .glsl = "ddgi.glsl" },
                 .headers = { "platform.h", "scene.h", "ddgi.h" },
                 .type = VK_SHADER_STAGE_COMPUTE_BIT,
             },
         },
         .name = k_ddgi_step_names[ (u32)DDGISteps::SampleIrradiance ],
-        .slang_input = 0,
     },
     .pipeline_creation = {
         .name = k_ddgi_step_names[ (u32)DDGISteps::SampleIrradiance ],
@@ -180,18 +174,17 @@ GpuTechniquePassCreation tpc_debug_mesh = {
     .shader_compilation = {
         .stages = {
             {
-                .source_file_path = "ddgi.glsl",
+                .source = { .glsl = "ddgi.glsl" },
                 .headers = { "platform.h", "scene.h", "ddgi.h" },
                 .type = VK_SHADER_STAGE_VERTEX_BIT,
             },
             {
-                .source_file_path = "ddgi.glsl",
+                .source = { .glsl = "ddgi.glsl" },
                 .headers = { "platform.h", "ddgi.h" },
                 .type = VK_SHADER_STAGE_FRAGMENT_BIT,
             },
         },
         .name = k_ddgi_step_names[ (u32)DDGISteps::DebugMesh ],
-        .slang_input = 0,
     },
     .pipeline_creation = {
         .rasterization = {
@@ -217,13 +210,12 @@ GpuTechniquePassCreation tpc_probe_update_irradiance_slang = {
     .shader_compilation = {
         .stages = {
             {
-                .source_file_path = "slang/ddgi.slang",
+                .source = { .slang = "slang/ddgi.slang" },
                 .headers = { /* no includes in JSON */ },
                 .type = VK_SHADER_STAGE_COMPUTE_BIT,
             },
         },
         .name = "probe_update_irradiance_slang",
-        .slang_input = 1,
     },
     .pipeline_creation = {
         .name = "probe_update_irradiance_slang",
@@ -235,13 +227,12 @@ GpuTechniquePassCreation tpc_probe_update_visibility_slang = {
     .shader_compilation = {
         .stages = {
             {
-                .source_file_path = "slang/ddgi.slang",
+                .source = { .slang = "slang/ddgi.slang" },
                 .headers = { /* no includes in JSON */ },
                 .type = VK_SHADER_STAGE_COMPUTE_BIT,
             },
         },
         .name = "probe_update_visibility_slang",
-        .slang_input = 1,
     },
     .pipeline_creation = {
         .name = "probe_update_visibility_slang",
@@ -253,13 +244,12 @@ GpuTechniquePassCreation tpc_calculate_probe_offsets_slang = {
     .shader_compilation = {
         .stages = {
             {
-                .source_file_path = "slang/ddgi.slang",
+                .source = { .slang = "slang/ddgi.slang" },
                 .headers = { /* no includes in JSON */ },
                 .type = VK_SHADER_STAGE_COMPUTE_BIT,
             },
         },
         .name = "calculate_probe_offsets_slang",
-        .slang_input = 1,
     },
     .pipeline_creation = {
         .name = "calculate_probe_offsets_slang",
@@ -271,13 +261,12 @@ GpuTechniquePassCreation tpc_calculate_probe_statuses_slang = {
     .shader_compilation = {
         .stages = {
             {
-                .source_file_path = "slang/ddgi.slang",
+                .source = { .slang = "slang/ddgi.slang" },
                 .headers = { /* no includes in JSON */ },
                 .type = VK_SHADER_STAGE_COMPUTE_BIT,
             },
         },
         .name = "calculate_probe_statuses_slang",
-        .slang_input = 1,
     },
     .pipeline_creation = {
         .name = "calculate_probe_statuses_slang",
@@ -289,13 +278,12 @@ GpuTechniquePassCreation tpc_sample_irradiance_slang = {
     .shader_compilation = {
         .stages = {
             {
-                .source_file_path = "slang/ddgi.slang",
+                .source = { .slang = "slang/ddgi.slang" },
                 .headers = { /* no includes in JSON */ },
                 .type = VK_SHADER_STAGE_COMPUTE_BIT,
             },
         },
         .name = "sample_irradiance_slang",
-        .slang_input = 1,
     },
     .pipeline_creation = {
         .name = "sample_irradiance_slang",
@@ -307,18 +295,17 @@ GpuTechniquePassCreation tpc_debug_mesh_slang = {
     .shader_compilation = {
         .stages = {
             {
-                .source_file_path = "slang/ddgi.slang",
+                .source = { .slang = "slang/ddgi.slang" },
                 .headers = { /* no includes in JSON */ },
                 .type = VK_SHADER_STAGE_VERTEX_BIT,
             },
             {
-                .source_file_path = "slang/ddgi.slang",
+                .source = { .slang = "slang/ddgi.slang" },
                 .headers = { /* no includes in JSON */ },
                 .type = VK_SHADER_STAGE_FRAGMENT_BIT,
             },
         },
         .name = "debug_mesh_slang",
-        .slang_input = 1,
     },
     .pipeline_creation = {
         .rasterization = {
