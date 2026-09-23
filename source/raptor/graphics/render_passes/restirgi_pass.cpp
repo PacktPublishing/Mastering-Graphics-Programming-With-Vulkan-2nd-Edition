@@ -228,6 +228,10 @@ void ReSTIRGIPass::render( FrameGraphRenderContext& context ) {
         descriptors_created = true;
     }
 
+    if ( !context.render_config->restirgi.enabled ) {
+        return;
+    }
+
     const u32 restir_width = ceilu32(render_blackboard.render_width * texture_scale);
     const u32 restir_height = ceilu32(render_blackboard.render_height * texture_scale);
 

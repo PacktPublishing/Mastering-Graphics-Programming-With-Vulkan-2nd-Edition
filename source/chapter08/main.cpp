@@ -14,27 +14,21 @@
 #include "graphics/scene_graph.hpp"
 #include "graphics/frame_renderer.hpp"
 
-#include "graphics/render_passes/meshlet_animation_pass.hpp"
 #include "graphics/render_passes/culling_pass.hpp"
 #include "graphics/render_passes/depth_pyramid_pass.hpp"
 #include "graphics/render_passes/gbuffer_pass.hpp"
 #include "graphics/render_passes/lighting_pass.hpp"
 #include "graphics/render_passes/transparent_pass.hpp"
 #include "graphics/render_passes/debug_pass.hpp"
-#include "graphics/render_passes/pointlight_shadow_pass.hpp"
-#include "graphics/render_passes/volumetric_fog_pass.hpp"
-#include "graphics/render_passes/temporal_anti_aliasing_pass.hpp"
-#include "graphics/render_passes/motion_vector_pass.hpp"
-#include "graphics/render_passes/shadow_visibility_pass.hpp"
 #include "graphics/render_passes/hdr_color_pass.hpp"
 #include "graphics/render_passes/bloom_pass.hpp"
+#include "graphics/render_passes/pointlight_shadow_pass.hpp"
 
 #include "external/glm/mat4x4.hpp"
 #include "external/enkiTS/TaskScheduler.h"
 
 #include "foundation/file.hpp"
 #include "foundation/time.hpp"
-#include "foundation/numerics.hpp"
 #include "foundation/resource_manager.hpp"
 
 #include "external/imgui/imgui.h"
@@ -89,7 +83,7 @@ struct AsynchronousLoadTask : enki::IPinnedTask {
 int main( int argc, char** argv ) {
 
     if ( argc < 2 ) {
-        printf( "Usage: chapter12 [path to glTF model]\n");
+        printf( "Usage: chapter8 [path to glTF model]\n");
         InjectDefault3DModel();
     }
 
@@ -111,7 +105,7 @@ int main( int argc, char** argv ) {
     task_scheduler.Initialize( config );
 
     // window
-    WindowConfiguration wconf{ 1920, 1080, "Chapter 12: Ray Tracing Shadows", &MemoryService::instance()->system_allocator};
+    WindowConfiguration wconf{ 1280, 800, "Chapter 8: Shadows with Mesh Shaders", &MemoryService::instance()->system_allocator};
     raptor::Window window;
     window.init( &wconf );
 
@@ -125,7 +119,6 @@ int main( int argc, char** argv ) {
     GpuDeviceCreation dc;
     dc.debug_options.set_default();
     dc.enable_bindless = true;
-    dc.enable_ray_tracing = true;
     dc.set_window( window.width, window.height, window.platform_handle ).set_allocator( &MemoryService::instance()->system_allocator )
       .set_num_threads( task_scheduler.GetNumTaskThreads() );
     dc.resource_pool_creation.buffers = 1024;
@@ -171,21 +164,18 @@ int main( int argc, char** argv ) {
 
     FrameRenderer frame_renderer;
     frame_renderer.init( allocator, &renderer, &frame_graph, &scene_graph, &render_scene );
-    frame_renderer.set_upscale_settings( { .render_scale = 0.666f, .enabled = false } );
+    frame_renderer.set_upscale_settings( { .render_scale = 0.66f, .enabled = false } );
     frame_renderer.calculate_resolution_info( gpu.swapchain_width, gpu.swapchain_height );
 
     frame_graph_builder.set_resolution_info( &frame_renderer.resolution_info );
 
     // NEW: rendering features
     // Add locally declared rendering features to the frame renderer to enable them
-    MeshesRenderingFeature meshes;
-    frame_renderer.meshes = &meshes;
-
-    PointlightShadowsRenderingFeature pointlight_shadows_feature;
-    frame_renderer.point_shadows = &pointlight_shadows_feature;
-
     GpuCullingRenderingFeature gpu_culling_feature;
     frame_renderer.gpu_culling = &gpu_culling_feature;
+
+    MeshesRenderingFeature meshes;
+    frame_renderer.meshes = &meshes;
 
     MeshletsRenderingFeature meshlets_feature;
     frame_renderer.meshlets = &meshlets_feature;
@@ -199,11 +189,8 @@ int main( int argc, char** argv ) {
     DebugDrawRenderingFeature debug_draw_feature;
     frame_renderer.debug_draw = &debug_draw_feature;
 
-    RayTracingRenderFeature ray_tracing_feature;
-    ray_tracing_feature.init( allocator, &renderer );
-    frame_renderer.ray_tracing = &ray_tracing_feature;
-
-    frame_renderer.render_config.raytraced_shadows.enabled = true;
+    PointlightShadowsRenderingFeature pointlight_shadows_feature;
+    frame_renderer.point_shadows = &pointlight_shadows_feature;
 
     // Debug image views
     ImageViewDebugger image_view_debugger;
@@ -211,8 +198,6 @@ int main( int argc, char** argv ) {
 
     ArenaAllocator temp_frame_allocator;
     temp_frame_allocator.init( rmega( 4 ) );
-
-    frame_renderer.render_config.enable_meshlet_animations = true;
 
     // Load frame graph
     {
@@ -222,23 +207,17 @@ int main( int argc, char** argv ) {
         };
         frame_graph.add_node( present_node_info );
 
-        frame_renderer.add_render_pass( "volumetric_fog_pass", rnewa( VolumetricFogPass, allocator, 64 ) );
-        frame_renderer.add_render_pass( "point_shadows_pass", rnewa( PointlightShadowPass2, allocator, 64 ) );
-        frame_renderer.add_render_pass( "animated_meshlet_pass", rnewa( MeshletAnimationPass, allocator, 64 ) );
         frame_renderer.add_render_pass( "mesh_occlusion_early_pass", rnewa( CullingEarlyPass, allocator, 64 ) );
+        frame_renderer.add_render_pass( "point_shadows_pass", rnewa( PointlightShadowPass2, allocator, 64 ) );
         frame_renderer.add_render_pass( "gbuffer_pass_early", rnewa( GBufferPass, allocator, 64 ) );
         frame_renderer.add_render_pass( "depth_pyramid_pass", rnewa( DepthPyramidPass, allocator, 64 ) );
         frame_renderer.add_render_pass( "mesh_occlusion_late_pass", rnewa( CullingLatePass, allocator, 64 ) );
         frame_renderer.add_render_pass( "gbuffer_pass_late", rnewa( LateGBufferPass, allocator, 64 ) );
-        frame_renderer.add_render_pass( "motion_vector_pass", rnewa( MotionVectorPass, allocator, 64 ) );
-        frame_renderer.add_render_pass( "shadow_visibility_pass", rnewa( ShadowVisibilityPass, allocator, 64 ) );
         frame_renderer.add_render_pass( "lighting_pass", rnewa( LightingPass, allocator, 64 ) );
         frame_renderer.add_render_pass( "transparent_pass", rnewa( TransparentPass, allocator, 64 ) );
         frame_renderer.add_render_pass( "debug_draw_pass", rnewa( DebugDrawPass, allocator, 64 ) );
-        frame_renderer.add_render_pass( "debug_mesh_pass", rnewa( DebugPass, allocator, 64 ) );
         frame_renderer.add_render_pass( "hdr_color_copy_pass", rnewa( HDRColorCopyPass, allocator, 64 ) );
         frame_renderer.add_render_pass( "bloom_pass", rnewa( BloomPass, allocator, 64 ) );
-        frame_renderer.add_render_pass( "temporal_anti_aliasing_pass", rnewa( TemporalAntiAliasingPass, allocator, 64 ) );
 
         frame_renderer.declare_frame_graph_structure( frame_graph );
 
@@ -256,17 +235,11 @@ int main( int argc, char** argv ) {
     directory_current(&cwd);
 
     ArenaAllocator temp_allocator;
-    temp_allocator.init( rmega( 128 ) );
+    temp_allocator.init( rmega( 4 ) );
 
-    RenderModel* model = nullptr;
     for ( i32 arg_i = 1; arg_i < argc; ++arg_i ) {
         cstring scene_path = argv[ arg_i ];
-        cstring anim_prefix = strstr( scene_path, "anim:" );
-        if ( anim_prefix ) {
-            scene_path += strlen( "anim:" );
-        }
-
-        sizet scene_path_len = strlen( scene_path );
+        sizet scene_path_len = strlen( argv[ arg_i ] );
 
         char file_base_path[ 512 ]{ };
         memcpy( file_base_path, scene_path, scene_path_len );
@@ -278,17 +251,11 @@ int main( int argc, char** argv ) {
         memcpy( file_name, scene_path, scene_path_len );
         file_name_from_path( file_name );
 
-        if ( anim_prefix ) {
-            model->add_animation( file_name, file_base_path, &temp_allocator );
-        } else {
-            model = render_scene.add_and_load_model( file_name, file_base_path, &temp_allocator );
-        }
+        render_scene.add_and_load_model( file_name, file_base_path, &temp_allocator );
     }
 
     // Initial matrix update to have correct world matrices
     scene_graph.update_matrices();
-
-    ray_tracing_feature.add_meshes_to_build_from_scene( &render_scene );
 
     temp_allocator.shutdown();
 
@@ -344,10 +311,6 @@ int main( int argc, char** argv ) {
     float light_intensity = 80.0f;
     glm::vec2 last_clicked_position = glm::vec2{ 1280 / 2.0f, 800 / 2.0f };
 
-    // Setup common options
-    AnimationViewer animation_viewer;
-    animation_viewer.init( allocator );
-
     while ( !window.requested_exit ) {
         ZoneScopedN("RenderLoop");
 
@@ -377,7 +340,7 @@ int main( int argc, char** argv ) {
             frame_renderer.on_resize( gpu, window.width, window.height );
 
             frame_graph.on_resize( &renderer, &frame_renderer.render_blackboard,
-                                   &frame_renderer.render_config, 
+                                   &frame_renderer.render_config,
                                    frame_renderer.resolution_info.render_width,
                                    frame_renderer.resolution_info.render_height );
             game_camera.camera.set_aspect_ratio( ( f32 )window.width / ( f32 )window.height );
@@ -429,9 +392,6 @@ int main( int argc, char** argv ) {
                 frame_renderer.render_config.gpu_culling.draw_imgui();
                 frame_renderer.render_config.meshlets.draw_imgui();
                 frame_renderer.render_config.post.draw_imgui();
-                frame_renderer.render_config.volumetric_fog.draw_imgui();
-                frame_renderer.render_config.taa.draw_imgui();
-                frame_renderer.render_config.raytraced_shadows.draw_imgui();
 
                 if ( frame_renderer.render_config.debug_draw.inspect_mesh_instance ) {
                     MeshInstance& mi = render_scene.mesh_instances[ frame_renderer.render_config.debug_draw.mesh_instance_index ];
@@ -487,12 +447,6 @@ int main( int argc, char** argv ) {
             }
             ImGui::End();
 
-            // Animation Viewer
-            if ( ImGui::Begin( "Animation Viewer" ) ) {
-                animation_viewer.draw_imgui( render_scene.animations.as_span(), scene_graph, render_scene.current_animation_time );
-            }
-            ImGui::End();
-
             MemoryService::instance()->imgui_draw();
         }
 
@@ -531,14 +485,8 @@ int main( int argc, char** argv ) {
             task_scheduler.WaitforTask( &draw_task );
             frame_graph.update_persistent_resources_handles();
 
-
-            // Build ray-tracing BLAS for the meshes in the scene
-            //ray_tracing_feature.build_acceleration_structures_from_scene( &renderer, &render_scene, scratch_allocator, frame_renderer.render_config.global_scale );
-            ray_tracing_feature.build_acceleration_structures_from_static_scene( &renderer, &render_scene, scratch_allocator, frame_renderer.render_config.global_scale );
-
             // Avoid using the same command buffer
             CommandBuffer* image_upload_cb = renderer.add_image_finalize_commands( ( draw_task.thread_id + 1 ) % task_scheduler.GetNumTaskThreads() );
-            CommandBuffer* acceleration_structures_build_cb = gpu.flush_acceleration_structure_builds();
 
             gpu.update_bindless_resources();
             bool wait_for_sparse_semaphore = gpu.update_sparse_resources();
@@ -559,12 +507,7 @@ int main( int argc, char** argv ) {
             cbs.clear();
             cbs.push( frame_graph.get_command_buffer_from_batch( CommandQueueType::Compute, 0 ) );
 
-            if ( acceleration_structures_build_cb ) {
-                cbs.push( acceleration_structures_build_cb );
-            }
-
             // WAITS
-            // Do not wait
             waits.clear();
             const u64 gfx_done_value = gpu.absolute_frame; // because gfx signals next_frame_value
 
@@ -651,8 +594,6 @@ int main( int argc, char** argv ) {
         FrameMark;
     }
 
-    animation_viewer.shutdown();
-
     run_pinned_task.execute = false;
     async_load_task.execute = false;
 
@@ -674,7 +615,6 @@ int main( int argc, char** argv ) {
     frame_graph_builder.shutdown();
 
     render_scene.shutdown( &renderer );
-    ray_tracing_feature.shutdown( &renderer );
 
     rm.shutdown();
     renderer.shutdown();

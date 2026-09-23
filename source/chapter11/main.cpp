@@ -86,57 +86,6 @@ struct AsynchronousLoadTask : enki::IPinnedTask {
 
 //
 //
-namespace raptor {
-namespace chapter11 {
-
-    raptor::DescriptorSetHandle           scene_ds;
-    raptor::BufferHandle                  scene_mesh_instances_ssbo;  // Buffer containing all mesh instances data
-
-    struct alignas( 16 ) GpuSceneData {
-        glm::mat4                               view_projection;
-        glm::vec4                               eye;
-        glm::vec4                               light_position;
-        f32                                     light_range;
-        f32                                     light_intensity;
-        f32                                     padding[ 2 ];
-    }; // struct GpuFrameData
-
-    //
-    //
-    struct alignas( 16 ) MeshData {
-        glm::mat4       m;
-        glm::mat4       inverseM;
-
-        u32         textures[ 4 ]; // diffuse, roughness, normal, occlusion
-        glm::vec4   base_color_factor;
-        glm::vec4   metallic_roughness_occlusion_factor; // metallic, roughness, occlusion
-
-        float       alpha_cutoff;
-        u32         flags;
-        u32         padding_[2];
-    }; // struct MeshData
-
-    static void upload_material( RenderScene& render_scene, const MeshInstance& mesh_instance, MeshData& mesh_data ) {
-        Mesh& mesh = render_scene.meshes[ mesh_instance.mesh_index ];
-
-        mesh_data.textures[ 0 ] = mesh.pbr_material.diffuse_texture_index;
-        mesh_data.textures[ 1 ] = mesh.pbr_material.roughness_texture_index;
-        mesh_data.textures[ 2 ] = mesh.pbr_material.normal_texture_index;
-        mesh_data.textures[ 3 ] = mesh.pbr_material.occlusion_texture_index;
-        mesh_data.base_color_factor = mesh.pbr_material.base_color_factor;
-        mesh_data.metallic_roughness_occlusion_factor = { mesh.pbr_material.metallic, mesh.pbr_material.roughness, mesh.pbr_material.occlusion, 0.0f };
-        mesh_data.alpha_cutoff = mesh.pbr_material.alpha_cutoff;
-        mesh_data.flags = mesh.pbr_material.flags;
-
-        mesh_data.m = render_scene.scene_graph->world_matrices[ mesh_instance.scene_graph_node_index ];
-        mesh_data.inverseM = glm::inverse( glm::transpose( mesh_data.m ) );
-    }
-
-}; // chapter5
-}; // raptor
-
-//
-//
 int main( int argc, char** argv ) {
 
     if ( argc < 2 ) {
@@ -337,40 +286,6 @@ int main( int argc, char** argv ) {
 
     temp_allocator.shutdown();
 
-    // Create scene resources
-    {
-        // Create scene mesh instances buffer with all material data
-        chapter11::scene_mesh_instances_ssbo = gpu.create_buffer( {
-            .size = sizeof( chapter11::MeshData ) * render_scene.mesh_instances.size,
-            .usage = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT,
-            .memory_usage = VMA_MEMORY_USAGE_AUTO_PREFER_HOST,
-            .allocation_flags = VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT |
-                                VMA_ALLOCATION_CREATE_MAPPED_BIT,
-            .name = "mesh_instances_sb" } );
-
-        FlatHashMapIterator it = renderer.resource_cache.pipelines.find( hash_calculate( "gbuffer_culling" ) );
-        RASSERT( it.is_valid() );
-
-        PipelineHandle gbuffer_pipeline = renderer.resource_cache.pipelines.get( it ).any();
-        DescriptorSetLayoutHandle gbuffer_layout_handle = gpu.get_descriptor_set_layout( gbuffer_pipeline, k_material_descriptor_set_index );
-        ShaderReflectionInfo* gbuffer_reflection_info = renderer.get_shader_reflection( gbuffer_pipeline );
-
-
-        ShaderReflectionInfo* reflection_info = gbuffer_reflection_info;
-
-        DescriptorSetCreation ds_creation{ };
-        ds_creation.layout = gbuffer_layout_handle;
-        ds_creation.ssbos = {
-            {.buffer = chapter11::scene_mesh_instances_ssbo,
-             .binding = renderer.get_binding_index( reflection_info, "MeshData" ) },
-        };
-        ds_creation.dynamic_buffers = {
-            {.binding = renderer.get_binding_index( reflection_info, "LocalConstants" ), .size = sizeof( GpuFrameData ) },
-        };
-
-        //chapter11::scene_ds = gpu.create_descriptor_set( ds_creation );
-    }
-
     // Calculate main view render items
     {
         RenderView& main_view = frame_renderer.main_view;
@@ -422,8 +337,6 @@ int main( int argc, char** argv ) {
     float light_radius = 20.0f;
     float light_intensity = 80.0f;
     glm::vec2 last_clicked_position = glm::vec2{ 1280 / 2.0f, 800 / 2.0f };
-
-    bool update_mesh_data = true;
 
     // Setup common options
     AnimationViewer animation_viewer;
@@ -597,31 +510,6 @@ int main( int argc, char** argv ) {
 
             frame_renderer.upload_gpu_data( game_camera, last_clicked_position, &temp_frame_allocator );
 
-            // Upload per-mesh data
-            if ( update_mesh_data )
-            {
-                update_mesh_data = false;
-
-                Buffer* mesh_buffer = gpu.get_buffer( chapter11::scene_mesh_instances_ssbo );
-                RASSERT( mesh_buffer );
-                chapter11::MeshData* mesh_data = ( chapter11::MeshData* )mesh_buffer->mapped_data;
-                if ( mesh_data ) {
-                    for ( u32 i = 0; i < frame_renderer.main_view.opaque_items.size; ++i ) {
-                        RenderItem& render_mesh = frame_renderer.main_view.opaque_items[ i ];
-                        const u32 mesh_instance_index = render_mesh.mesh_instance->gpu_mesh_instance_index;
-                        upload_material( render_scene, *render_mesh.mesh_instance, mesh_data[ mesh_instance_index ] );
-                    }
-
-                    for ( u32 i = 0; i < frame_renderer.main_view.transparent_items.size; ++i ) {
-                        RenderItem& render_mesh = frame_renderer.main_view.transparent_items[ i ];
-                        const u32 mesh_instance_index = render_mesh.mesh_instance->gpu_mesh_instance_index;
-                        upload_material( render_scene, *render_mesh.mesh_instance, mesh_data[ mesh_instance_index ] );
-
-                    }
-                    gpu.flush_buffer( chapter11::scene_mesh_instances_ssbo, 0, sizeof( chapter11::MeshData ) * render_scene.mesh_instances.size );
-                }
-            }
-
             imgui->finalize_draw_data();
         }
 
@@ -767,9 +655,6 @@ int main( int argc, char** argv ) {
     imgui->shutdown();
     gpu_profiler.shutdown();
     scene_graph.shutdown();
-
-    gpu.destroy_descriptor_set( chapter11::scene_ds );
-    gpu.destroy_buffer( chapter11::scene_mesh_instances_ssbo );
 
     frame_renderer.main_view.opaque_items.shutdown();
     frame_renderer.main_view.transparent_items.shutdown();

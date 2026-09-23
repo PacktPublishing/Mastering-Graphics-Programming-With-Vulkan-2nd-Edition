@@ -20,10 +20,8 @@
 #include "graphics/render_passes/lighting_pass.hpp"
 #include "graphics/render_passes/transparent_pass.hpp"
 #include "graphics/render_passes/debug_pass.hpp"
-#include "graphics/render_passes/pointlight_shadow_pass.hpp"
-#include "graphics/render_passes/volumetric_fog_pass.hpp"
-#include "graphics/render_passes/temporal_anti_aliasing_pass.hpp"
-#include "graphics/render_passes/motion_vector_pass.hpp"
+#include "graphics/render_passes/hdr_color_pass.hpp"
+#include "graphics/render_passes/bloom_pass.hpp"
 
 #include "external/glm/mat4x4.hpp"
 #include "external/enkiTS/TaskScheduler.h"
@@ -78,460 +76,6 @@ struct AsynchronousLoadTask : enki::IPinnedTask {
     enki::TaskScheduler*        task_scheduler;
     bool                        execute         = true;
 }; // struct AsynchronousLoadTask
-
-//
-//
-namespace raptor {
-namespace chapter5 {
-
-    raptor::DescriptorSetHandle           scene_ds;
-    raptor::BufferHandle                  scene_mesh_instances_ssbo;  // Buffer containing all mesh instances data
-
-    struct alignas( 16 ) GpuSceneData {
-        glm::mat4                               view_projection;
-        glm::vec4                               eye;
-        glm::vec4                               light_position;
-        f32                                     light_range;
-        f32                                     light_intensity;
-        f32                                     padding[ 2 ];
-    }; // struct GpuFrameData
-
-    //
-    //
-    struct alignas( 16 ) MeshData {
-        glm::mat4       m;
-        glm::mat4       inverseM;
-
-        u32         textures[ 4 ]; // diffuse, roughness, normal, occlusion
-        glm::vec4   base_color_factor;
-        glm::vec4   metallic_roughness_occlusion_factor; // metallic, roughness, occlusion
-
-        float       alpha_cutoff;
-        u32         flags;
-        u32         padding_[2];
-    }; // struct MeshData
-
-    static void upload_material( RenderScene& render_scene, const MeshInstance& mesh_instance, MeshData& mesh_data ) {
-        Mesh& mesh = render_scene.meshes[ mesh_instance.mesh_index ];
-
-        mesh_data.textures[ 0 ] = mesh.pbr_material.diffuse_texture_index;
-        mesh_data.textures[ 1 ] = mesh.pbr_material.roughness_texture_index;
-        mesh_data.textures[ 2 ] = mesh.pbr_material.normal_texture_index;
-        mesh_data.textures[ 3 ] = mesh.pbr_material.occlusion_texture_index;
-        mesh_data.base_color_factor = mesh.pbr_material.base_color_factor;
-        mesh_data.metallic_roughness_occlusion_factor = { mesh.pbr_material.metallic, mesh.pbr_material.roughness, mesh.pbr_material.occlusion, 0.0f };
-        mesh_data.alpha_cutoff = mesh.pbr_material.alpha_cutoff;
-        mesh_data.flags = mesh.pbr_material.flags;
-
-        mesh_data.m = render_scene.scene_graph->world_matrices[ mesh_instance.scene_graph_node_index ];
-        mesh_data.inverseM = glm::inverse( glm::transpose( mesh_data.m ) );
-    }
-
-    // Render Passes //////////////////////////////////////////////////////////
-
-    //
-    //
-    struct HDRColorCopyPass : public FrameGraphRenderPass {
-        void declare_frame_graph_node( FrameGraphResourceContext& context ) override {
-            FrameGraphBuilder& builder = *context.frame_graph->builder;
-            FrameGraphNodeCreation_v2 hdr_copy_node_info {
-                .inputs = {
-                    /*{
-                        .type = FrameGraphResourceType_Texture,
-                        .handle = builder.get_output_handle( "transparent_pass", "final" )
-                    },*/
-                },
-                .outputs = {
-                    builder.create_output_handle( {
-                        .type = FrameGraphResourceType_Attachment,
-                        .resource_info{
-                            .texture = {
-                                .scale_width = 1.0f,
-                                .scale_height = 1.0f,
-                                .format = VK_FORMAT_R16G16B16A16_SFLOAT,
-                                .load_op = VK_ATTACHMENT_LOAD_OP_CLEAR,
-                                .disable_memory_aliasing = true
-                            }
-                        },
-                        .name = "hdr_color_copy",
-                    } ),
-                },
-                .scheduling = { CommandQueueType::Compute, 0 },
-                .enabled = true,
-                .compute = true,
-                .name = k_name,
-            };
-            context.frame_graph->add_node_v2( hdr_copy_node_info );
-        }
-
-        void post_render( FrameGraphRenderContext& context ) override {
-
-            // Avoid copying first frame as source image is not ready
-            Renderer* renderer = context.renderer;
-            GpuDevice* gpu = renderer->gpu;
-            if ( gpu->absolute_frame == 0 ) {
-                return;
-            }
-
-            CommandBuffer* cb = context.gpu_commands;
-            RenderScene* render_scene = context.render_view->scene;
-
-            // Get previous frame final image
-            FrameGraphResource* hdr_lighting_resource = context.frame_graph->get_resource( "final" );
-            RASSERT( hdr_lighting_resource );
-            ImageHandle hdr_lighting_image = hdr_lighting_resource->resource_info.texture.previous_image;
-            //Image* hdr_image_data = gpu.get_image( hdr_lighting_resource->resource_info.texture.image );
-
-            FrameGraphResource* hdr_copy_resource = context.frame_graph->get_resource( "hdr_color_copy" );
-            RASSERT( hdr_copy_resource );
-            ImageHandle hdr_copy_image = hdr_copy_resource->resource_info.texture.image;
-            //Image* hdr_copy_image_data = gpu.get_image( hdr_copy_resource->resource_info.texture.image );
-
-            // If we have different queue families, acquire ownership
-            if ( gpu->vulkan_compute_queue_family != gpu->vulkan_main_queue_family ) {
-                cb->acquire_image_ownership( hdr_lighting_image,
-                                             range_color_full(),
-                                             gpu->vulkan_main_queue_family, gpu->vulkan_compute_queue_family,
-                                             { VK_PIPELINE_STAGE_2_TRANSFER_BIT,
-                                               VK_ACCESS_2_TRANSFER_READ_BIT,
-                                               VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL } );
-                cb->flush_barriers();
-            }
-
-            cb->copy_image( hdr_lighting_image, hdr_copy_image,
-                ImageSyncState{
-                    .stage = VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
-                    .access = VK_ACCESS_2_SHADER_READ_BIT,
-                    .layout = VK_IMAGE_LAYOUT_READ_ONLY_OPTIMAL,
-                }
-            );
-
-            // Done with the texture, release the ownership
-            if ( gpu->vulkan_compute_queue_family != gpu->vulkan_main_queue_family ) {
-                cb->release_image_ownership( hdr_lighting_image, range_color_full(),
-                                             gpu->vulkan_main_queue_family );
-                cb->flush_barriers();
-            }
-            //gpu_commands->copy_image( hdr_lighting_resource->resource_info.texture.image,
-            //                          hdr_copy_resource->resource_info.texture.image, RESOURCE_STATE_PIXEL_SHADER_RESOURCE );
-        }
-
-        static constexpr cstring    k_name = "hdr_color_copy_pass";
-    }; // struct HDRColorCopyPass;
-
-    //
-    //
-    struct BloomPass : public FrameGraphRenderPass {
-
-        void declare_frame_graph_node( FrameGraphResourceContext& context ) override {
-            FrameGraphBuilder& builder = *context.frame_graph->builder;
-            FrameGraphNodeCreation_v2 bloom_node_info{
-                .inputs = {
-                    {
-                        .type = FrameGraphResourceType_Texture,
-                        .handle = builder.get_output_handle( "hdr_color_copy_pass", "hdr_color_copy" )
-                    },
-                },
-                .outputs = {
-                    builder.create_output_handle( {
-                        .type = FrameGraphResourceType_Attachment,
-                        .resource_info{
-                            .external = true
-                        },
-                        .name = "bloom",
-                    } ),
-                },
-                .scheduling = { CommandQueueType::Compute, 0 },
-                .enabled = true,
-                .compute = true,
-                .name = k_name,
-            };
-            context.frame_graph->add_node_v2( bloom_node_info );
-        }
-
-        void add_ui() override {
-
-        }
-
-        void update_psos( FrameGraphResourceContext& context, PipelineUpdatePhase phase ) override {
-
-            Renderer* renderer = context.renderer;
-
-            if ( phase == PipelineUpdatePhase::Destroy ) {
-                renderer->destroy_compute_pipeline_state( downsample_pipeline );
-                renderer->destroy_compute_pipeline_state( upsample_pipeline );
-
-                return;
-            }
-
-            ComputePipelineTransaction transaction( renderer );
-
-            ComputePipelineState& new_downsample_pipeline = transaction.add( downsample_pipeline );
-            ComputePipelineState& new_upsample_pipeline = transaction.add( upsample_pipeline );
-
-            renderer->create_compute_pipeline_state( {
-                .stages = {
-                    {
-                        .source = { .glsl = "glsl/chapter5/post_bloom.glsl" },
-                        .type = VK_SHADER_STAGE_COMPUTE_BIT,
-                    }
-                },
-                .name = "bloom_downsample" },
-                {
-                    .name = "bloom_downsample",
-                    .render_pass_name = k_name,
-                },
-                "bloom_downsample", context.frame_graph, new_downsample_pipeline );
-
-            renderer->create_compute_pipeline_state( {
-                .stages = {
-                    {
-                        .source = { .glsl = "glsl/chapter5/post_bloom.glsl" },
-                        .type = VK_SHADER_STAGE_COMPUTE_BIT,
-                    }
-                },
-                .name = "bloom_upsample" },
-                {
-                    .name = "bloom_downsample",
-                    .render_pass_name = k_name,
-                },
-                "bloom_upsample", context.frame_graph, new_upsample_pipeline );
-
-            transaction.commit_or_rollback();
-        }
-
-        struct GpuBloomConstants {
-            u32         source_texture_index;
-            u32         destination_texture_index;
-
-            f32         filter_radius;
-            u32         pad111;
-
-            glm::vec2   rcp_source_texture_size;
-            glm::vec2   rcp_destination_texture_size;
-
-        };
-
-        void post_render( FrameGraphRenderContext& context ) override {
-    const ShaderLanguage language = context.render_config->shader_language();
-
-            // Avoid copying first frame as source image is not ready
-            Renderer* renderer = context.renderer;
-            GpuDevice* gpu = renderer->gpu;
-            if ( gpu->absolute_frame == 0 ) {
-                return;
-            }
-
-            CommandBuffer* gpu_commands = context.gpu_commands;
-            RenderScene* render_scene = context.render_view->scene;
-
-            FrameGraphResource* lighting_resource = context.frame_graph->get_resource( "hdr_color_copy" );
-            Image* bloom_image_data = gpu->get_image( bloom_image );
-
-            u32 width = bloom_image_data->width;
-            u32 height = bloom_image_data->height;
-
-            // Downsample
-            gpu_commands->bind_pipeline( downsample_pipeline.active( language ) );
-
-            for ( u32 i = 0; i < bloom_image_views.size; i++ ) {
-
-                u32 mip_w = width >> i;
-                u32 mip_h = height >> i;
-
-                //util_add_image_barrier( &gpu, gpu_commands->vk_command_buffer, bloom_image_data->vk_image, RESOURCE_STATE_UNDEFINED, RESOURCE_STATE_UNORDERED_ACCESS, i, 1, false );
-
-                u32 cb_offset = 0;
-                GpuBloomConstants* gpu_data = renderer->gpu->dynamic_buffer_allocate<GpuBloomConstants>( &cb_offset );
-                if ( gpu_data ) {
-                    gpu_data->source_texture_index = ( i == 0 ) ? lighting_resource->resource_info.texture.image_view.index() : bloom_image_views[ i - 1 ].index();
-                    gpu_data->destination_texture_index = bloom_image_views[ i ].index();
-                    gpu_data->rcp_destination_texture_size = glm::vec2{ 1.f / mip_w, 1.f / mip_h };
-                    gpu_data->rcp_source_texture_size = glm::vec2{ 1.f / ( mip_w * 2 ), 1.f / ( mip_h * 2 ) };
-                    //rprint( "index %d, offset %d\n", gpu_data->destination_texture_index, cb_offset );
-                }
-
-                gpu_commands->bind_descriptor_set( { renderer->gpu->bindless_descriptor_set, descriptor_set },
-                                                    { cb_offset } );
-
-                u32 group_x = ( mip_w + 7 ) / 8;
-                u32 group_y = ( mip_h + 7 ) / 8;
-
-                gpu_commands->dispatch( group_x, group_y, 1 );
-
-                gpu_commands->barrier_instant_compute_write_to_compute_read();
-            }
-
-            // Upsample
-            gpu_commands->bind_pipeline( upsample_pipeline.active( language ) );
-
-            for ( i32 i = bloom_image_views.size - 1; i > 0; i-- ) {
-
-                //util_add_image_barrier( &gpu, gpu_commands->vk_command_buffer, bloom_image_data->vk_image, RESOURCE_STATE_UNDEFINED, RESOURCE_STATE_UNORDERED_ACCESS, i, 1, false );
-
-                // Mip i
-                const u32 src_w = bloom_image_data->width >> i;
-                const u32 src_h = bloom_image_data->height >> i;
-
-                // Mip i-1
-                const u32 dst_w = bloom_image_data->width >> ( i - 1 );
-                const u32 dst_h = bloom_image_data->height >> ( i - 1 );
-
-                u32 cb_offset = 0;
-                GpuBloomConstants* gpu_data = renderer->gpu->dynamic_buffer_allocate<GpuBloomConstants>( &cb_offset );
-                if ( gpu_data ) {
-                    gpu_data->source_texture_index = bloom_image_views[ i ].index();
-                    gpu_data->destination_texture_index = bloom_image_views[ i - 1 ].index();
-                    gpu_data->rcp_source_texture_size = { 1.f / src_w, 1.f / src_h };
-                    gpu_data->rcp_destination_texture_size = { 1.f / dst_w, 1.f / dst_h };
-                    gpu_data->filter_radius = 0.005f;
-                }
-
-                gpu_commands->bind_descriptor_set( { renderer->gpu->bindless_descriptor_set, descriptor_set },
-                                                    { cb_offset } );
-
-                u32 group_x = ( dst_w + 7 ) / 8;
-                u32 group_y = ( dst_h + 7 ) / 8;
-
-                gpu_commands->dispatch( group_x, group_y, 1 );
-
-                gpu_commands->barrier_instant_compute_write_to_compute_read();
-            }
-        }
-
-        // Utility methods ///////////////////////////////////////////////
-        u32 calculate_mip_levels( u32 width, u32 height ) {
-            u32 mip_levels = 0;
-            while ( width >= 16 && height >= 16 ) {
-                mip_levels++;
-                width /= 2;
-                height /= 2;
-            }
-            return mip_levels;
-        }
-
-        void create_image_views_for_mipmaps( GpuDevice& gpu, FrameGraph* frame_graph, u32 mip_levels ) {
-            // Create views for each mipmap
-            ImageViewCreation image_view_creation{
-                .parent_image = bloom_image,
-                .view_type = VK_IMAGE_VIEW_TYPE_2D, };
-            for ( u32 i = 0; i < mip_levels; i++ ) {
-                image_view_creation.sub_resource = { VK_IMAGE_ASPECT_COLOR_BIT, i, 1, 0, 1 };
-                bloom_image_views.push( gpu.create_image_view( image_view_creation ) );
-                gpu.add_image_view_to_bindless( bloom_image_views[ i ] );
-            }
-        }
-
-        void set_external_framegraph_resource( FrameGraph* frame_graph, GpuDevice& gpu ) {
-            FrameGraphResource* bloom_tex = frame_graph->get_resource( "bloom" );
-            RASSERT( bloom_tex );
-
-            bloom_tex->resource_info.set_external_texture_2d(
-                gpu.get_image( bloom_image )->width,
-                gpu.get_image( bloom_image )->height,
-                VK_FORMAT_R16G16B16A16_SFLOAT,
-                VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_STORAGE_BIT,
-                bloom_image,
-                bloom_image_views[ 0 ] );
-        }
-
-        void on_resize( FrameGraphResourceContext& context, u32 new_width, u32 new_height ) override {
-
-            Renderer* renderer = context.renderer;
-            FrameGraph* frame_graph = context.frame_graph;
-            GpuDevice& gpu = *renderer->gpu;
-
-            FrameGraphNode* node = frame_graph->get_node( k_name );
-            if ( node == nullptr ) {
-                RASSERT( false );
-                return;
-            }
-
-            // Remove old image views from bindless and destroy them
-            // NOTE: image can be just re-created, but we may have different mip levels and
-            // thus different image views.
-            for ( u32 i = 0; i < bloom_image_views.size; i++ ) {
-                gpu.remove_image_view_from_bindless( bloom_image_views[ i ] );
-                gpu.destroy_image_view( bloom_image_views[ i ] );
-            }
-
-            bloom_image_views.clear();
-
-            // Resize image
-            u32 mip_levels = calculate_mip_levels( new_width / 2, new_height / 2 );
-            gpu.resize_image( bloom_image, new_width / 2, new_height / 2, mip_levels );
-
-            create_image_views_for_mipmaps( gpu, frame_graph, mip_levels );
-            set_external_framegraph_resource( frame_graph, gpu );
-        }
-
-        void create_gpu_resources( FrameGraphResourceContext& context ) override {
-
-            Renderer* renderer = context.renderer;
-            GpuDevice& gpu = *renderer->gpu;
-            RenderBlackboard& render_blackboard = *context.render_blackboard;
-
-            FlatHashMapIterator it = renderer->resource_cache.pipelines.find( hash_calculate( "bloom_downsample" ) );
-            RASSERT( it.is_valid() );
-
-            PipelineHandle pipeline = renderer->resource_cache.pipelines.get( it ).any();
-            DescriptorSetLayoutHandle layout_handle = gpu.get_descriptor_set_layout( pipeline, k_material_descriptor_set_index );
-            ShaderReflectionInfo* reflection_info = renderer->get_shader_reflection( pipeline );
-
-            FrameGraphResource* lighting_resource = context.frame_graph->get_resource( "final" );
-
-            u32 mip_levels = calculate_mip_levels( render_blackboard.render_width / 2, render_blackboard.render_height / 2 );
-
-            // Create image
-            ImageCreation image_creation{
-                .image_type      = VK_IMAGE_TYPE_2D,
-                .format          = VK_FORMAT_R16G16B16A16_SFLOAT,
-                .width           = ( u32 )( render_blackboard.render_width / 2 ),
-                .height          = ( u32 )( render_blackboard.render_height / 2 ),
-                .depth           = 1,
-                .mip_level_count = mip_levels,
-                .usage           = VK_IMAGE_USAGE_SAMPLED_BIT |
-                                   VK_IMAGE_USAGE_STORAGE_BIT |
-                                   VK_IMAGE_USAGE_TRANSFER_DST_BIT |
-                                   VK_IMAGE_USAGE_TRANSFER_SRC_BIT,
-                .name            = "bloom" };
-
-            bloom_image = gpu.create_image( image_creation );
-
-            RASSERT( bloom_image_views.size == 0 );
-            create_image_views_for_mipmaps( gpu, context.frame_graph, mip_levels );
-            set_external_framegraph_resource( context.frame_graph, gpu );
-
-            descriptor_set = gpu.create_descriptor_set( {
-                .dynamic_buffers = { {.binding = renderer->get_binding_index( reflection_info, "bloom_locals" ), .size = sizeof( GpuBloomConstants ) }},
-                .layout = layout_handle } );
-        }
-
-        void destroy_gpu_resources( FrameGraphResourceContext& context ) override {
-            Renderer* renderer = context.renderer;
-
-            renderer->gpu->destroy_image( bloom_image );
-
-            for ( u32 i = 0; i < bloom_image_views.size; i++ ) {
-                renderer->gpu->destroy_image_view( bloom_image_views[ i ] );
-            }
-
-            renderer->gpu->destroy_descriptor_set( descriptor_set );
-        }
-
-        ImageHandle                 bloom_image;
-        StaticArray<ImageViewHandle, 16> bloom_image_views;
-
-        ComputePipelineState        downsample_pipeline;
-        ComputePipelineState        upsample_pipeline;
-
-        DescriptorSetHandle         descriptor_set;
-
-        static constexpr cstring    k_name = "bloom_pass";
-    }; // struct BloomPass
-
-}; // chapter5
-}; // raptor
 
 //
 //
@@ -662,8 +206,6 @@ int main( int argc, char** argv ) {
         };
         frame_graph.add_node( present_node_info );
 
-        //frame_renderer.add_render_pass( "volumetric_fog_pass", rnewa( VolumetricFogPass, allocator, 64 ) );
-        //frame_renderer.add_render_pass( "point_shadows_pass", rnewa( PointlightShadowPass2, allocator, 64 ) );
         frame_renderer.add_render_pass( "mesh_occlusion_early_pass", rnewa( CullingEarlyPass, allocator, 64 ) );
         frame_renderer.add_render_pass( "gbuffer_pass_early", rnewa( GBufferPass, allocator, 64 ) );
         frame_renderer.add_render_pass( "depth_pyramid_pass", rnewa( DepthPyramidPass, allocator, 64 ) );
@@ -672,19 +214,12 @@ int main( int argc, char** argv ) {
         frame_renderer.add_render_pass( "lighting_pass", rnewa( LightingPass, allocator, 64 ) );
         frame_renderer.add_render_pass( "transparent_pass", rnewa( TransparentPass, allocator, 64 ) );
         frame_renderer.add_render_pass( "debug_draw_pass", rnewa( DebugDrawPass, allocator, 64 ) );
-        frame_renderer.add_render_pass( "hdr_color_copy_pass", rnewa( chapter5::HDRColorCopyPass, allocator, 64 ) );
-        frame_renderer.add_render_pass( "bloom_pass", rnewa( chapter5::BloomPass, allocator, 64 ) );
-        frame_renderer.add_render_pass( "motion_vector_pass", rnewa( MotionVectorPass, allocator, 64 ) );
-        //frame_renderer.add_render_pass( "temporal_anti_aliasing_pass", rnewa( TemporalAntiAliasingPass, allocator, 64 ) );
+        frame_renderer.add_render_pass( "hdr_color_copy_pass", rnewa( HDRColorCopyPass, allocator, 64 ) );
+        frame_renderer.add_render_pass( "bloom_pass", rnewa( BloomPass, allocator, 64 ) );
 
         frame_renderer.declare_frame_graph_structure( frame_graph );
 
         frame_graph.compile();
-
-        /*FrameGraphNode* point_shadows_pass_node = frame_graph.get_node( "point_shadows_pass" );
-        if ( point_shadows_pass_node ) {
-            point_shadows_pass_node->render_pass_output.reset().depth( VK_FORMAT_D16_UNORM, VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL );
-        }*/
 
         frame_renderer.compile_passes_psos();
     }
@@ -716,40 +251,6 @@ int main( int argc, char** argv ) {
     scene_graph.update_matrices();
 
     temp_allocator.shutdown();
-
-    // Create scene resources
-    {
-        // Create scene mesh instances buffer with all material data
-        chapter5::scene_mesh_instances_ssbo = gpu.create_buffer( {
-            .size = sizeof( chapter5::MeshData ) * render_scene.mesh_instances.size,
-            .usage = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT,
-            .memory_usage = VMA_MEMORY_USAGE_AUTO_PREFER_HOST,
-            .allocation_flags = VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT |
-                                VMA_ALLOCATION_CREATE_MAPPED_BIT,
-            .name = "mesh_instances_sb" } );
-
-        FlatHashMapIterator it = renderer.resource_cache.pipelines.find( hash_calculate( "gbuffer_culling" ) );
-        RASSERT( it.is_valid() );
-
-        PipelineHandle gbuffer_pipeline = renderer.resource_cache.pipelines.get( it ).any();
-        DescriptorSetLayoutHandle gbuffer_layout_handle = gpu.get_descriptor_set_layout( gbuffer_pipeline, k_material_descriptor_set_index );
-        ShaderReflectionInfo* gbuffer_reflection_info = renderer.get_shader_reflection( gbuffer_pipeline );
-
-
-        ShaderReflectionInfo* reflection_info = gbuffer_reflection_info;
-
-        DescriptorSetCreation ds_creation{ };
-        ds_creation.layout = gbuffer_layout_handle;
-        ds_creation.ssbos = {
-            {.buffer = chapter5::scene_mesh_instances_ssbo,
-             .binding = renderer.get_binding_index( reflection_info, "MeshData" ) },
-        };
-        ds_creation.dynamic_buffers = {
-            {.binding = renderer.get_binding_index( reflection_info, "LocalConstants" ), .size = sizeof( GpuFrameData ) },
-        };
-
-        //chapter5::scene_ds = gpu.create_descriptor_set( ds_creation );
-    }
 
     // Calculate main view render items
     {
@@ -802,8 +303,6 @@ int main( int argc, char** argv ) {
     float light_radius = 20.0f;
     float light_intensity = 80.0f;
     glm::vec2 last_clicked_position = glm::vec2{ 1280 / 2.0f, 800 / 2.0f };
-
-    bool update_mesh_data = true;
 
     // Setup common options
     //frame_renderer.render_config.lighting.disable_shadows = true;
@@ -986,31 +485,6 @@ int main( int argc, char** argv ) {
 
             frame_renderer.upload_gpu_data( game_camera, last_clicked_position, &temp_frame_allocator );
 
-            // Upload per-mesh data
-            if ( update_mesh_data )
-            {
-                update_mesh_data = false;
-
-                Buffer* mesh_buffer = gpu.get_buffer( chapter5::scene_mesh_instances_ssbo );
-                RASSERT( mesh_buffer );
-                chapter5::MeshData* mesh_data = ( chapter5::MeshData* )mesh_buffer->mapped_data;
-                if ( mesh_data ) {
-                    for ( u32 i = 0; i < frame_renderer.main_view.opaque_items.size; ++i ) {
-                        RenderItem& render_mesh = frame_renderer.main_view.opaque_items[ i ];
-                        const u32 mesh_instance_index = render_mesh.mesh_instance->gpu_mesh_instance_index;
-                        upload_material( render_scene, *render_mesh.mesh_instance, mesh_data[ mesh_instance_index ] );
-                    }
-
-                    for ( u32 i = 0; i < frame_renderer.main_view.transparent_items.size; ++i ) {
-                        RenderItem& render_mesh = frame_renderer.main_view.transparent_items[ i ];
-                        const u32 mesh_instance_index = render_mesh.mesh_instance->gpu_mesh_instance_index;
-                        upload_material( render_scene, *render_mesh.mesh_instance, mesh_data[ mesh_instance_index ] );
-
-                    }
-                    gpu.flush_buffer( chapter5::scene_mesh_instances_ssbo, 0, sizeof( chapter5::MeshData ) * render_scene.mesh_instances.size );
-                }
-            }
-
             imgui->finalize_draw_data();
         }
 
@@ -1144,9 +618,6 @@ int main( int argc, char** argv ) {
     imgui->shutdown();
     gpu_profiler.shutdown();
     scene_graph.shutdown();
-
-    gpu.destroy_descriptor_set( chapter5::scene_ds );
-    gpu.destroy_buffer( chapter5::scene_mesh_instances_ssbo );
 
     frame_renderer.main_view.opaque_items.shutdown();
     frame_renderer.main_view.transparent_items.shutdown();

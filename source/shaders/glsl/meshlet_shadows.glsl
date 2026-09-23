@@ -105,9 +105,9 @@ struct ShadowDrawDebug {
     uint padding0;
 };
 
-layout(std430, set = MATERIAL_SET, binding = 36) buffer ShadowDrawDebugBuffer {
-    ShadowDrawDebug draw_debug[];
-} shadow_draw_debug_sb;
+// layout(std430, set = MATERIAL_SET, binding = 36) buffer ShadowDrawDebugBuffer {
+//     ShadowDrawDebug draw_debug[];
+// } shadow_draw_debug_sb;
 
 
 layout(std430, set = MATERIAL_SET, binding = 37) buffer ShadowGlobalDebugBuffer {

@@ -26,6 +26,9 @@
 #include "graphics/render_passes/temporal_anti_aliasing_pass.hpp"
 #include "graphics/render_passes/motion_vector_pass.hpp"
 #include "graphics/render_passes/shadow_visibility_pass.hpp"
+#include "graphics/render_passes/restirgi_pass.hpp"
+#include "graphics/render_passes/raytraced_reflections_pass.hpp"
+#include "graphics/render_passes/svgf_pass.hpp"
 #include "graphics/render_passes/hdr_color_pass.hpp"
 #include "graphics/render_passes/bloom_pass.hpp"
 
@@ -89,7 +92,7 @@ struct AsynchronousLoadTask : enki::IPinnedTask {
 int main( int argc, char** argv ) {
 
     if ( argc < 2 ) {
-        printf( "Usage: chapter12 [path to glTF model]\n");
+        printf( "Usage: chapter13 [path to glTF model]\n");
         InjectDefault3DModel();
     }
 
@@ -111,7 +114,7 @@ int main( int argc, char** argv ) {
     task_scheduler.Initialize( config );
 
     // window
-    WindowConfiguration wconf{ 1920, 1080, "Chapter 12: Ray Tracing Shadows", &MemoryService::instance()->system_allocator};
+    WindowConfiguration wconf{ 1920, 1080, "Chapter 13: Ray Tracing Reflections", &MemoryService::instance()->system_allocator};
     raptor::Window window;
     window.init( &wconf );
 
@@ -123,7 +126,7 @@ int main( int argc, char** argv ) {
 
     // graphics
     GpuDeviceCreation dc;
-    dc.debug_options.set_default();
+    dc.debug_options.set_validation();
     dc.enable_bindless = true;
     dc.enable_ray_tracing = true;
     dc.set_window( window.width, window.height, window.platform_handle ).set_allocator( &MemoryService::instance()->system_allocator )
@@ -171,7 +174,7 @@ int main( int argc, char** argv ) {
 
     FrameRenderer frame_renderer;
     frame_renderer.init( allocator, &renderer, &frame_graph, &scene_graph, &render_scene );
-    frame_renderer.set_upscale_settings( { .render_scale = 0.666f, .enabled = false } );
+    frame_renderer.set_upscale_settings( { .render_scale = 0.75f, .enabled = false } );
     frame_renderer.calculate_resolution_info( gpu.swapchain_width, gpu.swapchain_height );
 
     frame_graph_builder.set_resolution_info( &frame_renderer.resolution_info );
@@ -213,6 +216,12 @@ int main( int argc, char** argv ) {
     temp_frame_allocator.init( rmega( 4 ) );
 
     frame_renderer.render_config.enable_meshlet_animations = true;
+    frame_renderer.render_config.raytraced_reflections.enabled = true;
+    frame_renderer.render_config.restirgi.enabled = false;
+
+    // Force roughness and metalness to show reflections on all materials
+    frame_renderer.render_config.forced_roughness = 0.1f;
+    frame_renderer.render_config.forced_metalness = 1.0f;
 
     // Load frame graph
     {
@@ -231,6 +240,12 @@ int main( int argc, char** argv ) {
         frame_renderer.add_render_pass( "mesh_occlusion_late_pass", rnewa( CullingLatePass, allocator, 64 ) );
         frame_renderer.add_render_pass( "gbuffer_pass_late", rnewa( LateGBufferPass, allocator, 64 ) );
         frame_renderer.add_render_pass( "motion_vector_pass", rnewa( MotionVectorPass, allocator, 64 ) );
+        frame_renderer.add_render_pass( "svgf_guide_downsample_pass", rnewa( SVGFGuideDownsamplePass, allocator, 64 ) );
+        frame_renderer.add_render_pass( "restirgi_pass", rnewa( ReSTIRGIPass, allocator, 64 ) );
+        frame_renderer.add_render_pass( "reflections_pass", rnewa( RaytracedReflectionsPass, allocator, 64 ) );
+        frame_renderer.add_render_pass( "svgf_accumulation_pass", rnewa( SVGFAccumulationPass, allocator, 64 ) );
+        frame_renderer.add_render_pass( "svgf_variance_pass", rnewa( SVGFVariancePass, allocator, 64 ) );
+        frame_renderer.add_render_pass( "svgf_wavelet_pass", rnewa( SVGFWaveletPass, allocator, 64 ) );
         frame_renderer.add_render_pass( "shadow_visibility_pass", rnewa( ShadowVisibilityPass, allocator, 64 ) );
         frame_renderer.add_render_pass( "lighting_pass", rnewa( LightingPass, allocator, 64 ) );
         frame_renderer.add_render_pass( "transparent_pass", rnewa( TransparentPass, allocator, 64 ) );
@@ -344,6 +359,8 @@ int main( int argc, char** argv ) {
     float light_intensity = 80.0f;
     glm::vec2 last_clicked_position = glm::vec2{ 1280 / 2.0f, 800 / 2.0f };
 
+    bool update_mesh_data = true;
+
     // Setup common options
     AnimationViewer animation_viewer;
     animation_viewer.init( allocator );
@@ -358,6 +375,12 @@ int main( int argc, char** argv ) {
             if ( result == VK_ERROR_OUT_OF_DATE_KHR ) {
                 gpu.resize_swapchain();
             }
+            else if ( result == VK_ERROR_DEVICE_LOST ) {
+                gpu.dump_device_fault();
+                // End application.
+                break;
+            }
+
             gpu.update_descriptors();
             gpu.reset_pools();
 
@@ -377,7 +400,7 @@ int main( int argc, char** argv ) {
             frame_renderer.on_resize( gpu, window.width, window.height );
 
             frame_graph.on_resize( &renderer, &frame_renderer.render_blackboard,
-                                   &frame_renderer.render_config, 
+                                   &frame_renderer.render_config,
                                    frame_renderer.resolution_info.render_width,
                                    frame_renderer.resolution_info.render_height );
             game_camera.camera.set_aspect_ratio( ( f32 )window.width / ( f32 )window.height );
@@ -401,6 +424,8 @@ int main( int argc, char** argv ) {
                 ImGui::InputFloat( "Scene global scale", &frame_renderer.render_config.global_scale, 0.001f );
                 ImGui::InputFloat3( "Camera position", &game_camera.camera.position[0] );
                 ImGui::InputFloat3( "Camera target movement", &game_camera.target_movement[0] );
+                ImGui::SliderFloat( "Force Roughness", &frame_renderer.render_config.forced_roughness, -1, 1 );
+                ImGui::SliderFloat( "Force Metalness", &frame_renderer.render_config.forced_metalness, -1, 1 );
                 ImGui::Separator();
 
                 static bool fullscreen = false;
@@ -418,6 +443,23 @@ int main( int argc, char** argv ) {
                     frame_renderer.reload_psos();
                 }
 
+                if ( ImGui::Button( "Increase internal resolution" ) ) {
+                    gpu.wait_for_previous_frame();
+
+                    u32 new_width = 2500;
+                    u32 new_height = 3100;
+
+                    frame_renderer.on_resize( gpu, new_width, new_height );
+
+                    frame_graph.on_resize( &renderer,
+                        &frame_renderer.render_blackboard,
+                        &frame_renderer.render_config,
+                        frame_renderer.render_blackboard.render_width,
+                        frame_renderer.render_blackboard.render_height );
+
+                    game_camera.camera.set_aspect_ratio( ( f32 )new_width / ( f32 )new_height );
+                }
+
                 Span<Light> active_lights{};
                 active_lights.data = render_scene.active_lights > 0 ? &render_scene.lights[ 0 ] : nullptr;
                 active_lights.size = render_scene.active_lights;
@@ -432,6 +474,7 @@ int main( int argc, char** argv ) {
                 frame_renderer.render_config.volumetric_fog.draw_imgui();
                 frame_renderer.render_config.taa.draw_imgui();
                 frame_renderer.render_config.raytraced_shadows.draw_imgui();
+                frame_renderer.render_config.raytraced_reflections.draw_imgui();
 
                 if ( frame_renderer.render_config.debug_draw.inspect_mesh_instance ) {
                     MeshInstance& mi = render_scene.mesh_instances[ frame_renderer.render_config.debug_draw.mesh_instance_index ];
@@ -458,6 +501,8 @@ int main( int argc, char** argv ) {
                 }
             }
             ImGui::End();
+
+            const bool camera_edited = game_camera.draw_debug_ui();
 
             if ( ImGui::Begin( "GPU" ) ) {
                 renderer.imgui_draw();

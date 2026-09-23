@@ -1,5 +1,5 @@
 raptor_add_chapter(
-	Chapter06
+	Chapter07
 	../raptor/graphics/render_passes/bloom_pass.hpp
 	../raptor/graphics/render_passes/bloom_pass.cpp
 	../raptor/graphics/render_passes/culling_pass.hpp
@@ -14,10 +14,8 @@ raptor_add_chapter(
 	../raptor/graphics/render_passes/hdr_color_pass.cpp
 	../raptor/graphics/render_passes/lighting_pass.hpp
 	../raptor/graphics/render_passes/lighting_pass.cpp
-	../raptor/graphics/render_passes/meshlet_animation_pass.hpp
-	../raptor/graphics/render_passes/meshlet_animation_pass.cpp
 	../raptor/graphics/render_passes/transparent_pass.hpp
 	../raptor/graphics/render_passes/transparent_pass.cpp
 	main.cpp
 )
-raptor_link_chapter_deps(Chapter06)
+raptor_link_chapter_deps(Chapter07)
