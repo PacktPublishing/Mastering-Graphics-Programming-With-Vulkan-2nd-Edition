@@ -7,6 +7,7 @@
 #include "foundation/hash_map.hpp"
 #include "foundation/file.hpp"
 #include "foundation/numerics.hpp"
+#include "foundation/bit.hpp"
 
 #include <vulkan/vk_enum_string_helper.h>
 #include "external/vk_mem_alloc.h"
@@ -1132,6 +1133,10 @@ void GpuDevice::init( const GpuDeviceCreation& creation ) {
             check( result );
         }
     }
+
+    VkDescriptorSetLayoutBinding dsdp[ 4 ];
+    VkDescriptorSetLayoutCreateInfo layout_info;
+    layout_info.pBindings = dsdp;
 
     // Final use of temp allocator, free all temporary memory created here.
     temp_allocator->free_marker( initial_temp_allocator_marker );
@@ -4538,7 +4543,7 @@ void GpuDevice::recreate_image_view( ImageViewHandle image_view ) {
     set_resource_name( VK_OBJECT_TYPE_IMAGE_VIEW, (u64)vk_image_view->vk_image_view, vk_image_view->name );
 }
 
-PagePoolHandle GpuDevice::allocate_image_pool( ImageHandle image_handle, u32 pool_size ) {
+PagePoolHandle GpuDevice::allocate_image_pool( ImageHandle image_handle, u64 max_pool_size, u32 release_delay_frames ) {
 
     Image* image = get_image( image_handle );
     if ( image == nullptr ) {
@@ -4581,8 +4586,11 @@ PagePoolHandle GpuDevice::allocate_image_pool( ImageHandle image_handle, u32 poo
     VkMemoryRequirements memory_requirements{};
     vkGetImageMemoryRequirements( vulkan_device, image->vk_image, &memory_requirements );
 
+    // For sparse resources the alignment is the sparse block size in bytes.
     const VkDeviceSize page_size = memory_requirements.alignment;
     const VkExtent3D granularity = sparse_requirement->formatProperties.imageGranularity;
+
+    page_pool->memory_type_bits = memory_requirements.memoryTypeBits;
 
     page_pool->block_width = granularity.width;
     page_pool->block_height = granularity.height;
@@ -4594,22 +4602,23 @@ PagePoolHandle GpuDevice::allocate_image_pool( ImageHandle image_handle, u32 poo
     page_pool->mip_tail_stride = sparse_requirement->imageMipTailStride;
     page_pool->sparse_flags = sparse_requirement->formatProperties.flags;
 
-    page_pool->used_pages = 0;
-    page_pool->size = pool_size;
+    sparse_requirements.shutdown();
 
     const bool has_mip_tail = page_pool->mip_tail_first_lod < image->mip_level_count;
     const bool single_mip_tail = ( page_pool->sparse_flags & VK_SPARSE_IMAGE_FORMAT_SINGLE_MIPTAIL_BIT ) != 0;
     const u32 tail_count = has_mip_tail ? ( single_mip_tail ? 1 : image->array_layer_count ) : 0;
-    const VkDeviceSize mip_tail_memory_size = page_pool->mip_tail_size * tail_count;
 
-    RASSERT( mip_tail_memory_size <= pool_size );
+    // Per-layer tails that fit exactly one page are bound lazily like any other page.
+    // A single tail shared by all layers, or tails bigger than a page, stay permanently resident.
+    page_pool->paged_mip_tail = has_mip_tail && !single_mip_tail && page_pool->mip_tail_size == page_size;
 
-    const VkDeviceSize tiled_pool_size = pool_size - mip_tail_memory_size;
-    const u32 requested_page_count = ( u32 )( tiled_pool_size / page_size );
+    const VkDeviceSize permanent_tail_bytes = ( has_mip_tail && !page_pool->paged_mip_tail ) ? page_pool->mip_tail_size * tail_count : 0;
+    RASSERT( permanent_tail_bytes <= max_pool_size );
 
+    // Virtual pages: every block of every non-tail mip of every layer.
     u32 virtual_page_count = 0;
-    // Calculate virtual pages count
-    for ( u32 mip = 0; mip < raptor::min( (u32)image->mip_level_count, page_pool->mip_tail_first_lod ); ++mip ) {
+
+    for ( u32 mip = 0; mip < raptor::min( ( u32 )image->mip_level_count, page_pool->mip_tail_first_lod ); ++mip ) {
 
         const u32 mip_width = raptor::max( 1, image->width >> mip );
         const u32 mip_height = raptor::max( 1, image->height >> mip );
@@ -4620,37 +4629,55 @@ PagePoolHandle GpuDevice::allocate_image_pool( ImageHandle image_handle, u32 poo
         virtual_page_count += blocks_x * blocks_y * image->array_layer_count;
     }
 
-    const u32 page_count = raptor::min( requested_page_count, virtual_page_count );
-    RASSERT( page_count > 0 );
+    // Budget, in whole chunks. Nothing is allocated here.
+    const u32 k_chunk_pages = PagePool::k_pages_per_chunk;
+    const u64 needed_pages = u64( virtual_page_count ) + ( page_pool->paged_mip_tail ? tail_count : 0 );
+    const u64 budget_pages = ( max_pool_size - permanent_tail_bytes ) / page_size;
 
-    page_pool->vma_allocations.init( allocator, page_count, page_count );
+    const u64 needed_chunks = ( needed_pages + k_chunk_pages - 1 ) / k_chunk_pages;
+    const u64 budget_chunks = budget_pages / k_chunk_pages;
 
-    VmaAllocationCreateInfo allocation_create_info{
-        .usage = VMA_MEMORY_USAGE_GPU_ONLY
-    };
+    page_pool->max_chunks = ( u32 )raptor::min( needed_chunks, budget_chunks );
+    RASSERT( page_pool->max_chunks > 0 || needed_pages == 0 );
 
-    VkMemoryRequirements page_requirements{
-        .size = page_size,
-        .alignment = page_size,
-        .memoryTypeBits = memory_requirements.memoryTypeBits
-    };
+    page_pool->chunks.init( allocator, page_pool->max_chunks, page_pool->max_chunks );
 
-    check( vmaAllocateMemoryPages( vma_allocator, &page_requirements, &allocation_create_info, page_count, page_pool->vma_allocations.data, nullptr ) );
+    for ( u32 c = 0; c < page_pool->max_chunks; ++c ) {
+        page_pool->chunks[ c ] = PagePoolChunk{};
+    }
+
+    page_pool->allocated_chunks = 0;
+    page_pool->free_page_count = 0;
+    page_pool->used_pages = 0;
+    page_pool->first_free_chunk_hint = 0;
+    page_pool->release_delay_frames = release_delay_frames;
 
     page_pool->page_bindings.init( allocator, virtual_page_count, virtual_page_count );
-    page_pool->free_pages.init( allocator, page_count );
-    page_pool->pending_free_pages.init( allocator, page_count );
+    page_pool->pending_free_pages.init( allocator, 64 );
 
     for ( u32 i = 0; i < virtual_page_count; ++i ) {
         page_pool->page_bindings[ i ] = u32_max;
     }
 
-    if ( has_mip_tail ) {
+    const u32 paged_tail_count = page_pool->paged_mip_tail ? tail_count : 0;
+    page_pool->tail_bindings.init( allocator, paged_tail_count, paged_tail_count );
+
+    for ( u32 i = 0; i < paged_tail_count; ++i ) {
+        page_pool->tail_bindings[ i ] = u32_max;
+    }
+
+    page_pool->mip_tail_allocations.init( allocator, 0 );
+
+    if ( has_mip_tail && !page_pool->paged_mip_tail ) {
 
         RASSERT( page_pool->mip_tail_size > 0 );
         RASSERT( ( page_pool->mip_tail_size % page_size ) == 0 );
 
         page_pool->mip_tail_allocations.init( allocator, tail_count, tail_count );
+
+        VmaAllocationCreateInfo allocation_create_info{
+            .usage = VMA_MEMORY_USAGE_GPU_ONLY
+        };
 
         VkMemoryRequirements tail_requirements{
             .size = page_pool->mip_tail_size,
@@ -4687,11 +4714,10 @@ PagePoolHandle GpuDevice::allocate_image_pool( ImageHandle image_handle, u32 poo
         pending_sparse_opaque_memory_info.push( bind_info );
     }
 
-    rprint( "Sparse image: block %ux%u, page %u, pages %u, tail first %u, tail size %llu, tail count %u\n",
-            page_pool->block_width, page_pool->block_height, page_pool->block_size, page_count,
-            page_pool->mip_tail_first_lod, page_pool->mip_tail_size, tail_count );
-
-    sparse_requirements.shutdown();
+    rprint( "Sparse image: block %ux%u, page %u, virtual pages %u, budget %u chunks x %u pages, tail first %u, tail size %llu, tail count %u (%s)\n",
+            page_pool->block_width, page_pool->block_height, page_pool->block_size, virtual_page_count,
+            page_pool->max_chunks, k_chunk_pages, page_pool->mip_tail_first_lod, page_pool->mip_tail_size, tail_count,
+            page_pool->paged_mip_tail ? "paged" : "resident" );
 
     return pool_handle;
 }
@@ -4741,52 +4767,255 @@ void GpuDevice::destroy_page_pool_instant( ResourceHandle raw_handle ) {
 
     PagePool* page_pool = get_page_pool( handle );
     if ( page_pool ) {
-        vmaFreeMemoryPages( vma_allocator, page_pool->vma_allocations.size, page_pool->vma_allocations.data );
+
+        for ( u32 c = 0; c < page_pool->chunks.size; ++c ) {
+            if ( page_pool->chunks[ c ].allocation ) {
+                vmaFreeMemory( vma_allocator, page_pool->chunks[ c ].allocation );
+            }
+        }
 
         if ( page_pool->mip_tail_allocations.size ) {
             vmaFreeMemoryPages( vma_allocator, page_pool->mip_tail_allocations.size, page_pool->mip_tail_allocations.data );
         }
 
-        page_pool->vma_allocations.shutdown();
+        page_pool->chunks.shutdown();
         page_pool->mip_tail_allocations.shutdown();
 
         page_pool->page_bindings.shutdown();
-        page_pool->free_pages.shutdown();
+        page_pool->tail_bindings.shutdown();
         page_pool->pending_free_pages.shutdown();
 
         page_pools_pool.destroy( handle );
     }
 }
 
-void GpuDevice::reset_pool( PagePoolHandle pool_handle ) {
-    PagePool* page_pool = get_page_pool( pool_handle );
-    if ( page_pool == nullptr ) {
-        RASSERT( false );
+// Page pool chunk management ////////////////////////////////////////////
+bool GpuDevice::page_pool_reserve( PagePool* pool, u32 page_count ) {
+
+    const u32 k_chunk_pages = PagePool::k_pages_per_chunk;
+
+    while ( pool->free_page_count < page_count ) {
+
+        // Find an unallocated chunk slot. Lowest index first so live pages stay packed.
+        u32 slot = u32_max;
+        for ( u32 c = 0; c < pool->chunks.size; ++c ) {
+            if ( pool->chunks[ c ].allocation == nullptr ) {
+                slot = c;
+                break;
+            }
+        }
+
+        if ( slot == u32_max ) {
+            // Budget exhausted.
+            return false;
+        }
+
+        // Dedicated allocation: freeing the chunk gives the memory back to the driver,
+        // instead of leaving a hole in a shared 256 MiB VMA block.
+        VmaAllocationCreateInfo allocation_create_info{
+            .flags = VMA_ALLOCATION_CREATE_DEDICATED_MEMORY_BIT,
+            .usage = VMA_MEMORY_USAGE_GPU_ONLY
+        };
+
+        VkMemoryRequirements chunk_requirements{
+            .size = VkDeviceSize( pool->block_size ) * k_chunk_pages,
+            .alignment = pool->block_size,
+            .memoryTypeBits = pool->memory_type_bits
+        };
+
+        PagePoolChunk& chunk = pool->chunks[ slot ];
+
+        VmaAllocationInfo allocation_info{};
+        const VkResult result = vmaAllocateMemory( vma_allocator, &chunk_requirements, &allocation_create_info, &chunk.allocation, &allocation_info );
+
+        if ( result != VK_SUCCESS ) {
+            chunk.allocation = nullptr;
+            rprint( "Sparse page pool: chunk allocation failed (%s)\n", string_VkResult( result ) );
+            return false;
+        }
+
+        chunk.device_memory = allocation_info.deviceMemory;
+        chunk.memory_offset = allocation_info.offset;
+        chunk.free_mask = ~0ull;
+        chunk.used_pages = 0;
+        chunk.empty_since_frame = absolute_frame;
+        chunk.release_timeline_value = 0;   // never bound yet
+
+        pool->allocated_chunks++;
+        pool->free_page_count += k_chunk_pages;
+        pool->first_free_chunk_hint = raptor::min( pool->first_free_chunk_hint, slot );
+    }
+
+    return true;
+}
+
+u32 GpuDevice::page_pool_allocate_page( PagePool* pool ) {
+
+    RASSERT( pool->free_page_count > 0 );
+
+    for ( u32 c = pool->first_free_chunk_hint; c < pool->chunks.size; ++c ) {
+
+        PagePoolChunk& chunk = pool->chunks[ c ];
+
+        if ( chunk.allocation == nullptr || chunk.free_mask == 0 ) {
+            continue;
+        }
+
+        const u32 slot = ( u32 )trailing_zeros_u64( chunk.free_mask );
+        chunk.free_mask &= ~( 1ull << slot );
+        chunk.used_pages++;
+
+        pool->free_page_count--;
+        pool->used_pages++;
+        pool->first_free_chunk_hint = c;
+
+        return c * PagePool::k_pages_per_chunk + slot;
+    }
+
+    RASSERT( false );
+    return u32_max;
+}
+
+// Called by update_sparse_resources() right after vkQueueBindSparse(): the unbind of this page is
+// in the batch just submitted, which this frame's graphics submission waits on.
+void GpuDevice::page_pool_free_page( PagePool* pool, u32 page ) {
+
+    const u32 c = page / PagePool::k_pages_per_chunk;
+    const u32 slot = page % PagePool::k_pages_per_chunk;
+
+    PagePoolChunk& chunk = pool->chunks[ c ];
+
+    RASSERT( chunk.allocation != nullptr );
+    RASSERT( ( chunk.free_mask & ( 1ull << slot ) ) == 0 );
+
+    chunk.free_mask |= ( 1ull << slot );
+    chunk.used_pages--;
+
+    if ( chunk.used_pages == 0 ) {
+        chunk.empty_since_frame = absolute_frame;
+        // This frame's graphics submission signals absolute_frame + 1 and waits for the bind batch
+        // containing the unbind: once the timeline reaches it, nothing on the GPU references the chunk.
+        chunk.release_timeline_value = absolute_frame + 1;
+    }
+
+    pool->free_page_count++;
+    pool->used_pages--;
+    pool->first_free_chunk_hint = raptor::min( pool->first_free_chunk_hint, c );
+}
+
+void GpuDevice::page_pool_page_memory( const PagePool* pool, u32 page, VkDeviceMemory& memory, VkDeviceSize& offset ) const {
+
+    const u32 c = page / PagePool::k_pages_per_chunk;
+    const u32 slot = page % PagePool::k_pages_per_chunk;
+
+    const PagePoolChunk& chunk = pool->chunks[ c ];
+    RASSERT( chunk.allocation != nullptr );
+
+    memory = chunk.device_memory;
+    offset = chunk.memory_offset + VkDeviceSize( slot ) * pool->block_size;
+}
+
+void GpuDevice::trim_page_pool( PagePoolHandle pool_handle ) {
+
+    PagePool* pool = get_page_pool( pool_handle );
+    if ( pool == nullptr ) {
         return;
     }
 
-    page_pool->used_pages = 0;
+    // Keep at most one empty chunk as headroom, the lowest one (new pages go there first).
+    bool kept_one = false;
+
+    u64 completed_value = 0;
+    bool completed_value_read = false;
+
+    for ( u32 c = 0; c < pool->chunks.size; ++c ) {
+
+        PagePoolChunk& chunk = pool->chunks[ c ];
+
+        if ( chunk.allocation == nullptr || chunk.used_pages != 0 ) {
+            continue;
+        }
+
+        if ( !kept_one ) {
+            kept_one = true;
+            continue;
+        }
+
+        // Hysteresis for lights flickering between mips.
+        if ( absolute_frame - chunk.empty_since_frame < pool->release_delay_frames ) {
+            continue;
+        }
+
+        // GPU safety: the unbind that emptied the chunk must have executed.
+        if ( !completed_value_read ) {
+            check( vkGetSemaphoreCounterValue( vulkan_device, vulkan_graphics_timeline_semaphore, &completed_value ) );
+            completed_value_read = true;
+        }
+
+        if ( completed_value < chunk.release_timeline_value ) {
+            continue;
+        }
+
+        vmaFreeMemory( vma_allocator, chunk.allocation );
+
+        chunk = PagePoolChunk{};
+
+        pool->allocated_chunks--;
+        pool->free_page_count -= PagePool::k_pages_per_chunk;
+    }
 }
 
-void GpuDevice::bind_image_pages( PagePoolHandle pool_handle, ImageHandle image_handle, u32 x, u32 y, u32 width, u32 height, u32 layer, u32 mip_level ) {
+bool GpuDevice::bind_image_pages( PagePoolHandle pool_handle, ImageHandle image_handle, u32 x, u32 y, u32 width, u32 height, u32 layer, u32 mip_level ) {
     PagePool* page_pool = get_page_pool( pool_handle );
     if ( page_pool == nullptr ) {
         RASSERT( false );
-        return;
+        return false;
     }
 
     Image* image = get_image( image_handle );
     if ( image == nullptr ) {
         RASSERT( false );
-        return;
+        return false;
     }
 
     RASSERT( image->sparse );
     RASSERT( mip_level < image->mip_level_count );
 
-    // Mip tail is permanently resident through opaque bindings.
     if ( mip_level >= page_pool->mip_tail_first_lod ) {
-        return;
+
+        // Permanently resident tail: nothing to do.
+        if ( !page_pool->paged_mip_tail ) {
+            return true;
+        }
+
+        // The tail of a layer is one unit: binding any mip inside it binds the whole tail.
+        RASSERT( layer < page_pool->tail_bindings.size );
+
+        if ( page_pool->tail_bindings[ layer ] != u32_max ) {
+            return true;
+        }
+
+        if ( !page_pool_reserve( page_pool, 1 ) ) {
+            return false;
+        }
+
+        const u32 page_index = page_pool_allocate_page( page_pool );
+        page_pool->tail_bindings[ layer ] = page_index;
+
+        VkSparseMemoryBind& bind = pending_sparse_opaque_queue_binds.push_use();
+        bind = {};
+        bind.resourceOffset = page_pool->mip_tail_offset + layer * page_pool->mip_tail_stride;
+        bind.size = page_pool->mip_tail_size;
+        page_pool_page_memory( page_pool, page_index, bind.memory, bind.memoryOffset );
+
+        SparseMemoryBindInfo& bind_info = pending_sparse_opaque_memory_info.push_use();
+        bind_info = {};
+        bind_info.image = image->vk_image;
+        bind_info.page_pool = pool_handle;
+        bind_info.binding_array_offset = pending_sparse_opaque_queue_binds.size - 1;
+        bind_info.count = 1;
+
+        return true;
     }
 
     const u32 block_width = page_pool->block_width;
@@ -4794,20 +5023,10 @@ void GpuDevice::bind_image_pages( PagePoolHandle pool_handle, ImageHandle image_
 
     const u32 num_blocks_x = ( width + block_width - 1 ) / block_width;
     const u32 num_blocks_y = ( height + block_height - 1 ) / block_height;
-    const u32 num_blocks = num_blocks_x * num_blocks_y;
 
     // Checks for mip selection
-    RASSERT( mip_level < image->mip_level_count );
     RASSERT( ( x % block_width ) == 0 );
     RASSERT( ( y % block_height ) == 0 );
-
-    const u32 unused_pages = page_pool->vma_allocations.size - page_pool->used_pages;
-    const u32 available_pages = unused_pages + page_pool->free_pages.size;
-
-    if ( num_blocks > available_pages ) {
-        RASSERT( false );
-        return;
-    }
 
     const u32 mip_width = raptor_max( 1, image->width >> mip_level );
     const u32 mip_height = raptor_max( 1, image->height >> mip_level );
@@ -4815,36 +5034,46 @@ void GpuDevice::bind_image_pages( PagePoolHandle pool_handle, ImageHandle image_
     RASSERT( x + width <= mip_width );
     RASSERT( y + height <= mip_height );
 
-    u32 array_offset = pending_sparse_queue_binds.size;
+    // Count the blocks that are not bound yet, so a partial rebind does not over-reserve.
+    u32 blocks_to_bind = 0;
 
-    VkImageAspectFlags aspect = TextureFormat::has_depth( image->vk_format ) ? VK_IMAGE_ASPECT_DEPTH_BIT : VK_IMAGE_ASPECT_COLOR_BIT;
     for ( u32 block_y = 0; block_y < num_blocks_y; ++block_y ) {
         for ( u32 block_x = 0; block_x < num_blocks_x; ++block_x ) {
-            VkSparseImageMemoryBind sparse_bind{ };
+            const u32 virtual_page_index = sparse_page_index( image, page_pool, mip_level, layer,
+                                                              block_x * block_width + x, block_y * block_height + y );
+            blocks_to_bind += page_pool->page_bindings[ virtual_page_index ] == u32_max ? 1 : 0;
+        }
+    }
+
+    if ( blocks_to_bind == 0 ) {
+        return true;
+    }
+
+    // Grow before touching any state: either the whole rect is bound or nothing is.
+    if ( !page_pool_reserve( page_pool, blocks_to_bind ) ) {
+        return false;
+    }
+
+    const u32 array_offset = pending_sparse_queue_binds.size;
+
+    const VkImageAspectFlags aspect = TextureFormat::has_depth( image->vk_format ) ? VK_IMAGE_ASPECT_DEPTH_BIT : VK_IMAGE_ASPECT_COLOR_BIT;
+
+    for ( u32 block_y = 0; block_y < num_blocks_y; ++block_y ) {
+        for ( u32 block_x = 0; block_x < num_blocks_x; ++block_x ) {
 
             const u32 dest_x = block_x * block_width + x;
             const u32 dest_y = block_y * block_height + y;
 
             const u32 virtual_page_index = sparse_page_index( image, page_pool, mip_level, layer, dest_x, dest_y );
 
-            RASSERT( page_pool->page_bindings[ virtual_page_index ] == u32_max );
-
-            u32 page_index;
-
-            if ( page_pool->free_pages.size ) {
-                page_index = page_pool->free_pages.back();
-                page_pool->free_pages.pop();
-            } else {
-                RASSERT( page_pool->used_pages < page_pool->vma_allocations.size );
-                page_index = page_pool->used_pages++;
+            if ( page_pool->page_bindings[ virtual_page_index ] != u32_max ) {
+                continue;
             }
 
+            const u32 page_index = page_pool_allocate_page( page_pool );
             page_pool->page_bindings[ virtual_page_index ] = page_index;
 
-            VmaAllocation allocation = page_pool->vma_allocations[ page_index ];
-
-            VmaAllocationInfo allocation_info{ };
-            vmaGetAllocationInfo( vma_allocator, allocation, &allocation_info );
+            VkSparseImageMemoryBind sparse_bind{ };
 
             sparse_bind.subresource.aspectMask = aspect;
             sparse_bind.subresource.arrayLayer = layer;
@@ -4855,8 +5084,7 @@ void GpuDevice::bind_image_pages( PagePoolHandle pool_handle, ImageHandle image_
             sparse_bind.extent = { raptor_min( block_width, x + width - dest_x ),
                                    raptor_min( block_height, y + height - dest_y ), 1 };
 
-            sparse_bind.memory = allocation_info.deviceMemory;
-            sparse_bind.memoryOffset = allocation_info.offset;
+            page_pool_page_memory( page_pool, page_index, sparse_bind.memory, sparse_bind.memoryOffset );
 
             pending_sparse_queue_binds.push( sparse_bind );
         }
@@ -4866,9 +5094,11 @@ void GpuDevice::bind_image_pages( PagePoolHandle pool_handle, ImageHandle image_
     bind_info.image = image->vk_image;
     bind_info.page_pool = pool_handle;
     bind_info.binding_array_offset = array_offset;
-    bind_info.count = num_blocks;
+    bind_info.count = blocks_to_bind;
 
     pending_sparse_memory_info.push( bind_info );
+
+    return true;
 }
 
 void GpuDevice::unbind_image_pages( PagePoolHandle pool_handle, ImageHandle handle, u32 x, u32 y, u32 width, u32 height, u32 layer, u32 mip_level ) {
@@ -4881,21 +5111,49 @@ void GpuDevice::unbind_image_pages( PagePoolHandle pool_handle, ImageHandle hand
     RASSERT( image->sparse );
 
     if ( mip_level >= page_pool->mip_tail_first_lod ) {
+
+        if ( !page_pool->paged_mip_tail ) {
+            return;
+        }
+
+        RASSERT( layer < page_pool->tail_bindings.size );
+
+        const u32 page_index = page_pool->tail_bindings[ layer ];
+        if ( page_index == u32_max ) {
+            return;
+        }
+
+        VkSparseMemoryBind& bind = pending_sparse_opaque_queue_binds.push_use();
+        bind = {};
+        bind.resourceOffset = page_pool->mip_tail_offset + layer * page_pool->mip_tail_stride;
+        bind.size = page_pool->mip_tail_size;
+        bind.memory = VK_NULL_HANDLE;
+
+        SparseMemoryBindInfo& bind_info = pending_sparse_opaque_memory_info.push_use();
+        bind_info = {};
+        bind_info.image = image->vk_image;
+        bind_info.page_pool = pool_handle;
+        bind_info.binding_array_offset = pending_sparse_opaque_queue_binds.size - 1;
+        bind_info.count = 1;
+
+        page_pool->tail_bindings[ layer ] = u32_max;
+        page_pool->pending_free_pages.push( page_index );
         return;
     }
 
     const u32 block_x_begin = x / page_pool->block_width;
     const u32 block_y_begin = y / page_pool->block_height;
 
-    const u32 block_x_end = ceilu32( ( x + width ) / float( page_pool->block_width ) );
-    const u32 block_y_end = ceilu32( ( y + height ) / float( page_pool->block_height ) );
+    const u32 block_x_end = ( x + width + page_pool->block_width - 1 ) / page_pool->block_width;
+    const u32 block_y_end = ( y + height + page_pool->block_height - 1 ) / page_pool->block_height;
 
-    SparseMemoryBindInfo& bind_info = pending_sparse_memory_info.push_use();
+    const VkImageAspectFlags aspect = TextureFormat::has_depth( image->vk_format ) ? VK_IMAGE_ASPECT_DEPTH_BIT : VK_IMAGE_ASPECT_COLOR_BIT;
 
-    bind_info.image = image->vk_image;
-    bind_info.page_pool = pool_handle;
-    bind_info.binding_array_offset = pending_sparse_queue_binds.size;
-    bind_info.count = 0;
+    const u32 mip_width = raptor_max( 1, image->width >> mip_level );
+    const u32 mip_height = raptor_max( 1, image->height >> mip_level );
+
+    const u32 array_offset = pending_sparse_queue_binds.size;
+    u32 count = 0;
 
     for ( u32 block_y = block_y_begin; block_y < block_y_end; ++block_y ) {
         for ( u32 block_x = block_x_begin; block_x < block_x_end; ++block_x ) {
@@ -4914,15 +5172,12 @@ void GpuDevice::unbind_image_pages( PagePoolHandle pool_handle, ImageHandle hand
 
             bind = {};
             bind.subresource = {
-                .aspectMask = VK_IMAGE_ASPECT_DEPTH_BIT,
+                .aspectMask = aspect,
                 .mipLevel = mip_level,
                 .arrayLayer = layer
             };
 
             bind.offset = { i32( block_x * page_pool->block_width ), i32( block_y * page_pool->block_height ), 0 };
-
-            const u32 mip_width = raptor_max( 1, image->width >> mip_level );
-            const u32 mip_height = raptor_max( 1, image->height >> mip_level );
 
             bind.extent = { raptor_min( page_pool->block_width, mip_width - block_x * page_pool->block_width ),
                             raptor_min( page_pool->block_height, mip_height - block_y * page_pool->block_height ), 1 };
@@ -4934,9 +5189,20 @@ void GpuDevice::unbind_image_pages( PagePoolHandle pool_handle, ImageHandle hand
             page_pool->page_bindings[ virtual_page_index ] = u32_max;
             page_pool->pending_free_pages.push( page_index );
 
-            ++bind_info.count;
+            ++count;
         }
     }
+
+    if ( count == 0 ) {
+        return;
+    }
+
+    SparseMemoryBindInfo& bind_info = pending_sparse_memory_info.push_use();
+    bind_info = {};
+    bind_info.image = image->vk_image;
+    bind_info.page_pool = pool_handle;
+    bind_info.binding_array_offset = array_offset;
+    bind_info.count = count;
 }
 
 SparseImageMemoryStats GpuDevice::get_sparse_image_memory_stats( PagePoolHandle pool_handle, ImageHandle image_handle ) {
@@ -4949,26 +5215,21 @@ SparseImageMemoryStats GpuDevice::get_sparse_image_memory_stats( PagePoolHandle 
         return stats;
     }
 
-    // Count currently mapped tiled pages.
-    for ( u32 i = 0; i < pool->page_bindings.size; ++i ) {
-        if ( pool->page_bindings[ i ] != u32_max ) {
-            ++stats.resident_pages;
-        }
-    }
+    // Bound pages (tiles + paged tails). Pages unbound this frame are still counted until submit.
+    stats.resident_pages = pool->used_pages - pool->pending_free_pages.size;
+    stats.allocated_pages = pool->allocated_chunks * PagePool::k_pages_per_chunk;
 
-    stats.allocated_pages = pool->vma_allocations.size;
+    const VkDeviceSize permanent_tail_bytes = pool->mip_tail_size * pool->mip_tail_allocations.size;
 
-    const VkDeviceSize tail_bytes = pool->mip_tail_size * pool->mip_tail_allocations.size;
-
-    stats.resident_bytes = VkDeviceSize( stats.resident_pages ) * pool->block_size + tail_bytes;
-    stats.allocated_bytes = VkDeviceSize( stats.allocated_pages ) * pool->block_size + tail_bytes;
+    stats.resident_bytes = VkDeviceSize( stats.resident_pages ) * pool->block_size + permanent_tail_bytes;
+    stats.allocated_bytes = VkDeviceSize( stats.allocated_pages ) * pool->block_size + permanent_tail_bytes;
 
     // Worst residency if every layer uses mip 0.
     const u32 blocks_x = ( image->width + pool->block_width - 1 ) / pool->block_width;
     const u32 blocks_y = ( image->height + pool->block_height - 1 ) / pool->block_height;
 
     stats.max_mip0_pages = blocks_x * blocks_y * image->array_layer_count;
-    stats.max_mip0_bytes = VkDeviceSize( stats.max_mip0_pages ) * pool->block_size + tail_bytes;
+    stats.max_mip0_bytes = VkDeviceSize( stats.max_mip0_pages ) * pool->block_size + permanent_tail_bytes;
 
     return stats;
 }
@@ -5270,24 +5531,31 @@ bool GpuDevice::update_sparse_resources() {
         sparse_opaque_binding_infos.shutdown();
     }
 
-    // Free pages from page pools that have been unbound.
-    for ( u32 i = 0; i < pending_sparse_memory_info.size; ++i ) {
+    // Pages unbound this frame become reusable by the next batch: it is submitted to the same
+    // queue and waits for this frame's graphics work, which in turn waits for this batch.
+    // Memory is given back to the driver only later, in trim_page_pool().
+    auto release_pending_pages = [ this ]( const Array<SparseMemoryBindInfo>& infos ) {
+        for ( u32 i = 0; i < infos.size; ++i ) {
 
-        const SparseMemoryBindInfo& info = pending_sparse_memory_info[ i ];
+            const SparseMemoryBindInfo& info = infos[ i ];
 
-        if ( info.page_pool.is_invalid() ) {
-            continue;
+            if ( info.page_pool.is_invalid() ) {
+                continue;
+            }
+
+            PagePool* pool = get_page_pool( info.page_pool );
+            RASSERT( pool );
+
+            for ( u32 p = 0; p < pool->pending_free_pages.size; ++p ) {
+                page_pool_free_page( pool, pool->pending_free_pages[ p ] );
+            }
+
+            pool->pending_free_pages.clear();
         }
+    };
 
-        PagePool* pool = get_page_pool( info.page_pool );
-        RASSERT( pool );
-
-        for ( u32 p = 0; p < pool->pending_free_pages.size; ++p ) {
-            pool->free_pages.push( pool->pending_free_pages[ p ] );
-        }
-
-        pool->pending_free_pages.clear();
-    }
+    release_pending_pages( pending_sparse_memory_info );
+    release_pending_pages( pending_sparse_opaque_memory_info );
 
     pending_sparse_memory_info.clear();
     pending_sparse_queue_binds.clear();

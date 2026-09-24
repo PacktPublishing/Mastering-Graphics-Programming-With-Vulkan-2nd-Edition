@@ -123,11 +123,8 @@ void main() {
     float raw_depth = texelFetch( global_textures[ frame.depth_texture_index ], fullres_xy, 0 ).r;
 #endif // REFLECTION_USE_GUIDE
 
-    float roughness = frame.forced_roughness > 0.0 ? frame.forced_roughness : texelFetch( global_textures[ reflections.gbuffer_texures.x ], fullres_xy, 0 ).y;
-    roughness = max( 0.001, roughness);
-
+    float perceptual_roughness = max( texelFetch( global_textures[ reflections.gbuffer_texures.x ], fullres_xy, 0 ).y, k_min_perceptual_roughness );
     uint rng_state = seed( gl_LaunchIDEXT.xy ) + frame.current_frame;
-
     float rnd_normalizer = 1.0 / float( 0xFFFFFFFFu );
 
     // Rand should be in [0..1] values
@@ -138,8 +135,7 @@ void main() {
 
     // Debug
    // U = vec2(.5, .5);
-
-    if ( roughness <= 0.333 ) {
+    if ( perceptual_roughness <= 0.333 ) {
 
         vec3 normal = octahedral_decode( encoded_normal );
 
@@ -151,7 +147,7 @@ void main() {
             normal = -normal;
         }
 
-        float alpha = roughness * roughness;
+        float alpha = perceptual_roughness_to_alpha( perceptual_roughness );
         mat3 local_frame = make_tangent_frame( normal );
         vec3 wo_local = world_to_local( local_frame, incoming );
 
@@ -565,7 +561,7 @@ layout (local_size_x = 8, local_size_y = 8, local_size_z = 1) in;
 void main() {
     ivec2 frag_coord = ivec2( gl_GlobalInvocationID.xy );
     vec2 uv = uv_nearest( frag_coord, vec2(brdf_lut_push.output_texture_size) );
-    vec2 integrated_brdf = integrate_brdf( uv.x, 1 - uv.y );
+    vec2 integrated_brdf = integrate_brdf( uv.x, uv.y );
     imageStore( global_images_2d[ brdf_lut_push.output_texture_index ], frag_coord, vec4( integrated_brdf, 0, 0 ) );
 }
 

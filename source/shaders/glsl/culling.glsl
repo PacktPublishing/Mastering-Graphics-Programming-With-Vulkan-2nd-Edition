@@ -14,7 +14,7 @@
 bool is_sphere_visible( mat4 model, vec4 bounding_sphere, mat4 culling_view_projection, uint depth_pyramid_texture_index ) {
     // Transform bounding sphere to view space.
     vec4 world_bounding_center = model * vec4(bounding_sphere.xyz, 1);
-    vec4 view_bounding_center = freeze_occlusion_camera() ? frame.world_to_camera * world_bounding_center : frame.world_to_camera_debug * world_bounding_center;
+    vec4 view_bounding_center = culling_world_to_camera() * world_bounding_center;
 
     float scale = length( model[0] );
     float radius = bounding_sphere.w * scale * 1.1; // Artificially inflate bounding sphere.
@@ -29,7 +29,7 @@ bool is_sphere_visible( mat4 model, vec4 bounding_sphere, mat4 culling_view_proj
     bool occlusion_visible = true;
     if ( frustum_visible ) {
 
-        vec3 camera_world_position = freeze_occlusion_camera() ? frame.camera_position.xyz : frame.camera_position_debug.xyz;
+        vec3 camera_world_position = culling_camera_position();
 
         occlusion_visible = occlusion_cull( view_bounding_center.xyz, radius, frame.z_near, frame.projection_00, frame.projection_11,
                                             depth_pyramid_texture_index, world_bounding_center.xyz, camera_world_position,
@@ -115,7 +115,7 @@ void main() {
 
     MeshDraw mesh_draw = mesh_draws[mesh_draw_index];
 
-    mat4 culling_view_projection = frame.previous_view_projection;
+    mat4 culling_view_projection = get_culling_view_projection( false );
 
     vec4 bounding_sphere = mesh_bounds[mesh_draw_index];
     bool mesh_instance_visible = is_sphere_visible( model, bounding_sphere,
@@ -166,7 +166,7 @@ void main() {
     MeshDraw mesh_draw = mesh_draws[mesh_draw_index];
     vec4 bounding_sphere = mesh_bounds[mesh_draw_index];
 
-    mat4 culling_view_projection = frame.view_projection;
+    mat4 culling_view_projection = get_culling_view_projection( true );
     bool mesh_instance_visible = is_sphere_visible( model, bounding_sphere,
                                                 culling_view_projection,
                                                 depth_pyramid_texture_index );

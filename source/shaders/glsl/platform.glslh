@@ -72,6 +72,8 @@ layout( set = GLOBAL_SET, binding = BINDLESS_IMAGES ) writeonly uniform uimage3D
 #define INV_PI (1.0 / PI)
 #define INVALID_TEXTURE_INDEX 65535
 
+const float k_min_perceptual_roughness = 0.045;
+
 // Utility ///////////////////////////////////////////////////////////////
 float saturate( float a ) {
     return clamp(a, 0.0f, 1.0f);

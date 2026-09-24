@@ -88,13 +88,9 @@ void main()
 
     vec4 view_center = vec4(0);
     // Backface culling and move meshlet in camera space
-    if ( freeze_occlusion_camera() ) {
-        accept = !coneCull(world_center.xyz, radius, cone_axis, cone_cutoff, frame.camera_position_debug.xyz);
-        view_center = frame.world_to_camera_debug * world_center;
-    } else {
-        accept = !coneCull(world_center.xyz, radius, cone_axis, cone_cutoff, frame.camera_position.xyz);
-        view_center = frame.world_to_camera * world_center;
-    }
+    const vec3 culling_camera = culling_camera_position();
+    accept = !coneCull( world_center.xyz, radius, cone_axis, cone_cutoff, culling_camera );
+    view_center = culling_world_to_camera() * world_center;
 
     bool frustum_visible = true;
     for ( uint i = 0; i < 6; ++i ) {
@@ -106,8 +102,8 @@ void main()
     bool occlusion_visible = true;
     if ( frustum_visible ) {
 
-        vec3 camera_world_position = freeze_occlusion_camera() ? frame.camera_position_debug.xyz : frame.camera_position.xyz;
-        mat4 culling_view_projection = late_flag == 0 ? frame.previous_view_projection : frame.view_projection;
+        vec3 camera_world_position = culling_camera;
+        mat4 culling_view_projection = get_culling_view_projection( late_flag != 0 );
 
         occlusion_visible = occlusion_cull( view_center.xyz, radius, frame.z_near, frame.projection_00, frame.projection_11,
                                             depth_pyramid_texture_index, world_center.xyz, camera_world_position,
@@ -598,9 +594,10 @@ void main() {
     normal_out.rg = octahedral_encode(normal);
 
     // PBR Parameters
-    occlusion_roughness_metalness_out.rgb = calculate_pbr_parameters( mesh_draw.metallic_roughness_occlusion_factor.x, mesh_draw.metallic_roughness_occlusion_factor.y,
-                                                                      mesh_draw.textures.y, mesh_draw.metallic_roughness_occlusion_factor.z, mesh_draw.textures.w, vTexcoord0_W.xy );
+    vec3 orm = calculate_pbr_parameters( mesh_draw.metallic_roughness_occlusion_factor.x, mesh_draw.metallic_roughness_occlusion_factor.y,
+                                         mesh_draw.textures.y, mesh_draw.metallic_roughness_occlusion_factor.z, mesh_draw.textures.w, vTexcoord0_W.xy );
 
+    occlusion_roughness_metalness_out.rgb = resolve_orm( orm, normal );
     emissive_out = vec4( calculate_emissive(mesh_draw.emissive.rgb, uint(mesh_draw.emissive.w), vTexcoord0_W.xy ), 1.0 );
 
     mesh_id = mesh_draw_index;
@@ -652,7 +649,7 @@ void main() {
 
     vec3 orm = calculate_pbr_parameters( mesh_draw.metallic_roughness_occlusion_factor.x, mesh_draw.metallic_roughness_occlusion_factor.y,
                                                                       mesh_draw.textures.y, mesh_draw.metallic_roughness_occlusion_factor.z, mesh_draw.textures.w, vTexcoord0_W.xy );
-
+    orm = resolve_orm( orm, normal );
     vec3 emissive_colour = calculate_emissive(mesh_draw.emissive.rgb, uint(mesh_draw.emissive.w), vTexcoord0_W.xy );
 
 #if DEBUG

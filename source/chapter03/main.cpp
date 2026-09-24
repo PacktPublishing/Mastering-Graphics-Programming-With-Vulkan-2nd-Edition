@@ -1,7 +1,7 @@
-
 #include "application/window.hpp"
 #include "application/input.hpp"
 #include "application/game_camera.hpp"
+#include "application/demo_ui.hpp"
 
 #include "graphics/gpu_device.hpp"
 #include "graphics/command_buffer.hpp"
@@ -84,7 +84,7 @@ namespace chapter3 {
         f32                                     light_range;
         f32                                     light_intensity;
         f32                                     padding[ 2 ];
-    }; // struct GpuFrameData
+    }; // struct GpuSceneData
 
     //
     //
@@ -1271,7 +1271,7 @@ int main( int argc, char** argv ) {
              .binding = renderer.get_binding_index( reflection_info, "MeshData" ) },
         };
         ds_creation.dynamic_buffers = {
-            {.binding = renderer.get_binding_index( reflection_info, "LocalConstants" ), .size = sizeof( GpuFrameData ) },
+            {.binding = renderer.get_binding_index( reflection_info, "LocalConstants" ), .size = sizeof( chapter3::GpuSceneData ) },
         };
 
         chapter3::scene_ds = gpu.create_descriptor_set( ds_creation );
@@ -1337,6 +1337,9 @@ int main( int argc, char** argv ) {
     glm::vec2 last_clicked_position = glm::vec2{ 1280 / 2.0f, 800 / 2.0f };
     bool update_mesh_data = true;
 
+    DemoUi demo_ui;
+    demo_ui.set_tools( &gpu_profiler, nullptr, &frame_graph, MemoryService::instance() );
+
     while ( !window.requested_exit ) {
         ZoneScopedN("RenderLoop");
 
@@ -1382,43 +1385,67 @@ int main( int argc, char** argv ) {
         {
             ZoneScopedN( "ImGui Recording" );
 
-            if ( ImGui::Begin( "Raptor ImGui" ) ) {
-                ImGui::InputFloat( "Scene global scale", &frame_renderer.render_config.global_scale, 0.001f );
-                ImGui::SliderFloat3( "Light position", &light_position[0], -30.0f, 30.0f );
-                ImGui::InputFloat( "Light radius", &light_radius );
-                ImGui::InputFloat( "Light intensity", &light_intensity );
-                ImGui::InputFloat3( "Camera position", &game_camera.camera.position[0] );
-                ImGui::InputFloat3( "Camera target movement", &game_camera.target_movement[0] );
-                ImGui::Separator();
+            if ( demo_ui.begin( "Chapter 3" ) ) {
 
-                static bool fullscreen = false;
-                if ( ImGui::Checkbox( "Fullscreen", &fullscreen ) ) {
-                    window.set_fullscreen( fullscreen );
+                if ( demo_ui.begin_chapter_tab() ) {
+                    demo_ui.end_chapter_tab();
                 }
 
-                static i32 present_mode = renderer.gpu->present_mode;
-                if ( ImGui::Combo( "Present Mode", &present_mode, raptor::PresentMode::s_value_names, raptor::PresentMode::Count ) ) {
-                    renderer.set_presentation_mode( ( raptor::PresentMode::Enum )present_mode );
+                if ( demo_ui.begin_scene_tab() ) {
+                    game_camera.draw_debug_ui();
+
+                    Span<Light> active_lights{ &render_scene.lights[ 0 ], render_scene.active_lights };
+                    frame_renderer.render_config.lighting.draw_imgui( active_lights );
+
+                    scene_graph.debug_ui();
+                    demo_ui.end_tab();
                 }
 
-                frame_graph.add_ui();
+                if ( demo_ui.begin_renderer_tab() ) {
+                    frame_renderer.render_config.draw_common_imgui();
 
-                frame_graph.debug_ui();
+                    static bool fullscreen = false;
+                    if ( ImGui::Checkbox( "Fullscreen", &fullscreen ) ) {
+                        window.set_fullscreen( fullscreen );
+                    }
 
-                frame_renderer.render_config.post.draw_imgui();
+                    static i32 present_mode = renderer.gpu->present_mode;
+                    if ( ImGui::Combo( "Present Mode", &present_mode, raptor::PresentMode::s_value_names, raptor::PresentMode::Count ) ) {
+                        renderer.set_presentation_mode( ( raptor::PresentMode::Enum )present_mode );
+                    }
+
+                    if ( ImGui::Button( "Reload Pipelines" ) ) {
+                        frame_renderer.reload_psos();
+                    }
+
+                    if ( ImGui::Button( "Increase internal resolution" ) ) {
+                        gpu.wait_for_previous_frame();
+
+                        u32 new_width = 2500;
+                        u32 new_height = 3100;
+
+                        frame_renderer.on_resize( gpu, new_width, new_height );
+
+                        frame_graph.on_resize( &renderer,
+                                               &frame_renderer.render_blackboard,
+                                               &frame_renderer.render_config,
+                                               frame_renderer.render_blackboard.render_width,
+                                               frame_renderer.render_blackboard.render_height );
+
+                        game_camera.camera.set_aspect_ratio( ( f32 )new_width / ( f32 )new_height );
+                    }
+
+                    frame_renderer.render_config.post.draw_imgui();
+
+                    demo_ui.end_tab();
+                }
             }
-            ImGui::End();
+            demo_ui.end();
 
-            if ( ImGui::Begin( "GPU" ) ) {
-                renderer.imgui_draw();
-
-                ImGui::Separator();
-                gpu_profiler.imgui_draw();
-
+            if ( demo_ui.begin_outputs() ) {
+                demo_ui.common_outputs_ui();
             }
-            ImGui::End();
-
-            MemoryService::instance()->imgui_draw();
+            demo_ui.end_outputs();
         }
 
         {

@@ -171,6 +171,7 @@ void ImGuiService::init( void* configuration ) {
     io.ConfigFlags |= ImGuiConfigFlags_ViewportsEnable;       // Enable Multi-Viewport / Platform Windows
     io.BackendRendererName = "Raptor_ImGui";
     io.BackendFlags |= ImGuiBackendFlags_RendererHasVtxOffset;
+    io.ConfigNavCaptureKeyboard = false; // Disable keyboard capture so we can use it for camera movement
 
     // Setup scaling
     float main_scale = SDL_GetDisplayContentScale(SDL_GetPrimaryDisplay());

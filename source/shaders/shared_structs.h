@@ -11,6 +11,8 @@ using float2   = glm::vec2;
 using float3   = glm::vec3;
 using float4   = glm::vec4;
 
+#define SHARED_CONST inline constexpr
+
 #elif defined(__SLANG__)
 
 //#define uint uint32_t
@@ -21,6 +23,8 @@ using float4   = glm::vec4;
 //#define float2 float2
 //#define float3 float3
 //#define float4 float4
+
+#define SHARED_CONST static const
 
 #else // GLSL
 
@@ -35,6 +39,8 @@ using float4   = glm::vec4;
 #define float3 vec3
 #define float4 vec4
 
+#define SHARED_CONST const
+
 #endif // __cplusplus
 
 struct GpuFrameConstants {
@@ -43,6 +49,7 @@ struct GpuFrameConstants {
     float4x4    inverse_view_projection;
     float4x4    world_to_camera;
     float4x4    world_to_camera_debug;
+    float4x4    projection;
     float4x4    previous_view_projection;
     float4x4    inverse_projection;
     float4x4    inverse_view;
@@ -78,6 +85,11 @@ struct GpuFrameConstants {
     float       forced_roughness;
     float       volumetric_fog_application_dithering_scale;
     uint        volumetric_fog_application_options;
+
+    float       specular_aa_variance;    // sigma^2, 0 = AA off
+    float       specular_aa_threshold;
+    uint        scene_options;
+    uint        pad000;
 
     float4      frustum_planes[6];
 }; // struct GpuFrameConstants
@@ -333,5 +345,22 @@ struct SVGFPushConstants {
     float sigma_n;
     float sigma_l;
 };
+
+// Options ///////////////////////////////////////////////////////////////
+
+// GpuFrameConstants::culling_options
+SHARED_CONST uint k_culling_frustum_meshes              = 1u << 0;
+SHARED_CONST uint k_culling_frustum_meshlets            = 1u << 1;
+SHARED_CONST uint k_culling_occlusion_meshes            = 1u << 2;
+SHARED_CONST uint k_culling_occlusion_meshlets          = 1u << 3;
+SHARED_CONST uint k_culling_freeze_occlusion_camera     = 1u << 4;
+SHARED_CONST uint k_culling_shadow_meshlets_cone        = 1u << 5;
+SHARED_CONST uint k_culling_shadow_meshlets_sphere      = 1u << 6;
+SHARED_CONST uint k_culling_shadow_meshlets_cubemap_face = 1u << 7;
+SHARED_CONST uint k_culling_shadow_meshes_sphere        = 1u << 8;
+
+// GpuFrameConstants::volumetric_fog_application_options
+SHARED_CONST uint k_vfog_opacity_anti_aliasing          = 1u << 0;
+SHARED_CONST uint k_vfog_tricubic_filtering             = 1u << 1;
 
 #endif // SHARED_STRUCTS_H

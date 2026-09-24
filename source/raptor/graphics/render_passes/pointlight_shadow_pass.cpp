@@ -414,9 +414,9 @@ void PointlightShadowPass2::render( FrameGraphRenderContext& context ) {
     cb->dispatch( group_x, k_shadow_mip_count, 1 );
 
     // Draw
-    if ( update_sparse_binding( context ) ) {
-
-    }
+    update_sparse_binding( context );
+    // Give back chunks that stayed empty for a while (hysteresis inside the pool).
+    gpu.trim_page_pool( shadow_maps_pool );
 
     {
         // Calculate and cache sparse image memory stats
@@ -867,16 +867,32 @@ bool PointlightShadowPass2::update_sparse_binding( FrameGraphRenderContext& cont
             }
         }
 
-        // Add new tiled residency.
-        // bind_image_pages() already ignores the mip tail.
+        // Add new residency. Memory is allocated by the pool on demand;
+        // mips in the tail bind the per-layer tail (or nothing, if the tail is permanently resident).
         const u32 resolution = k_shadow_map_resolution >> new_mip;
 
+        bool bound = true;
+
         for ( u32 face = 0; face < 6; ++face ) {
-            gpu.bind_image_pages( shadow_maps_pool, cubemap_shadow_array_image, 0, 0,
-                                  resolution, resolution, light * 6 + face, new_mip );
+            bound &= gpu.bind_image_pages( shadow_maps_pool, cubemap_shadow_array_image, 0, 0,
+                                           resolution, resolution, light * 6 + face, new_mip );
         }
 
-        resident_mip_levels[ light ] = new_mip;
+        if ( bound ) {
+            resident_mip_levels[ light ] = new_mip;
+
+        } else {
+            // Budget or device memory exhausted: release the faces that did bind and retry next frame.
+            // This frame the light renders/samples a non-resident mip (undefined content).
+            for ( u32 face = 0; face < 6; ++face ) {
+                gpu.unbind_image_pages( shadow_maps_pool, cubemap_shadow_array_image, 0, 0,
+                                         resolution, resolution, light * 6 + face, new_mip );
+            }
+            
+            resident_mip_levels[ light ] = u32_max;
+            rprint( "Point shadows: out of sparse memory for light %u, mip %u\n", light, new_mip );
+        }
+
         changed = true;
     }
 

@@ -1,7 +1,7 @@
-
 #include "application/window.hpp"
 #include "application/input.hpp"
 #include "application/game_camera.hpp"
+#include "application/demo_ui.hpp"
 
 #include "graphics/gpu_device.hpp"
 #include "graphics/command_buffer.hpp"
@@ -348,6 +348,9 @@ int main( int argc, char** argv ) {
     AnimationViewer animation_viewer;
     animation_viewer.init( allocator );
 
+    DemoUi demo_ui;
+    demo_ui.set_tools( &gpu_profiler, &image_view_debugger, &frame_graph, MemoryService::instance() );
+
     while ( !window.requested_exit ) {
         ZoneScopedN("RenderLoop");
 
@@ -396,104 +399,74 @@ int main( int argc, char** argv ) {
         {
             ZoneScopedN( "ImGui Recording" );
 
-            if ( ImGui::Begin( "Raptor ImGui" ) ) {
-                ImGui::Checkbox( "Use Slang Shaders", &frame_renderer.render_config.use_slang_shaders );
-                ImGui::InputFloat( "Scene global scale", &frame_renderer.render_config.global_scale, 0.001f );
-                ImGui::InputFloat3( "Camera position", &game_camera.camera.position[0] );
-                ImGui::InputFloat3( "Camera target movement", &game_camera.target_movement[0] );
-                ImGui::Separator();
+            if ( demo_ui.begin( "Chapter 12" ) ) {
 
-                static bool fullscreen = false;
-                if ( ImGui::Checkbox( "Fullscreen", &fullscreen ) ) {
-                    window.set_fullscreen( fullscreen );
+                if ( demo_ui.begin_chapter_tab() ) {
+                    demo_ui.end_chapter_tab();
                 }
 
-                static i32 present_mode = renderer.gpu->present_mode;
-                if ( ImGui::Combo( "Present Mode", &present_mode, raptor::PresentMode::s_value_names, raptor::PresentMode::Count ) ) {
-                    renderer.set_presentation_mode( ( raptor::PresentMode::Enum )present_mode );
+                if ( demo_ui.begin_scene_tab() ) {
+                    game_camera.draw_debug_ui();
+
+                    Span<Light> active_lights{ &render_scene.lights[ 0 ], render_scene.active_lights };
+                    frame_renderer.render_config.lighting.draw_imgui( active_lights );
+
+                    scene_graph.debug_ui();
+                    demo_ui.end_tab();
                 }
 
-                if ( ImGui::Button( "Reload Pipelines" ) ) {
+                if ( demo_ui.begin_renderer_tab() ) {
+                    frame_renderer.render_config.draw_common_imgui();
 
-                    frame_renderer.reload_psos();
-                }
-
-                Span<Light> active_lights{};
-                active_lights.data = render_scene.active_lights > 0 ? &render_scene.lights[ 0 ] : nullptr;
-                active_lights.size = render_scene.active_lights;
-                frame_renderer.render_config.lighting.draw_imgui( active_lights );
-                frame_renderer.render_config.shadows.draw_imgui( frame_renderer.render_blackboard.point_shadows );
-
-                frame_renderer.render_config.debug_draw.mesh_instances_count = render_scene.mesh_instances.size;
-                frame_renderer.render_config.debug_draw.draw_imgui();
-                frame_renderer.render_config.gpu_culling.draw_imgui();
-                frame_renderer.render_config.meshlets.draw_imgui();
-                frame_renderer.render_config.post.draw_imgui();
-                frame_renderer.render_config.volumetric_fog.draw_imgui();
-                frame_renderer.render_config.taa.draw_imgui();
-                frame_renderer.render_config.raytraced_shadows.draw_imgui();
-
-                if ( frame_renderer.render_config.debug_draw.inspect_mesh_instance ) {
-                    MeshInstance& mi = render_scene.mesh_instances[ frame_renderer.render_config.debug_draw.mesh_instance_index ];
-                    Mesh& mesh = render_scene.meshes[ mi.mesh_index ];
-
-                    glm::mat4 world = scene_graph.world_matrices[ mi.scene_graph_node_index ];
-                    glm::vec4 world_min = world * glm::vec4( mesh.aabb[ 0 ], 1.f );
-                    glm::vec4 world_max = world * glm::vec4( mesh.aabb[ 1 ], 1.f );
-                    f32 scale = extract_scale( world ).x;
-
-                    debug_draw_feature.aabb( world_min, world_max, Color::white() );
-
-                    glm::vec4 sphere_center = glm::vec4{ mesh.bounding_sphere.x, mesh.bounding_sphere.y, mesh.bounding_sphere.z, 1.f };
-                    debug_draw_feature.sphere_wire( world* sphere_center, mesh.bounding_sphere.w* scale, Color::blue() );
-
-                    for ( u32 i = 0; i < mesh.meshlet_count; i++ ) {
-                        const GpuMeshlet& meshlet = render_scene.meshlets[ mesh.meshlet_offset + i ];
-                        glm::vec4 world_center = world * glm::vec4( meshlet.center, 1.f );
-
-                        f32 world_radius = scale * meshlet.radius;
-
-                        debug_draw_feature.sphere_wire( world_center, world_radius, Color::green() );
+                    static bool fullscreen = false;
+                    if ( ImGui::Checkbox( "Fullscreen", &fullscreen ) ) {
+                        window.set_fullscreen( fullscreen );
                     }
+
+                    static i32 present_mode = renderer.gpu->present_mode;
+                    if ( ImGui::Combo( "Present Mode", &present_mode, raptor::PresentMode::s_value_names, raptor::PresentMode::Count ) ) {
+                        renderer.set_presentation_mode( ( raptor::PresentMode::Enum )present_mode );
+                    }
+
+                    if ( ImGui::Button( "Reload Pipelines" ) ) {
+                        frame_renderer.reload_psos();
+                    }
+
+                    if ( ImGui::Button( "Increase internal resolution" ) ) {
+                        gpu.wait_for_previous_frame();
+
+                        u32 new_width = 2500;
+                        u32 new_height = 3100;
+
+                        frame_renderer.on_resize( gpu, new_width, new_height );
+
+                        frame_graph.on_resize( &renderer,
+                                               &frame_renderer.render_blackboard,
+                                               &frame_renderer.render_config,
+                                               frame_renderer.render_blackboard.render_width,
+                                               frame_renderer.render_blackboard.render_height );
+
+                        game_camera.camera.set_aspect_ratio( ( f32 )new_width / ( f32 )new_height );
+                    }
+
+                    frame_renderer.render_config.shadows.draw_imgui( frame_renderer.render_blackboard.point_shadows );
+                    frame_renderer.render_config.debug_draw.draw_imgui( &render_scene, scene_graph, debug_draw_feature );
+                    frame_renderer.render_config.gpu_culling.draw_imgui();
+                    frame_renderer.render_config.meshlets.draw_imgui();
+                    frame_renderer.render_config.post.draw_imgui();
+                    frame_renderer.render_config.volumetric_fog.draw_imgui();
+                    frame_renderer.render_config.taa.draw_imgui();
+                    frame_renderer.render_config.raytraced_shadows.draw_imgui();
+
+                    demo_ui.end_tab();
                 }
             }
-            ImGui::End();
+            demo_ui.end();
 
-            if ( ImGui::Begin( "GPU" ) ) {
-                renderer.imgui_draw();
-
-                ImGui::Separator();
-                gpu_profiler.imgui_draw();
-
+            if ( demo_ui.begin_outputs() ) {
+                demo_ui.common_outputs_ui();
             }
-            ImGui::End();
-
-            if ( ImGui::Begin( "Scene" ) ) {
-                scene_graph.debug_ui();
-            }
-            ImGui::End();
-
-            if ( ImGui::Begin( "Frame Graph Debug" ) ) {
-
-                frame_graph.add_ui();
-                frame_graph.debug_ui();
-
-                static i32 face_to = 0;
-                ImGui::SliderInt( "Face", &face_to, 0, 5 );
-                frame_renderer.render_config.cubemap_debug_face_index = (u32)face_to;
-                ImGui::Checkbox( "Cubemap face enabled", &frame_renderer.render_config.cubemap_face_debug_enabled );
-
-                image_view_debugger.debug_ui();
-            }
-            ImGui::End();
-
-            // Animation Viewer
-            if ( ImGui::Begin( "Animation Viewer" ) ) {
-                animation_viewer.draw_imgui( render_scene.animations.as_span(), scene_graph, render_scene.current_animation_time );
-            }
-            ImGui::End();
-
-            MemoryService::instance()->imgui_draw();
+            demo_ui.end_outputs();
         }
 
         {
@@ -601,7 +574,7 @@ int main( int argc, char** argv ) {
             if ( wait_for_sparse_semaphore ) {
                 waits.push( GpuDevice::build_semaphore_submit( gpu.vulkan_bind_binary_semaphore,
                                                                0,
-                                                               VK_PIPELINE_STAGE_2_ALL_GRAPHICS_BIT ) );
+                                                               VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT ) );
             }
 
             cbs.push( frame_graph.get_command_buffer_from_batch( CommandQueueType::Graphics, 0 ) );

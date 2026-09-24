@@ -20,6 +20,9 @@
 
 #include <mutex>
 
+// Enable this to debug Slang shader matches.
+//#define RAPTOR_DEBUG_SLANG_GLSL_MATCHES
+
 namespace raptor {
 
 std::mutex                  texture_update_mutex;
@@ -433,9 +436,11 @@ bool Renderer::create_graphics_pipeline_state( const ShaderCompilationCreation& 
         return false;
     }
 
+#if defined ( RAPTOR_DEBUG_SLANG_GLSL_MATCHES )
     if ( !reference_pair_matches( out_pipeline_state, shader_reflections, name, pipeline_creation.name ) ) {
         return false;
     }
+#endif // RAPTOR_DEBUG_SLANG_GLSL_MATCHES
 
     return true;
 }
@@ -468,9 +473,11 @@ bool Renderer::create_compute_pipeline_state( const ShaderCompilationCreation& s
         return false;
     }
 
+#if defined ( RAPTOR_DEBUG_SLANG_GLSL_MATCHES )
     if ( !reference_pair_matches( out_pipeline_state, shader_reflections, name, pipeline_creation.name ) ) {
         return false;
     }
+#endif // RAPTOR_DEBUG_SLANG_GLSL_MATCHES
 
     return true;
 }
@@ -502,9 +509,11 @@ bool Renderer::create_raytracing_pipeline_state( const ShaderCompilationCreation
         return false;
     }
 
+#if defined ( RAPTOR_DEBUG_SLANG_GLSL_MATCHES )
     if ( !reference_pair_matches( out_pipeline_state, shader_reflections, name, pipeline_creation.name ) ) {
         return false;
     }
+#endif // RAPTOR_DEBUG_SLANG_GLSL_MATCHES
 
     return true;
 }
@@ -731,11 +740,11 @@ DescriptorSetHandle Renderer::create_descriptor_set( DescriptorSetBinder& descri
     // Search for render scene bindings
     u16 binding = get_binding_index( reflection_info, "FrameConstants" );
     if ( binding != u16_max ) {
-        descriptors.bind_dynamic_buffer( binding, sizeof( GpuFrameData ) );
+        descriptors.bind_dynamic_buffer( binding, sizeof( GpuFrameConstants ) );
     } else {
         binding = get_binding_index( reflection_info, "frame" );
         if ( binding != u16_max ) {
-            descriptors.bind_dynamic_buffer( binding, sizeof( GpuFrameData ) );
+            descriptors.bind_dynamic_buffer( binding, sizeof( GpuFrameConstants ) );
         }
     }
 

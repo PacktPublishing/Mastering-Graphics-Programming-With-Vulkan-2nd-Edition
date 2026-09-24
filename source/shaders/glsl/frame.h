@@ -1,6 +1,6 @@
 
-#ifndef RAPTOR_GLSL_SCENE_H
-#define RAPTOR_GLSL_SCENE_H
+#ifndef RAPTOR_GLSL_FRAME_H
+#define RAPTOR_GLSL_FRAME_H
 
 #include "../shared_structs.h"
 
@@ -10,48 +10,48 @@ layout ( std140, set = MATERIAL_SET, binding = 0 ) uniform FrameConstants {
 };
 
 bool enable_volumetric_fog_opacity_anti_aliasing() {
-    return (frame.volumetric_fog_application_options & 1) == 1;
+    return (frame.volumetric_fog_application_options & k_vfog_opacity_anti_aliasing) != 0u;
 }
 
 bool enable_volumetric_fog_opacity_tricubic_filtering() {
-    return (frame.volumetric_fog_application_options & 2) == 2;
+    return (frame.volumetric_fog_application_options & k_vfog_tricubic_filtering) != 0u;
 }
 
 // Options ///////////////////////////////////////////////////////////////
 bool disable_frustum_cull_meshes() {
-    return (frame.culling_options & 1) != 1;
+    return ( frame.culling_options & k_culling_frustum_meshes ) == 0u;
 }
 
 bool disable_frustum_cull_meshlets() {
-    return (frame.culling_options & 2) != 2;
+    return ( frame.culling_options & k_culling_frustum_meshlets ) == 0u;
 }
 
 bool disable_occlusion_cull_meshes() {
-    return (frame.culling_options & 4) != 4;
+    return ( frame.culling_options & k_culling_occlusion_meshes ) == 0u;
 }
 
 bool disable_occlusion_cull_meshlets() {
-    return (frame.culling_options & 8) != 8;
+    return ( frame.culling_options & k_culling_occlusion_meshlets ) == 0u;
 }
 
 bool freeze_occlusion_camera() {
-    return (frame.culling_options & 16) == 16;
+    return ( frame.culling_options & k_culling_freeze_occlusion_camera ) != 0u;
 }
 
 bool disable_shadow_meshlets_cone_cull() {
-    return ( frame.culling_options & 32 ) != 32;
+    return ( frame.culling_options & k_culling_shadow_meshlets_cone ) == 0u;
 }
 
 bool disable_shadow_meshlets_sphere_cull() {
-    return ( frame.culling_options & 64 ) != 64;
+    return ( frame.culling_options & k_culling_shadow_meshlets_sphere ) == 0u;
 }
 
 bool disable_shadow_meshlets_cubemap_face_cull() {
-    return ( frame.culling_options & 128 ) != 128;
+    return ( frame.culling_options & k_culling_shadow_meshlets_cubemap_face ) == 0u;
 }
 
 bool disable_shadow_meshes_sphere_cull() {
-    return ( frame.culling_options & 256 ) != 256;
+    return ( frame.culling_options & k_culling_shadow_meshes_sphere ) == 0u;
 }
 
 // Utility methods ///////////////////////////////////////////////////////
@@ -67,4 +67,20 @@ float linearize_raw_depth(float raw_depth) {
     return frame.z_near * frame.z_far / (frame.z_far + raw_depth * (frame.z_near - frame.z_far));
 }
 
-#endif // RAPTOR_GLSL_SCENE_H
+// Utilities for camera freeze
+mat4 culling_world_to_camera() {
+    return freeze_occlusion_camera() ? frame.world_to_camera_debug : frame.world_to_camera;
+}
+
+vec3 culling_camera_position() {
+    return freeze_occlusion_camera() ? frame.camera_position_debug.xyz : frame.camera_position.xyz;
+}
+
+mat4 get_culling_view_projection( bool late ) {
+    if ( freeze_occlusion_camera() ) {
+        return frame.view_projection_debug;
+    }
+    return late ? frame.view_projection : frame.previous_view_projection;
+}
+
+#endif // RAPTOR_GLSL_FRAME_H

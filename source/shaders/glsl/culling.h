@@ -154,7 +154,7 @@ bool occlusion_cull( vec3 view_bounding_center, float radius, float z_near, floa
         float depth_sphere = sceen_space_center_last.z / sceen_space_center_last.w;
 
         vec3 view_near_point = view_bounding_center.xyz + vec3(0.0, 0.0, radius);
-        vec4 clip = inverse(frame.inverse_projection) * vec4(view_near_point, 1.0);
+        vec4 clip = (frame.projection) * vec4(view_near_point, 1.0);
         depth_sphere = clip.z / clip.w;
 
         // Clamp aabb for numerical safety

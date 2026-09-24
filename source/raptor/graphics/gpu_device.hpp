@@ -191,12 +191,13 @@ struct GpuDevice : public Service {
     void                            resize_image_3d( ImageHandle image, u32 width, u32 height, u32 depth, u32 mip_levels );
     void                            recreate_image_view( ImageViewHandle image_view );
 
-    PagePoolHandle                  allocate_image_pool( ImageHandle image_handle, u32 pool_size );
+    PagePoolHandle                  allocate_image_pool( ImageHandle image_handle, u64 max_pool_size, u32 release_delay_frames = 120 );
     void                            destroy_page_pool( PagePoolHandle pool_handle );
 
-    void                            reset_pool( PagePoolHandle pool_handle );
-    void                            bind_image_pages( PagePoolHandle pool_handle, ImageHandle handle, u32 x, u32 y, u32 width, u32 height, u32 layer, u32 mip_level );
+    bool                            bind_image_pages( PagePoolHandle pool_handle, ImageHandle handle, u32 x, u32 y, u32 width, u32 height, u32 layer, u32 mip_level );
     void                            unbind_image_pages( PagePoolHandle pool_handle, ImageHandle handle, u32 x, u32 y, u32 width, u32 height, u32 layer, u32 mip_level );
+
+    void                            trim_page_pool( PagePoolHandle pool_handle );
     
     SparseImageMemoryStats          get_sparse_image_memory_stats( PagePoolHandle pool, ImageHandle image );
 
@@ -505,6 +506,11 @@ struct GpuDevice : public Service {
 
     PipelineLayout*                 get_pipeline_layout( PipelineLayoutHandle layout );
     const PipelineLayout*           get_pipeline_layout( PipelineLayoutHandle layout ) const;
+
+    bool                            page_pool_reserve( PagePool* pool, u32 page_count );
+    u32                             page_pool_allocate_page( PagePool* pool );
+    void                            page_pool_free_page( PagePool* pool, u32 page );
+    void                            page_pool_page_memory( const PagePool* pool, u32 page, VkDeviceMemory& memory, VkDeviceSize& offset ) const;
 
     PagePool*                       get_page_pool( PagePoolHandle page_pool );
     const PagePool*                 get_page_pool( PagePoolHandle page_pool ) const;

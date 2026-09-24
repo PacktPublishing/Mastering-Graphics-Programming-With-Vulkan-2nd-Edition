@@ -12,6 +12,8 @@
 
 #include "frame_graph.hpp"
 
+#include "../../shaders/shared_structs.h"
+
 namespace raptor {
 
 struct CommandBuffer;
@@ -36,7 +38,7 @@ struct UploadGpuDataContext {
     RenderConfig&           render_config;
     FrameGraph*             frame_graph;
     RenderScene*            scene;
-    GpuFrameData&           scene_data;
+    GpuFrameConstants&      frame_data;
 
 }; // struct UploadGpuDataContext
 
@@ -316,7 +318,7 @@ struct FrameRenderer {
     RenderBlackboard        render_blackboard;
     RenderConfig            render_config;
 
-    GpuFrameData            frame_data;
+    GpuFrameConstants       frame_data;
 
     Array<FrameGraphRenderPass*> render_passes;
 

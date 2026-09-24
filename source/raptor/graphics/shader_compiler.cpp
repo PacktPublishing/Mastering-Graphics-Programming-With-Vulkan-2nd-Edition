@@ -1209,6 +1209,22 @@ bool ShaderCompiler::compile_and_cache_shader( ShaderCompilationStage& compilati
     cstring shader_layout_path = nullptr;
     cstring shader_reflection_path = nullptr;
 
+    // Create a hash for the defines, so that SpirV binaries uses it
+    u64 defines_hash = 0;
+    {
+        cstring sorted[ k_max_defines ];
+        const u32 count = compilation_stage.defines.size;
+
+        for ( u32 i = 0; i < count; ++i ) {
+            sorted[ i ] = compilation_stage.defines[ i ];
+        }
+        std::sort( sorted, sorted + count, []( cstring a, cstring b ) { return strcmp( a, b ) < 0; } );
+
+        for ( u32 i = 0; i < count; ++i ) {
+            defines_hash = hash_calculate( sorted[ i ], defines_hash );
+        }
+    }
+
     //shader_stage.type = compilation_stage.type;
 
     if ( use_cache ) {
@@ -1218,9 +1234,9 @@ bool ShaderCompiler::compile_and_cache_shader( ShaderCompilationStage& compilati
         // The language is part of the cache key.
         cstring language_name = to_shader_language_name( language );
 
-        shader_spirv_path = path_buffer.append_use_f( "%s/%s_%s_%s_%s.spv",
+        shader_spirv_path = path_buffer.append_use_f( "%s/%s_%s_%s_%s_%016llx.spv",
                                                         binary_data_folder, technique_name, shader_name, language_name,
-                                                        to_compiler_extension( compilation_stage.type ) );
+                                                        to_compiler_extension( compilation_stage.type ), defines_hash );
         shader_hash_path = path_buffer.append_use_f( "%s/%s_%s_%s_%s.hash.cache",
                                                         binary_data_folder, technique_name, shader_name, language_name,
                                                         to_compiler_extension( compilation_stage.type ) );
@@ -1518,8 +1534,18 @@ VkShaderModuleCreateInfo ShaderCompiler::compile_shader_slang( cstring code, u32
     preprocessor_defines.push( { to_stage_defines( stage ), "1" } );
 
     // Append defines
+    //for ( u32 i = 0; i < defines.size; ++i ) {
+    //    preprocessor_defines.push( { defines[ i ], "1" } );
+    //}
     for ( u32 i = 0; i < defines.size; ++i ) {
-        preprocessor_defines.push( { defines[ i ], "1" } );
+        cstring define = defines[ i ];
+        cstring equal = strchr( define, '=' );
+        if ( equal ) {
+            char* name = temp_string_buffer.append_use_substring( define, 0, u32( equal - define ) );
+            preprocessor_defines.push( { name, equal + 1 } );
+        } else {
+            preprocessor_defines.push( { define, "1" } );
+        }
     }
 
     session_desc.preprocessorMacros = preprocessor_defines.data;

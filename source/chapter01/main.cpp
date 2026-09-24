@@ -1,4 +1,3 @@
-
 #include "application/window.hpp"
 #include "application/input.hpp"
 #include "application/game_camera.hpp"

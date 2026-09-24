@@ -325,8 +325,7 @@ void FrameRenderer::upload_gpu_data( GameCamera& game_camera, glm::vec2 last_cli
     jitter_offsets.x *= jitter_scale;
     jitter_offsets.y *= jitter_scale;
 
-    frame_data.halton_x = jitter_offsets.x;
-    frame_data.halton_y = jitter_offsets.y;
+    frame_data.halton_xy = jitter_offsets;
 
     // Cache previous view projection
     frame_data.previous_view_projection = frame_data.view_projection;
@@ -342,7 +341,7 @@ void FrameRenderer::upload_gpu_data( GameCamera& game_camera, glm::vec2 last_cli
         const f32 render_width = render_blackboard.render_width * 1.f;
         const f32 render_height = render_blackboard.render_height * 1.f;
 
-        frame_data.jitter_xy = glm::vec2{ frame_data.halton_x / render_width, frame_data.halton_y / render_height };
+        frame_data.jitter_xy = glm::vec2{ frame_data.halton_xy.x / render_width, frame_data.halton_xy.y / render_height };
 
         game_camera.apply_jittering( jitter_offsets.x / render_width, jitter_offsets.y / render_height );
     }
@@ -355,43 +354,33 @@ void FrameRenderer::upload_gpu_data( GameCamera& game_camera, glm::vec2 last_cli
     frame_data.world_to_camera = game_camera.camera.view;
     frame_data.camera_position = glm::vec4{ game_camera.camera.position.x, game_camera.camera.position.y, game_camera.camera.position.z, 1.0f };
     frame_data.camera_direction = game_camera.camera.direction;
-    frame_data.dither_image_view_index = dither_4x4_texture ? dither_4x4_texture->image_view.index() : 0;
+    frame_data.dither_texture_index = dither_4x4_texture ? dither_4x4_texture->image_view.index() : 0;
     frame_data.current_frame = (u32)gpu.absolute_frame;
     frame_data.forced_metalness = render_config.forced_metalness;
     frame_data.forced_roughness = render_config.forced_roughness;
+    frame_data.specular_aa_variance = glm::clamp( render_config.specular_aa_variance, 0.0f, 1.0f );
+    frame_data.specular_aa_threshold = glm::clamp( render_config.specular_aa_threshold, 0.0f, 1.0f );
 
     FrameGraphResource* depth_resource = (FrameGraphResource*)frame_graph->get_resource( "depth" );
     if ( depth_resource ) {
         frame_data.depth_texture_index = depth_resource->resource_info.texture.image_view.index();
     }
 
-    frame_data.blue_noise_128_rg_image_view_index = blue_noise_texture->image_view.index();
+    frame_data.blue_noise_128_rg_texture_index = blue_noise_texture->image_view.index();
     frame_data.use_tetrahedron_shadows = render_config.use_tetrahedron_shadows;
     frame_data.active_lights = render_scene.active_lights;
     frame_data.z_near = game_camera.camera.near_plane;
     frame_data.z_far = game_camera.camera.far_plane;
-    frame_data.projection_00 = game_camera.camera.projection[0][0];
-    frame_data.projection_11 = game_camera.camera.projection[1][1];
 
     GpuCullingRenderConfig& gpu_culling_config = render_config.gpu_culling;
-    frame_data.culling_options = 0;
-    frame_data.set_frustum_cull_meshes( gpu_culling_config.enable_frustum_cull_meshes );
-    frame_data.set_frustum_cull_meshlets( gpu_culling_config.enable_frustum_cull_meshlets );
-    frame_data.set_occlusion_cull_meshes( gpu_culling_config.enable_occlusion_cull_meshes );
-    frame_data.set_occlusion_cull_meshlets( gpu_culling_config.enable_occlusion_cull_meshlets );
-    frame_data.set_freeze_occlusion_camera( gpu_culling_config.freeze_occlusion_camera );
-    frame_data.set_shadow_meshlets_cone_cull( gpu_culling_config.shadow_meshlets_cone_cull );
-    frame_data.set_shadow_meshlets_sphere_cull( gpu_culling_config.shadow_meshlets_sphere_cull );
-    frame_data.set_shadow_meshlets_cubemap_face_cull( gpu_culling_config.shadow_meshlets_cubemap_face_cull );
+    frame_data.culling_options = gpu_culling_config.pack_culling_options();
 
-    frame_data.resolution_x = render_blackboard.render_width * 1.f;
-    frame_data.resolution_y = render_blackboard.render_height * 1.f;
+    frame_data.resolution.x = render_blackboard.render_width * 1.f;
+    frame_data.resolution.y = render_blackboard.render_height * 1.f;
     frame_data.aspect_ratio = render_blackboard.render_width * 1.f / render_blackboard.render_height;
     frame_data.num_mesh_instances = render_scene.mesh_instances.size;
     frame_data.volumetric_fog_application_dithering_scale = render_config.volumetric_fog.application_dithering_scale;
-    frame_data.volumetric_fog_application_options =
-        ( render_config.volumetric_fog.application_apply_opacity_anti_aliasing ? 1 : 0 )
-        | ( render_config.volumetric_fog.application_apply_tricubic_filtering ? 2 : 0 );
+    frame_data.volumetric_fog_application_options = render_config.volumetric_fog.pack_options();
 
     // Frustum computations
     GpuCullingRuntimeData& gpu_culling = render_blackboard.gpu_culling;
@@ -399,19 +388,27 @@ void FrameRenderer::upload_gpu_data( GameCamera& game_camera, glm::vec2 last_cli
         frame_data.camera_position_debug = frame_data.camera_position;
         frame_data.world_to_camera_debug = frame_data.world_to_camera;
         frame_data.view_projection_debug = frame_data.view_projection;
-        gpu_culling.projection_transpose = glm::transpose( game_camera.camera.projection );
+        frame_data.projection = game_camera.camera.projection;
     }
 
-    frame_data.frustum_planes[ 0 ] = normalize_plane( gpu_culling.projection_transpose[ 3 ] + gpu_culling.projection_transpose[ 0 ] ); // x + w  < 0;
-    frame_data.frustum_planes[ 1 ] = normalize_plane( gpu_culling.projection_transpose[ 3 ] - gpu_culling.projection_transpose[ 0 ] ); // x - w  < 0;
-    frame_data.frustum_planes[ 2 ] = normalize_plane( gpu_culling.projection_transpose[ 3 ] + gpu_culling.projection_transpose[ 1 ] ); // y + w  < 0;
-    frame_data.frustum_planes[ 3 ] = normalize_plane( gpu_culling.projection_transpose[ 3 ] - gpu_culling.projection_transpose[ 1 ] ); // y - w  < 0;
-    frame_data.frustum_planes[ 4 ] = normalize_plane( gpu_culling.projection_transpose[ 3 ] + gpu_culling.projection_transpose[ 2 ] ); // z + w  < 0;
-    frame_data.frustum_planes[ 5 ] = normalize_plane( gpu_culling.projection_transpose[ 3 ] - gpu_culling.projection_transpose[ 2 ] ); // z - w  < 0;
+    // All culling respects frozen camera.
+    const glm::mat4& culling_projection = frame_data.projection;
 
-    GpuFrameData* uniform_data = gpu.dynamic_buffer_allocate<GpuFrameData>( &render_blackboard.scene_cb_offset );
+    frame_data.projection_00 = culling_projection[ 0 ][ 0 ];
+    frame_data.projection_11 = culling_projection[ 1 ][ 1 ];
+
+    // Calculate frustum planes from projection matrix
+    const glm::mat4 projection_transpose = glm::transpose( culling_projection );
+    frame_data.frustum_planes[ 0 ] = normalize_plane( projection_transpose[ 3 ] + projection_transpose[ 0 ] ); // x + w  < 0;
+    frame_data.frustum_planes[ 1 ] = normalize_plane( projection_transpose[ 3 ] - projection_transpose[ 0 ] ); // x - w  < 0;
+    frame_data.frustum_planes[ 2 ] = normalize_plane( projection_transpose[ 3 ] + projection_transpose[ 1 ] ); // y + w  < 0;
+    frame_data.frustum_planes[ 3 ] = normalize_plane( projection_transpose[ 3 ] - projection_transpose[ 1 ] ); // y - w  < 0;
+    frame_data.frustum_planes[ 4 ] = normalize_plane( projection_transpose[ 3 ] + projection_transpose[ 2 ] ); // z + w  < 0;
+    frame_data.frustum_planes[ 5 ] = normalize_plane( projection_transpose[ 3 ] - projection_transpose[ 2 ] ); // z - w  < 0;
+
+    GpuFrameConstants* uniform_data = gpu.dynamic_buffer_allocate<GpuFrameConstants>( &render_blackboard.scene_cb_offset );
     if ( uniform_data ) {
-        memcpy( uniform_data, &frame_data, sizeof( GpuFrameData ) );
+        memcpy( uniform_data, &frame_data, sizeof( GpuFrameConstants ) );
     }
 
     // Cache view data informations
@@ -2263,7 +2260,7 @@ void LightingRenderingFeature::upload_gpu_data( UploadGpuDataContext& context ) 
     sizet current_marker = scratch_allocator->get_marker();
 
     RenderScene* scene = context.scene;
-    GpuFrameData& scene_data = context.scene_data;
+    GpuFrameConstants& scene_data = context.frame_data;
 
     Array<SortedLight> sorted_lights;
     sorted_lights.init( scratch_allocator, scene->active_lights, scene->active_lights );
@@ -2383,7 +2380,7 @@ void LightingRenderingFeature::upload_gpu_data( UploadGpuDataContext& context ) 
         light_z_bins[ bin ] = min_light_id | ( max_light_id << 16 );
     }
 
-    ClusteringLightingTileInfo tile_info = calculate_light_tile_buffer_size( (u32)scene_data.resolution_x, (u32)scene_data.resolution_y );
+    ClusteringLightingTileInfo tile_info = calculate_light_tile_buffer_size( (u32)scene_data.resolution.x, (u32)scene_data.resolution.y );
 
     // Light Clustering //////////////////////////////////////////////////
     Array<u32> light_tiles_bits;

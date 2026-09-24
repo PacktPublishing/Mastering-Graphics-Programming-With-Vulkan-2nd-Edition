@@ -249,6 +249,35 @@ void calculate_geometric_TBN( inout vec3 vertex_normal, inout vec3 vertex_tangen
     vertex_bitangent = bitangent;
 }
 
+float resolve_perceptual_roughness( float material_perceptual_roughness ) {
+    float p = frame.forced_roughness >= 0.0 ? frame.forced_roughness : material_perceptual_roughness;
+    return clamp( p, k_min_perceptual_roughness, 1.0 );
+}
+
+float resolve_metallic( float material_metallic ) {
+    return frame.forced_metalness >= 0.0 ? frame.forced_metalness : material_metallic;
+}
+
+// Geometric specular AA — Tokuyoshi & Kaplanyan 2019, Filament style
+// Fragment only: used final normal derivates
+float specular_aa_perceptual_roughness( float perceptual_roughness, vec3 n ) {
+    const vec3  du       = dFdx( n );
+    const vec3  dv       = dFdy( n );
+    const float variance = frame.specular_aa_variance * ( dot( du, du ) + dot( dv, dv ) );
+    const float kernel   = min( 2.0 * variance, frame.specular_aa_threshold );
+
+    const float alpha    = perceptual_roughness * perceptual_roughness;
+    const float alpha_aa = sqrt( saturate( alpha * alpha + kernel ) );
+    // G-Buffer uses perceptual roughness
+    return sqrt( alpha_aa );
+}
+
+vec3 resolve_orm( vec3 orm, vec3 final_normal ) {
+    orm.b = resolve_metallic( orm.b );
+    orm.g = specular_aa_perceptual_roughness( resolve_perceptual_roughness( orm.g ), final_normal );
+    return orm;
+}
+
 #endif // FRAGMENT
 
 #endif // RAPTOR_GLSL_MESH_H

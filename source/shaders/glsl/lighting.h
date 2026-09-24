@@ -126,6 +126,10 @@ vec3 compute_f0(const vec4 base_color, float metallic) {
     return mix(vec3(0.04), base_color.rgb, metallic);
 }
 
+float perceptual_roughness_to_alpha( float perceptual_roughness ) {
+    return perceptual_roughness * perceptual_roughness;
+}
+
 float attenuation_square_falloff(vec3 position_to_light, float light_inverse_radius) {
     const float distance_square = dot(position_to_light, position_to_light);
     const float factor = distance_square * light_inverse_radius * light_inverse_radius;
@@ -508,10 +512,10 @@ vec4 calculate_lighting(vec4 base_colour, vec3 orm, vec3 normal, vec3 emissive, 
     vec3 V = normalize( frame.camera_position.xyz - world_position );
     const float NoV = saturate(dot(normal, V));
 
-    const float metallic = frame.forced_metalness < 0.0f ? orm.b : frame.forced_metalness;
-    // alpha = perceived roughness ^ 2
-    float perceptual_roughness = orm.g;
-    const float roughness = frame.forced_roughness < 0.0f ? orm.g * orm.g : frame.forced_roughness;
+    const float metallic = orm.b;
+    const float perceptual_roughness = orm.g;
+    const float roughness = perceptual_roughness_to_alpha( perceptual_roughness );
+
     vec4 albedo = vec4(compute_diffuse_color(base_colour, metallic), base_colour.a);
 
     // TODO: missing IOR for F0 calculations. Get default value.
@@ -608,7 +612,7 @@ vec4 calculate_lighting(vec4 base_colour, vec3 orm, vec3 normal, vec3 emissive, 
 #endif // RAYTRACED_SHADOWS
 
     // Ambient term
-    vec3 F = fresnel_schlick_roughness(max(dot(normal, V), 0.0), F0, roughness);
+    vec3 F = fresnel_schlick_roughness(max(dot(normal, V), 0.0), F0, perceptual_roughness);
 
     vec3 kS = F;
     vec3 kD = 1.0 - kS;
@@ -628,7 +632,7 @@ vec4 calculate_lighting(vec4 base_colour, vec3 orm, vec3 normal, vec3 emissive, 
     vec3 reflection_color = textureLod( global_textures[light_cb.reflections_texture_index], screen_uv, 0 ).rgb;
 
     vec2 envBRDF = textureLod(global_textures[nonuniformEXT(light_cb.brdf_lut_texture_index)], vec2(NoV, roughness), 0).rg;
-    vec3 indirect_specular = reflection_color * (F * envBRDF.x + envBRDF.y) * light_cb.reflections_intensity;
+    vec3 indirect_specular = reflection_color * (F0 * envBRDF.x + envBRDF.y) * light_cb.reflections_intensity;
     final_color.rgb += (indirect_specular) * ao;
 #endif // ENABLE_INDIRECT_SPECULAR
 

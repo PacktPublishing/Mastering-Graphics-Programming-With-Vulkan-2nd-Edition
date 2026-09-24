@@ -842,14 +842,6 @@ struct Pipeline {
 
 //
 //
-struct PagePoolAllocation {
-    VmaAllocation*                  allocation;
-    PagePoolAllocation*             next;
-}; // struct PagePoolAllocation
-
-
-//
-//
 struct SparseMemoryBindInfo {
     VkImage                         image;
     PagePoolHandle                  page_pool;
@@ -859,14 +851,33 @@ struct SparseMemoryBindInfo {
 
 
 //
+// A chunk is one dedicated VkDeviceMemory (through VMA) split into k_pages_per_chunk pages.
+// Chunks are allocated on demand and released when they stay empty long enough.
+struct PagePoolChunk {
+    VmaAllocation                   allocation      = nullptr;  // nullptr = slot not allocated
+    VkDeviceMemory                  device_memory   = VK_NULL_HANDLE;
+    VkDeviceSize                    memory_offset   = 0;
+
+    u64                             free_mask       = 0;        // bit set = page free
+    u32                             used_pages      = 0;
+    u64                             empty_since_frame = 0;      // absolute frame when used_pages became 0 (hysteresis)
+    u64                             release_timeline_value = 0; // graphics timeline value after which the GPU no longer references the chunk
+}; // struct PagePoolChunk
+
+//
 //
 struct PagePool {
-    Array<VmaAllocation>            vma_allocations;
-    Array<VmaAllocation>            mip_tail_allocations;
 
-    Array<u32>                      page_bindings;
-    Array<u32>                      free_pages;
-    Array<u32>                      pending_free_pages;
+    static const u32                k_pages_per_chunk = 64;     // one u64 free mask per chunk
+
+    Array<PagePoolChunk>            chunks;                     // capacity = budget in chunks
+    Array<VmaAllocation>            mip_tail_allocations;       // only when tails cannot be paged
+
+    Array<u32>                      page_bindings;              // virtual page -> physical page (chunk * 64 + slot)
+    Array<u32>                      tail_bindings;              // layer (or 0 for single tail) -> physical page
+    Array<u32>                      pending_free_pages;         // unbound this frame, reusable after submit
+
+    u32                             memory_type_bits;
 
     u32                             block_width;
     u32                             block_height;
@@ -877,9 +888,14 @@ struct PagePool {
     VkDeviceSize                    mip_tail_offset;
     VkDeviceSize                    mip_tail_stride;
     VkSparseImageFormatFlags        sparse_flags;
+    bool                            paged_mip_tail;             // tail bound lazily per layer from the chunks
 
-    u32                             size;
-    u32                             used_pages;
+    u32                             max_chunks;                 // budget
+    u32                             allocated_chunks;
+    u32                             free_page_count;            // free pages in allocated chunks (excluding pending)
+    u32                             used_pages;                 // bound (or pending free) pages
+    u32                             first_free_chunk_hint;
+    u32                             release_delay_frames;       // hysteresis only; GPU safety comes from the timeline
 }; // struct PagePool
 
 //

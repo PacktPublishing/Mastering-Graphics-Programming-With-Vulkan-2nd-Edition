@@ -140,8 +140,7 @@ void GameCamera::apply_jittering( f32 x, f32 y ) {
 
 bool GameCamera::draw_debug_ui() {
 
-    if ( !ImGui::Begin( "Camera" ) ) {
-        ImGui::End();
+    if ( ImGui::CollapsingHeader( "Camera" ) ) {
         return false;
     }
 
@@ -301,8 +300,6 @@ bool GameCamera::draw_debug_ui() {
         c.update_projection = true;
         c.update();
     }
-
-    ImGui::End();
 
     return changed;
 }

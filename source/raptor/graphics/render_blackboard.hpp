@@ -12,79 +12,11 @@
 
 namespace raptor {
 
+struct DebugDrawRenderingFeature;
 struct Light;
 struct PointlightShadowsRuntimeData;
-
-// Gpu Data //////////////////////////////////////////////////////////////
-struct alignas( 16 ) GpuFrameData {
-    glm::mat4               view_projection;
-    glm::mat4               view_projection_debug;
-    glm::mat4               inverse_view_projection;
-    glm::mat4               world_to_camera;    // view matrix
-    glm::mat4               world_to_camera_debug;
-    glm::mat4               previous_view_projection;
-    glm::mat4               inverse_projection;
-    glm::mat4               inverse_view;
-
-    glm::vec4               camera_position;
-    glm::vec4               camera_position_debug;
-    glm::vec3               camera_direction;
-    i32                     current_frame;
-
-    u32                     active_lights;
-    u32                     use_tetrahedron_shadows;
-    u32                     dither_image_view_index;
-    f32                     z_near;
-
-    f32                     z_far;
-    f32                     projection_00;
-    f32                     projection_11;
-    u32                     culling_options;
-
-    f32                     resolution_x;
-    f32                     resolution_y;
-    f32                     aspect_ratio;
-    u32                     num_mesh_instances;
-
-    f32                     halton_x;
-    f32                     halton_y;
-    u32                     depth_texture_index;
-    u32                     blue_noise_128_rg_image_view_index;
-
-    glm::vec2               jitter_xy;
-    glm::vec2               previous_jitter_xy;
-
-    f32                     forced_metalness;
-    f32                     forced_roughness;
-    f32                     volumetric_fog_application_dithering_scale;
-    u32                     volumetric_fog_application_options;
-
-    glm::vec4               frustum_planes[ 6 ];
-
-    // Helpers for bit packing. Would be perfect for code generation
-    // NOTE: must be in sync with scene.h!
-    bool                    frustum_cull_meshes() const { return ( culling_options & 1 ) == 1; }
-    bool                    frustum_cull_meshlets() const { return ( culling_options & 2 ) == 2; }
-    bool                    occlusion_cull_meshes() const { return ( culling_options & 4 ) == 4; }
-    bool                    occlusion_cull_meshlets() const { return ( culling_options & 8 ) == 8; }
-    bool                    freeze_occlusion_camera() const { return ( culling_options & 16 ) == 16; }
-    bool                    shadow_meshlets_cone_cull() const { return ( culling_options & 32 ) == 32; }
-    bool                    shadow_meshlets_sphere_cull() const { return ( culling_options & 64 ) == 64; }
-    bool                    shadow_meshlets_cubemap_face_cull() const { return ( culling_options & 128 ) == 128; }
-    bool                    shadow_mesh_sphere_cull() const { return ( culling_options & 256 ) == 256; }
-
-    void                    set_frustum_cull_meshes( bool value ) { value ? ( culling_options |= 1 ) : ( culling_options &= ~( 1 ) ); }
-    void                    set_frustum_cull_meshlets( bool value ) { value ? ( culling_options |= 2 ) : ( culling_options &= ~( 2 ) ); }
-    void                    set_occlusion_cull_meshes( bool value ) { value ? ( culling_options |= 4 ) : ( culling_options &= ~( 4 ) ); }
-    void                    set_occlusion_cull_meshlets( bool value ) { value ? ( culling_options |= 8 ) : ( culling_options &= ~( 8 ) ); }
-    void                    set_freeze_occlusion_camera( bool value ) { value ? ( culling_options |= 16 ) : ( culling_options &= ~( 16 ) ); }
-    void                    set_shadow_meshlets_cone_cull( bool value ) { value ? ( culling_options |= 32 ) : ( culling_options &= ~( 32 ) ); }
-    void                    set_shadow_meshlets_sphere_cull( bool value ) { value ? ( culling_options |= 64 ) : ( culling_options &= ~( 64 ) ); }
-    void                    set_shadow_meshlets_cubemap_face_cull( bool value ) { value ? ( culling_options |= 128 ) : ( culling_options &= ~( 128 ) ); }
-    void                    set_shadow_mesh_sphere_cull( bool value ) { value ? ( culling_options |= 256 ) : ( culling_options &= ~( 256 ) ); }
-
-}; // struct GpuFrameData
-
+struct RenderScene;
+struct SceneGraph;
 
 // Render Configs ////////////////////////////////////////////////////////
 //
@@ -120,6 +52,8 @@ struct GpuCullingRenderConfig {
     bool                    shadow_meshlets_cone_cull       = true;
     bool                    shadow_meshlets_sphere_cull     = true;
     bool                    shadow_meshlets_cubemap_face_cull = true;
+
+    u32                     pack_culling_options() const;
 
     void                    draw_imgui();
 }; // struct GpuCullingRenderConfig
@@ -182,7 +116,7 @@ struct DebugDrawRenderConfig {
     u32                     mesh_instance_index = 0; // index of mesh instance to inspect
     u32                     mesh_instances_count = u32_max;
 
-    void                    draw_imgui();
+    void                    draw_imgui( RenderScene* scene, SceneGraph& scene_graph, DebugDrawRenderingFeature& debug_draw_feature );
 
 }; // struct DebugDrawRenderConfig
 
@@ -220,6 +154,8 @@ struct VolumetricFogRenderConfig {
     bool                    application_apply_tricubic_filtering = false;
 
     void                    draw_imgui();
+
+    u32                     pack_options() const;
 
 }; // struct VolumetricFogRenderConfig
 
@@ -337,6 +273,10 @@ struct RenderConfig {
     // PBR
     f32                     forced_metalness = -1.f;
     f32                     forced_roughness = -1.f;
+    f32                     specular_aa_variance = 0.15f;
+    f32                     specular_aa_threshold = 0.2f;
+
+    void                    draw_common_imgui();
 
     ShaderLanguage          shader_language() const {
         return use_slang_shaders ? ShaderLanguage::Slang : ShaderLanguage::Glsl;
@@ -402,8 +342,6 @@ struct GpuCullingRuntimeData {
 
     BufferHandle            meshlet_indirect_late_count_sb[ k_max_frames ];
     BufferHandle            meshlet_indirect_late_commands_sb[ k_max_frames ];
-
-    glm::mat4               projection_transpose{ };
 
 }; // struct GpuCullingRuntimeData
 

@@ -1,5 +1,7 @@
 #include "graphics/render_blackboard.hpp"
 #include "graphics/raptor_imgui.hpp"
+#include "graphics/scene_graph.hpp"
+#include "graphics/frame_renderer.hpp"
 
 #include "external/imgui/imgui.h"
 
@@ -93,6 +95,20 @@ void GpuCullingRenderConfig::draw_imgui() {
         ImGui::PopID();
     }
 }
+
+u32 GpuCullingRenderConfig::pack_culling_options() const {
+    u32 options = 0u;
+    options |= enable_frustum_cull_meshes ? k_culling_frustum_meshes : 0u;
+    options |= enable_frustum_cull_meshlets ? k_culling_frustum_meshlets : 0u;
+    options |= enable_occlusion_cull_meshes ? k_culling_occlusion_meshes : 0u;
+    options |= enable_occlusion_cull_meshlets ? k_culling_occlusion_meshlets : 0u;
+    options |= freeze_occlusion_camera ? k_culling_freeze_occlusion_camera : 0u;
+    options |= shadow_meshlets_cone_cull ? k_culling_shadow_meshlets_cone : 0u;
+    options |= shadow_meshlets_sphere_cull ? k_culling_shadow_meshlets_sphere : 0u;
+    options |= shadow_meshlets_cubemap_face_cull ? k_culling_shadow_meshlets_cubemap_face : 0u;
+    return options;
+}
+
 void ShadowRenderConfig::draw_imgui( const PointlightShadowsRuntimeData& shadows ) {
 
     if ( ImGui::CollapsingHeader( "Shadows" ) ) {
@@ -169,7 +185,9 @@ void PostProcessRenderConfig::draw_imgui() {
     }
 }
 
-void DebugDrawRenderConfig::draw_imgui() {
+void DebugDrawRenderConfig::draw_imgui( RenderScene* scene, SceneGraph& scene_graph,
+                                        DebugDrawRenderingFeature& debug_draw_feature ) {
+
     if ( ImGui::CollapsingHeader( "Debug Drawing" ) ) {
         ImGui::PushID( "DebugDrawRenderConfig" );
 
@@ -181,6 +199,36 @@ void DebugDrawRenderConfig::draw_imgui() {
         }
 
         ImGui::PopID();
+    }
+
+    if ( scene ) {
+        RenderScene& render_scene = *scene;
+        mesh_instances_count = render_scene.mesh_instances.size;
+
+
+        if ( inspect_mesh_instance ) {
+            MeshInstance& mi = render_scene.mesh_instances[ mesh_instance_index ];
+            Mesh& mesh = render_scene.meshes[ mi.mesh_index ];
+
+            glm::mat4 world = scene_graph.world_matrices[ mi.scene_graph_node_index ];
+            glm::vec4 world_min = world * glm::vec4( mesh.aabb[ 0 ], 1.f );
+            glm::vec4 world_max = world * glm::vec4( mesh.aabb[ 1 ], 1.f );
+            f32 scale = extract_scale( world ).x;
+
+            debug_draw_feature.aabb( world_min, world_max, Color::white() );
+
+            glm::vec4 sphere_center = glm::vec4{ mesh.bounding_sphere.x, mesh.bounding_sphere.y, mesh.bounding_sphere.z, 1.f };
+            debug_draw_feature.sphere_wire( world * sphere_center, mesh.bounding_sphere.w * scale, Color::blue() );
+
+            for ( u32 i = 0; i < mesh.meshlet_count; i++ ) {
+                const GpuMeshlet& meshlet = render_scene.meshlets[ mesh.meshlet_offset + i ];
+                glm::vec4 world_center = world * glm::vec4( meshlet.center, 1.f );
+
+                f32 world_radius = scale * meshlet.radius;
+
+                debug_draw_feature.sphere_wire( world_center, world_radius, Color::green() );
+            }
+        }
     }
 }
 
@@ -224,6 +272,14 @@ void VolumetricFogRenderConfig::draw_imgui() {
         }
         ImGui::PopID();
     }
+}
+
+u32 VolumetricFogRenderConfig::pack_options() const {
+    u32 options = 0u;
+    options |= application_apply_opacity_anti_aliasing ? k_vfog_opacity_anti_aliasing : 0u;
+    options |= application_apply_tricubic_filtering ? k_vfog_tricubic_filtering : 0u;
+
+    return options;
 }
 
 void TAARenderConfig::draw_imgui() {
@@ -330,6 +386,18 @@ void ReSTIRGIConfig::draw_imgui() {
 
         ImGui::PopID();
     }
+}
+
+void RenderConfig::draw_common_imgui() {
+
+    ImGui::Checkbox( "Use Slang Shaders", &use_slang_shaders );
+    ImGui::InputFloat( "Scene global scale", &global_scale, 0.001f );
+    ImGui::SliderFloat( "Force Roughness", &forced_roughness, -1, 1 );
+    ImGui::SliderFloat( "Force Metalness", &forced_metalness, -1, 1 );
+    ImGui::SliderFloat( "Specular AA variance", &specular_aa_variance, 0.0f, 1.0f, "%.3f" );
+    ImGui::SliderFloat( "Specular AA threshold", &specular_aa_threshold, 0.0f, 0.5f, "%.3f" );
+    ImGui::Separator();
+
 }
 
 } // namespace raptor
