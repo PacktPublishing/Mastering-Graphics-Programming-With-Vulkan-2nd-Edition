@@ -260,19 +260,24 @@ void CullingLatePass::render( FrameGraphRenderContext& context ) {
     FrameGraphResource* depth_pyramid_resource = context.frame_graph->get_resource( "depth_pyramid" );
     mesh_draw_counts.depth_pyramid_texture_index = depth_pyramid_resource->resource_info.texture.image_view.index();
 
-    cb->update_buffer( gpu_culling.meshlet_indirect_late_count_sb[ current_frame_index ], 0, sizeof( GpuMeshDrawCounts ), &mesh_draw_counts );
+    BufferHandle commands_handle = gpu_culling.meshlet_indirect_late_commands_sb[ current_frame_index ];
+    BufferHandle count_handle = gpu_culling.meshlet_indirect_late_count_sb[ current_frame_index ];
+
+    // Synchronize previous uses and track the upcoming transfer write.
+    cb->add_buffer_barrier( count_handle, 0, VK_WHOLE_SIZE, { VK_PIPELINE_STAGE_2_ALL_TRANSFER_BIT, VK_ACCESS_2_TRANSFER_WRITE_BIT } );
+    cb->flush_barriers();
+
+    cb->update_buffer( count_handle, 0, sizeof( GpuMeshDrawCounts ), &mesh_draw_counts );
 
     cb->bind_pipeline( cull_pipeline.active( language ) );
 
-    const Buffer* visible_commands_sb = renderer->gpu->get_buffer( gpu_culling.meshlet_indirect_late_commands_sb[ current_frame_index ] );
-    const Buffer* count_sb = renderer->gpu->get_buffer( gpu_culling.meshlet_indirect_late_count_sb[ current_frame_index ] );
-    cb->add_buffer_barrier( visible_commands_sb->handle, 0, VK_WHOLE_SIZE,
+    cb->add_buffer_barrier( commands_handle, 0, VK_WHOLE_SIZE,
                             { VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
                               VK_ACCESS_2_SHADER_WRITE_BIT } );
 
-    cb->add_buffer_barrier( count_sb->handle, 0, VK_WHOLE_SIZE,
-                            { VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
-                              VK_ACCESS_2_SHADER_WRITE_BIT } );
+    cb->add_buffer_barrier( count_handle, 0, VK_WHOLE_SIZE,
+                            { VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT | VK_PIPELINE_STAGE_2_DRAW_INDIRECT_BIT,
+                              VK_ACCESS_2_SHADER_READ_BIT | VK_ACCESS_2_SHADER_WRITE_BIT | VK_ACCESS_2_INDIRECT_COMMAND_READ_BIT } );
 
     cb->flush_barriers();
 
@@ -283,11 +288,11 @@ void CullingLatePass::render( FrameGraphRenderContext& context ) {
     u32 group_x = raptor::ceilu32( render_scene->mesh_instances.size / 64.0f );
     cb->dispatch( group_x, 1, 1 );
 
-    cb->add_buffer_barrier( visible_commands_sb->handle, 0, VK_WHOLE_SIZE,
+    cb->add_buffer_barrier( commands_handle, 0, VK_WHOLE_SIZE,
                             { VK_PIPELINE_STAGE_2_DRAW_INDIRECT_BIT,
                               VK_ACCESS_2_INDIRECT_COMMAND_READ_BIT } );
 
-    cb->add_buffer_barrier( count_sb->handle, 0, VK_WHOLE_SIZE,
+    cb->add_buffer_barrier( count_handle, 0, VK_WHOLE_SIZE,
                             { VK_PIPELINE_STAGE_2_DRAW_INDIRECT_BIT,
                               VK_ACCESS_2_INDIRECT_COMMAND_READ_BIT } );
 

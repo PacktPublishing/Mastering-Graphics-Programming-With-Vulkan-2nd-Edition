@@ -16,7 +16,7 @@ namespace raptor {
             u32 miss_index;
             u32 out_image_index;
 
-            u32 gbuffer_texures[4]; // x = roughness, y = normals, z = indirect lighting
+            u32 gbuffer_textures[4]; // x = roughness, y = normals, z = indirect lighting
         };
 
         void                    declare_frame_graph_node( FrameGraphResourceContext& context ) override;

@@ -3,6 +3,7 @@
 #include "graphics/gpu_profiler.hpp"
 #include "graphics/renderer.hpp"
 #include "graphics/frame_graph.hpp"
+#include "graphics/frame_renderer.hpp"
 #include "external/imgui/imgui.h"
 
 namespace raptor {
@@ -140,8 +141,8 @@ void DemoUi::common_outputs_ui() {
         end_tab();
     }
 
-    if ( begin_tab( DemoUiTab::ImageViewer ) ) {
-        image_viewer->debug_ui();
+    if ( frame_renderer && frame_renderer->image_viewer && begin_tab( DemoUiTab::ImageViewer ) ) {
+        frame_renderer->render_config.image_viewer.draw_imgui( *frame_renderer->renderer->gpu, *frame_renderer->image_viewer );
         end_tab();
     }
 
@@ -266,15 +267,15 @@ void DemoUi::set_tab_available( DemoUiTab tab, bool available ) {
     }
 }
 
-void DemoUi::set_tools( GpuVisualProfiler* gpu_profiler, ImageViewDebugger* image_viewer,
+void DemoUi::set_tools( GpuVisualProfiler* gpu_profiler, FrameRenderer* frame_renderer,
                         FrameGraph* frame_graph, MemoryService* memory ) {
     if ( gpu_profiler ) {
         tab_available[ static_cast< int >( DemoUiTab::GpuProfiler ) ] = true;
         this->gpu_profiler = gpu_profiler;
     }
-    if ( image_viewer ) {
+    if ( frame_renderer && frame_renderer->image_viewer ) {
         tab_available[ static_cast< int >( DemoUiTab::ImageViewer ) ] = true;
-        this->image_viewer = image_viewer;
+        this->frame_renderer = frame_renderer;
     }
     if ( frame_graph ) {
         tab_available[ static_cast< int >( DemoUiTab::FrameGraph ) ] = true;

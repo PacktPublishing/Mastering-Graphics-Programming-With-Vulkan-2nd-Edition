@@ -2,6 +2,9 @@
 #include "graphics/raptor_imgui.hpp"
 #include "graphics/scene_graph.hpp"
 #include "graphics/frame_renderer.hpp"
+#include "graphics/gpu_device.hpp"
+
+#include <vulkan/vk_enum_string_helper.h>
 
 #include "external/imgui/imgui.h"
 
@@ -10,7 +13,7 @@
 
 namespace raptor {
 
-void LightingRenderConfig::draw_imgui( Span<Light> lights ) {
+void LightingRenderConfig::draw_lights_imgui( Span<Light> lights ) {
 
     if ( ImGui::CollapsingHeader( "Lights" ) ) {
         ImGui::PushID( "LightingRenderConfig::Lights" );
@@ -50,8 +53,23 @@ void LightingRenderConfig::draw_imgui( Span<Light> lights ) {
             ImGui::TextUnformatted( "No lights" );
         }
 
+        ImGui::SeparatorText( "Test lights" );
+
+        if ( ImGui::Button( "Sponza light test" ) ) {
+            load_shadow_test_lights = true;
+        }
+
+        if ( ImGui::Button( "Sponza light test advanced" ) ) {
+            load_shadow_test_lights_adv = true;
+        }
+
+        ImGui::Checkbox( "Animate lights", &animate_lights );
+
         ImGui::PopID();
     }
+}
+
+void LightingRenderConfig::draw_imgui() {
 
     if ( ImGui::CollapsingHeader( "Clustered Lighting" ) ) {
         ImGui::PushID( "LightingRenderConfig::Clustered" );
@@ -64,14 +82,6 @@ void LightingRenderConfig::draw_imgui( Span<Light> lights ) {
         ImGui::Checkbox( "debug show tiles", &debug_show_tiles );
         ImGui::Checkbox( "debug show bins", &debug_show_bins );
         ImGui::SliderUint( "Lighting debug modes", &lighting_debug_modes, 0, 10 );
-
-        if ( ImGui::Button( "Sponza light test" ) ) {
-            load_shadow_test_lights = true;
-        }
-
-        if ( ImGui::Button( "Sponza light test advanced" ) ) {
-            load_shadow_test_lights_adv = true;
-        }
 
         ImGui::PopID();
     }
@@ -230,6 +240,193 @@ void DebugDrawRenderConfig::draw_imgui( RenderScene* scene, SceneGraph& scene_gr
             }
         }
     }
+}
+
+// ImageViewerRenderConfig ///////////////////////////////////////////////
+
+// "gbuffer_normals (42) 1280x800 R16G16_SFLOAT"
+static void format_image_view_label( GpuDevice& gpu, ImageViewHandle view_handle, char* label, sizet label_size ) {
+
+    const ImageView* view = gpu.get_image_view( view_handle );
+    const Image* image = gpu.get_image( view->parent_image );
+
+    cstring format_name = string_VkFormat( image->vk_format );
+    if ( strncmp( format_name, "VK_FORMAT_", 10 ) == 0 ) {
+        format_name += 10;
+    }
+
+    snprintf( label, label_size, "%s (%u) %ux%u %s", image->name, view_handle.index(),
+              ( u32 )image->width, ( u32 )image->height, format_name );
+}
+
+// Views selectable by the viewer, in pool order.
+static ImageViewHandle get_viewable_image_view( GpuDevice& gpu, const ImageViewerRenderingFeature& feature, u32 index ) {
+
+    if ( gpu.image_views.active_elements.get_bit( index ) == 0 ) {
+        return {};
+    }
+
+    const ImageViewHandle handle( ( u16 )index, gpu.image_views.generations[ index ] );
+    return feature.is_debuggable( gpu, handle ) ? handle : ImageViewHandle{};
+}
+
+void ImageViewerRenderConfig::draw_imgui( GpuDevice& gpu, ImageViewerRenderingFeature& feature ) {
+
+    ImGui::PushID( "ImageViewerRenderConfig" );
+
+    const u32 first_view = gpu.dummy_image_view.index();
+    const u32 view_count = gpu.image_views.size;
+
+    // Image selection //////////////////////////////////////////////////
+    char preview[ 256 ] = "None";
+    if ( feature.is_debuggable( gpu, input ) ) {
+        format_image_view_label( gpu, input, preview, sizeof( preview ) );
+    }
+
+    if ( ImGui::BeginCombo( "Image", preview ) ) {
+        for ( u32 v = first_view; v < view_count; ++v ) {
+            const ImageViewHandle handle = get_viewable_image_view( gpu, feature, v );
+            if ( handle.is_invalid() ) {
+                continue;
+            }
+
+            char label[ 256 ];
+            format_image_view_label( gpu, handle, label, sizeof( label ) );
+
+            const bool is_selected = ( handle == input );
+            if ( ImGui::Selectable( label, is_selected ) ) {
+                input = handle;
+                mip = 0;
+                zoom = 1.0f;
+                pan = { 0.0f, 0.0f };
+            }
+
+            if ( is_selected ) {
+                ImGui::SetItemDefaultFocus();
+            }
+        }
+        ImGui::EndCombo();
+    }
+
+    if ( !feature.is_debuggable( gpu, input ) || feature.output_view.is_invalid() ) {
+        ImGui::TextUnformatted( "Select an image." );
+        ImGui::PopID();
+        return;
+    }
+
+    const ImageView* view = gpu.get_image_view( input );
+    const Image* image = gpu.get_image( view->parent_image );
+
+    // Conversion controls ////////////////////////////////////////////////
+    static cstring channel_names[] = { "RGB", "R", "G", "B", "A", "Luminance" };
+    i32 channel = ( i32 )channel_mode;
+    ImGui::Combo( "Channels", &channel, channel_names, ArraySize( channel_names ) );
+    channel_mode = ( u32 )channel;
+
+    ImGui::DragFloatRange2( "Range", &range_min, &range_max, 0.01f, 0.0f, 0.0f, "Min %.4f", "Max %.4f" );
+    ImGui::SameLine();
+    if ( ImGui::Button( "0..1" ) ) {
+        range_min = 0.0f;
+        range_max = 1.0f;
+    }
+
+    ImGui::SliderFloat( "Exposure (EV)", &exposure_ev, -16.0f, 16.0f, "%.1f" );
+
+    const VkImageSubresourceRange& range = view->subresource_range;
+    const u32 mip_count = range.levelCount == VK_REMAINING_MIP_LEVELS ? image->mip_level_count - range.baseMipLevel : range.levelCount;
+    if ( mip_count > 1 ) {
+        ImGui::SliderUint( "Mip", &mip, 0, mip_count - 1 );
+    }
+    mip = raptor::min( mip, mip_count - 1 );
+
+    ImGui::Checkbox( "sRGB encode", &encode_srgb );
+    ImGui::SameLine();
+    ImGui::Checkbox( "NaN/Inf (magenta)", &show_nan_inf );
+    ImGui::SameLine();
+    ImGui::Checkbox( "Out of range (red/blue)", &show_out_of_range );
+
+    ImGui::SliderFloat( "Zoom", &zoom, 0.1f, 256.0f, "%.2f", ImGuiSliderFlags_Logarithmic );
+    ImGui::SameLine();
+    if ( ImGui::Button( "Reset view" ) ) {
+        zoom = 1.0f;
+        pan = { 0.0f, 0.0f };
+    }
+    ImGui::SameLine();
+    ImGui::Checkbox( "Fullscreen (Esc)", &fullscreen );
+
+    if ( fullscreen && ImGui::IsKeyPressed( ImGuiKey_Escape ) ) {
+        fullscreen = false;
+    }
+
+    // View: display pixel -> input texel
+    const u32 base_mip = range.baseMipLevel + mip;
+    const glm::vec2 input_size{ ( f32 )raptor::max( ( u32 )image->width >> base_mip, 1u ),
+                                ( f32 )raptor::max( ( u32 )image->height >> base_mip, 1u ) };
+
+    // The image fills the rest of the panel; the output image is as large as the swapchain.
+    const ImVec2 available = ImGui::GetContentRegionAvail();
+    // Output always full size: the same pixels feed the panel and the fullscreen passthrough.
+    const glm::vec2 output_size{ ( f32 )feature.output_width, ( f32 )feature.output_height };
+
+    const f32 fit = raptor::min( output_size.x / input_size.x, output_size.y / input_size.y );
+    f32 texels_per_pixel = 1.0f / ( fit * zoom );
+    glm::vec2 view_center = input_size * 0.5f + pan;
+
+    // Panel: the output keeps its aspect and is downscaled by the sampler.
+    const f32 panel_scale = raptor::max( raptor::min( available.x / output_size.x, available.y / output_size.y ), 0.01f );
+    const glm::vec2 panel_size = output_size * panel_scale;
+
+    const ImVec2 origin = ImGui::GetCursorScreenPos();
+    ImGui::InvisibleButton( "image", ImVec2( panel_size.x, panel_size.y ) );
+
+    // Mouse in output pixels, from the centre.
+    const ImGuiIO& io = ImGui::GetIO();
+    const glm::vec2 mouse_from_center = ( glm::vec2( io.MousePos.x - origin.x, io.MousePos.y - origin.y ) - panel_size * 0.5f ) / panel_scale;
+
+    if ( ImGui::IsItemHovered() && io.MouseWheel != 0.0f ) {
+        const glm::vec2 texel_under_mouse = view_center + mouse_from_center * texels_per_pixel;
+        zoom = raptor::clamp( zoom * powf( 1.2f, io.MouseWheel ), 0.1f, 256.0f );
+        texels_per_pixel = 1.0f / ( fit * zoom );
+        view_center = texel_under_mouse - mouse_from_center * texels_per_pixel;
+    }
+
+    if ( ImGui::IsItemActive() && ImGui::IsMouseDragging( ImGuiMouseButton_Left ) ) {
+        view_center -= glm::vec2( io.MouseDelta.x, io.MouseDelta.y ) / panel_scale * texels_per_pixel;
+    }
+
+    pan = view_center - input_size * 0.5f;
+
+    if ( ImGui::IsItemHovered() ) {
+        const glm::vec2 texel = view_center + mouse_from_center * texels_per_pixel;
+        ImGui::SetTooltip( "Texel %d, %d (mip %u)", ( i32 )floorf( texel.x ), ( i32 )floorf( texel.y ), mip );
+    }
+
+    ImGui::GetWindowDrawList()->AddImage( ( ImTextureID )&feature.output_view, origin,
+                                          ImVec2( origin.x + panel_size.x, origin.y + panel_size.y ) );   // uv 0..1
+
+    // Request the conversion for this frame
+    GpuImageViewerConstants& constants = feature.constants;
+    constants.input_index       = input.index();
+    constants.output_index      = feature.output_view.index();
+    constants.options           = ( TextureFormat::is_uint_format( image->vk_format ) ? k_image_viewer_input_uint : 0 ) |
+                                  ( TextureFormat::is_sint_format( image->vk_format ) ? k_image_viewer_input_sint : 0 ) |
+                                  ( encode_srgb ? k_image_viewer_encode_srgb : 0 ) |
+                                  ( show_nan_inf ? k_image_viewer_show_nan_inf : 0 ) |
+                                  ( show_out_of_range ? k_image_viewer_show_out_of_range : 0 );
+    constants.channel_mode      = channel_mode;
+    constants.range_min         = range_min;
+    constants.range_rcp_size    = 1.0f / raptor::max( range_max - range_min, 1e-6f );
+    constants.exposure_scale    = exp2f( exposure_ev );
+    constants.mip               = mip;
+    constants.display_size      = output_size;
+    constants.input_size        = input_size;
+    constants.view_center       = view_center;
+    constants.texels_per_pixel  = texels_per_pixel;
+
+    feature.input = input;
+    feature.requested = true;
+
+    ImGui::PopID();
 }
 
 // VolumetricFogRenderConfig /////////////////////////////////////////////

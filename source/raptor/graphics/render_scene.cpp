@@ -572,6 +572,10 @@ CommandBuffer* RenderScene::update_physics( f32 delta_time, f32 air_density, f32
 
 void RenderScene::update_animations( f32 delta_time ) {
 
+    if ( animate_lights ) {
+        light_animation_time += delta_time;
+    }
+
     if ( animations.size == 0 ) {
         return;
     }
@@ -781,6 +785,7 @@ RenderModel* RenderScene::add_and_load_model( char* filename, cstring path, Aren
 void RenderScene::prepare_draws( Renderer* renderer, ArenaAllocator* scratch_allocator, SceneGraph* scene_graph ) {
 
     lights.init( resident_allocator, k_num_lights );
+    light_starting_positions.init( resident_allocator, k_num_lights );
 
     // Add a first light in a fixed position and then random lights.
     const u32 lights_per_side = raptor::ceilu32( sqrtf( active_lights * 1.f ) );
@@ -808,6 +813,8 @@ void RenderScene::prepare_draws( Renderer* renderer, ArenaAllocator* scratch_all
             new_light.aabb_max = glm::vec4{ aabb_max.x, aabb_max.y, aabb_max.z, 1.0f };
 
             lights.push( new_light );
+
+            light_starting_positions.push( new_light.world_position );
         }
 
         for ( u32 i = 1; i < k_num_lights; ++i ) {
@@ -838,6 +845,8 @@ void RenderScene::prepare_draws( Renderer* renderer, ArenaAllocator* scratch_all
             new_light.intensity = 3.0f;
 
             lights.push( new_light );
+
+            light_starting_positions.push( new_light.world_position );
         }
     }
 
@@ -995,6 +1004,7 @@ void RenderScene::shutdown( Renderer* renderer )
     }
 
     lights.shutdown();
+    light_starting_positions.shutdown();
 
     meshes.shutdown();
     mesh_instances.shutdown();

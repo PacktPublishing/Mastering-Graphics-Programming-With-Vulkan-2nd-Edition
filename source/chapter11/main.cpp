@@ -199,9 +199,9 @@ int main( int argc, char** argv ) {
     ray_tracing_feature.init( allocator, &renderer );
     frame_renderer.ray_tracing = &ray_tracing_feature;
 
-    // Debug image views
-    ImageViewDebugger image_view_debugger;
-    image_view_debugger.init( allocator, &gpu );
+    // Debug image viewer
+    ImageViewerRenderingFeature image_viewer_feature;
+    frame_renderer.image_viewer = &image_viewer_feature;
 
     ArenaAllocator temp_frame_allocator;
     temp_frame_allocator.init( rmega( 4 ) );
@@ -343,7 +343,7 @@ int main( int argc, char** argv ) {
     animation_viewer.init( allocator );
 
     DemoUi demo_ui;
-    demo_ui.set_tools( &gpu_profiler, &image_view_debugger, &frame_graph, MemoryService::instance() );
+    demo_ui.set_tools( &gpu_profiler, &frame_renderer, &frame_graph, MemoryService::instance() );
 
     while ( !window.requested_exit ) {
         ZoneScopedN("RenderLoop");
@@ -401,7 +401,7 @@ int main( int argc, char** argv ) {
                     game_camera.draw_debug_ui();
 
                     Span<Light> active_lights{ &render_scene.lights[ 0 ], render_scene.active_lights };
-                    frame_renderer.render_config.lighting.draw_imgui( active_lights );
+                    frame_renderer.render_config.lighting.draw_lights_imgui( active_lights );
 
                     scene_graph.debug_ui();
                     demo_ui.end_tab();
@@ -441,6 +441,7 @@ int main( int argc, char** argv ) {
                         game_camera.camera.set_aspect_ratio( ( f32 )new_width / ( f32 )new_height );
                     }
 
+                    frame_renderer.render_config.lighting.draw_imgui();
                     frame_renderer.render_config.shadows.draw_imgui( frame_renderer.render_blackboard.point_shadows );
                     frame_renderer.render_config.debug_draw.draw_imgui( &render_scene, scene_graph, debug_draw_feature );
                     frame_renderer.render_config.gpu_culling.draw_imgui();
@@ -624,7 +625,6 @@ int main( int argc, char** argv ) {
 
     vkDeviceWaitIdle( gpu.vulkan_device );
 
-    image_view_debugger.shutdown();
     imgui->shutdown();
     gpu_profiler.shutdown();
     scene_graph.shutdown();

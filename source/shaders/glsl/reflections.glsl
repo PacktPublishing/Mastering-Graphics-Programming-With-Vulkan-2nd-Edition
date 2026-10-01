@@ -5,13 +5,12 @@
 #include "platform.glslh"
 #include "frame.h"
 #include "mesh.h"
+#include "lighting.h"
 #include "sampling.h"
 #include "debug_rendering.h"
 
 // Common Raytracing code ////////////////////////////////////////////////
 #if defined (RAYGEN_REFLECTIONS_RT) || defined (CLOSEST_HIT_REFLECTIONS_RT) || defined (MISS_REFLECTIONS_RT)
-
-#include "lighting.h"
 
 #extension GL_EXT_ray_tracing : enable
 
@@ -30,7 +29,7 @@ struct ReflectionConstants {
     uint miss_index;
     uint out_image_index;
 
-    uvec4 gbuffer_texures; // x = roughness, y= normals, z = indirect lighting
+    uvec4 gbuffer_textures; // x = roughness, y= normals, z = indirect lighting
 };
 
 layout( set = MATERIAL_SET, binding = 40 ) uniform ReflectionsConstants {
@@ -104,7 +103,7 @@ void main() {
 
 #if REFLECTION_USE_GUIDE
     // Use half res guide texture
-    vec4 guide = texelFetch( global_textures[ reflections.gbuffer_texures.y ], xy, 0 );
+    vec4 guide = texelFetch( global_textures[ reflections.gbuffer_textures.y ], xy, 0 );
     vec2 encoded_normal = guide.rg;
     float raw_depth = guide.b;
     // Safe clamp to have valid values
@@ -119,11 +118,11 @@ void main() {
 #else
     // Manually choose best representative pixel
     ivec2 fullres_xy = choose_reflection_representative_fullres_pixel( xy );
-    vec2 encoded_normal = texelFetch( global_textures[ reflections.gbuffer_texures.y ], fullres_xy, 0 ).rg;
+    vec2 encoded_normal = texelFetch( global_textures[ reflections.gbuffer_textures.y ], fullres_xy, 0 ).rg;
     float raw_depth = texelFetch( global_textures[ frame.depth_texture_index ], fullres_xy, 0 ).r;
 #endif // REFLECTION_USE_GUIDE
 
-    float perceptual_roughness = max( texelFetch( global_textures[ reflections.gbuffer_texures.x ], fullres_xy, 0 ).y, k_min_perceptual_roughness );
+    float perceptual_roughness = max( texelFetch( global_textures[ reflections.gbuffer_textures.x ], fullres_xy, 0 ).y, k_min_perceptual_roughness );
     uint rng_state = seed( gl_LaunchIDEXT.xy ) + frame.current_frame;
     float rnd_normalizer = 1.0 / float( 0xFFFFFFFFu );
 
@@ -271,56 +270,12 @@ void main() {
                 debug_draw_line( p_world, p_world + ( triangle_normal * 2 ), white, red );
             }
 
-            float lights_importance[ NUM_LIGHTS ];
-            float total_importance = 0.0;
+            uint num_lights = get_num_lights();
+            LightSample light_sample = sample_light( rng_state, p_world, shading_normal );
+            int light_index = light_sample.index;
 
-            uint num_lights = min( frame.active_lights, uint( NUM_LIGHTS ) );
-
-            for ( uint l = 0; l < num_lights; ++l ) {
-                // Compute light importance by using something similar to "Importance Sampling of Many Lights on the GPU"
-                Light light = lights[ l ];
-                vec3 p_to_light = light.world_position - p_world.xyz;
-
-                float point_light_angle = dot( normalize( p_to_light ), shading_normal );
-
-                float distance_sq = max( dot( p_to_light, p_to_light ), 1e-6 );
-                float r_sq = light.radius * light.radius;
-
-                bool light_active = ( point_light_angle > 1e-4 ) && ( distance_sq <= r_sq );
-
-                float orientation = point_light_angle;
-
-                // Follow the light attenuation formula
-                float factor = distance_sq * ( 1.0 / r_sq );
-                float smooth_factor = max( 1.0 - factor * factor, 0.0 );
-                float importance = ( light.intensity * orientation * smooth_factor * smooth_factor ) / distance_sq;
-                //float importance = ( light.intensity * orientation ) / distance_sq;
-
-                float final_value = light_active ? importance : 0.0;
-                lights_importance[ l ] = final_value;
-
-                total_importance += final_value;
-            }
-
-            if ( total_importance > 0.0001f ) {
-                for ( uint l = 0; l < num_lights; ++l ) {
-                    lights_importance[ l ] /= total_importance;
-                }    
-            }
-            
-            float rnd_value = rand_pcg( rng_state ) * rnd_normalizer;
-
-            uint light_index = 0;
-            float accum_probability = 0.0;
-            for ( ; light_index < num_lights; ++light_index ) {
-                accum_probability += lights_importance[ light_index ];
-
-                if ( accum_probability > rnd_value ) {
-                    break;
-                }
-            }
-
-            if ( total_importance > 0.0001f && light_index < num_lights ) {
+            if ( light_index != -1 &&
+                 light_index < num_lights ) {
 
                 // Debug: light selected
                 //reflection_colour = vec3( 0, 0, 1 );
@@ -375,7 +330,7 @@ void main() {
 
                     vec3 light_intensity = NoL * light.intensity * attenuation * light.color;
 
-                    float light_pdf = max( lights_importance[ light_index ], 0.000001f );
+                    float light_pdf = max( light_sample.importance, 0.000001f );
                     reflection_colour = albedo.rgb * light_intensity / ( PI * light_pdf );
 
                     //reflection_colour = vec3( attenuation );
@@ -417,13 +372,13 @@ void main() {
             // Indirect light sampling
             // vec3 indirect_color = sample_irradiance( p_world.xyz, shading_normal, camera_position.xyz );
             // reflection_colour += indirect_color;
-        } // 
+        } //
         else {
             // Debug: green, primary ray in the void
             //reflection_colour = vec3( 0, 1, 0 );
             vec3 l = normalize( light_cb.raytraced_shadow_light_position );
 
-            reflection_colour = sample_procedural_sky( reflected_ray, l );            
+            reflection_colour = sample_procedural_sky( reflected_ray, l );
         }
     }
 

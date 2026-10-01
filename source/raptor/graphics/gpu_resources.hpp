@@ -564,9 +564,11 @@ namespace TextureFormat {
     inline bool                     is_depth_stencil( VkFormat value ) {
         return value >= VK_FORMAT_D16_UNORM_S8_UINT && value < VK_FORMAT_BC1_RGB_UNORM_BLOCK;
     }
+
     inline bool                     is_depth_only( VkFormat value ) {
         return value >= VK_FORMAT_D16_UNORM && value < VK_FORMAT_S8_UINT;
     }
+
     inline bool                     is_stencil_only( VkFormat value ) {
         return value == VK_FORMAT_S8_UINT;
     }
@@ -574,12 +576,17 @@ namespace TextureFormat {
     inline bool                     has_depth( VkFormat value ) {
         return is_depth_only(value) || is_depth_stencil( value );
     }
+
     inline bool                     has_stencil( VkFormat value ) {
         return value >= VK_FORMAT_S8_UINT && value <= VK_FORMAT_D32_SFLOAT_S8_UINT;
     }
+
     inline bool                     has_depth_or_stencil( VkFormat value ) {
         return value >= VK_FORMAT_D16_UNORM && value <= VK_FORMAT_D32_SFLOAT_S8_UINT;
     }
+
+    bool                            is_uint_format( VkFormat format );
+    bool                            is_sint_format( VkFormat format );
 
 } // namespace TextureFormat
 

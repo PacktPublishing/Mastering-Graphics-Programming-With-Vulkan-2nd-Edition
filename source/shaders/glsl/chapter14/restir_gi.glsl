@@ -3,6 +3,7 @@
 #extension GL_GOOGLE_include_directive : enable
 #extension GL_EXT_ray_tracing : enable
 #extension GL_EXT_ray_query : enable
+#extension GL_EXT_shader_16bit_storage: require
 
 #include "platform.glslh"
 #include "frame.h"
@@ -55,7 +56,8 @@ struct ReservoirPacked {
     float W;                 // 32
     float w_sum;             // 36
     uint  M;                 // 40
-    uint  debug;             // 44
+    int16_t  light_index;    // 42
+    uint16_t debug;          // 44
 };
 
 // Adapted from the ReSTIR GI: Path Resampling for Real-Time Path Tracing paper
@@ -75,7 +77,8 @@ struct ReservoirSample {
 
     float p_hat; // target function
     float cos_theta; // dot(nv, wi)
-    uint pad[2];
+    int light_index;
+    uint pad;
 };
 
 struct Reservoir {
@@ -200,6 +203,7 @@ Reservoir unpack_reservoir( ReservoirPacked p ) {
     r.z.Fs = vec3( 0.0 );
     r.z.p_wi      = 0.0;
     r.z.cos_theta = 0.0;
+    r.z.light_index = p.light_index;
 
     r.w_sum = p.w_sum;
     r.W     = p.W;
@@ -221,7 +225,8 @@ ReservoirPacked pack_reservoir( Reservoir r ) {
     p.W               = r.W;
     p.w_sum           = r.w_sum;
     p.M               = r.M;
-    p.debug           = r.debug;
+    p.light_index     = int16_t( r.z.light_index );
+    p.debug           = uint16_t( r.debug );
 
     return p;
 }
@@ -280,6 +285,7 @@ Reservoir empty_reservoir() {
     empty.z.p_wi = 0;
     empty.z.p_hat = 0;
     empty.z.cos_theta = 0;
+    empty.z.light_index = -1;
 
     empty.w_sum = 0;
     empty.W = 0;
@@ -342,14 +348,15 @@ vec3 evaluate_brdf_diffuse( vec3 wo, vec3 wi, vec3 albedo, vec3 position,
 #define evaluate_brdf evaluate_brdf_diffuse
 
 
-vec3 estimate_outgoing_radiance( vec3 xs, vec3 ns, vec3 wo, vec3 albedo,
+vec3 estimate_outgoing_radiance( int light_index, vec3 xs, vec3 ns, vec3 wo, vec3 albedo,
                                  float metalness, float roughness ) {
 
     vec3 Lo = vec3( 0.0 );
 
     // Regular point light.
+    if ( light_index != -1 && light_index < get_num_lights() )
     {
-        Light light = lights[0];
+        Light light = lights[ light_index ];
 
         vec3 position_to_light = light.world_position - xs;
         float dist = length( position_to_light );
@@ -420,10 +427,46 @@ Reservoir validate_reservoir( Reservoir r, vec3 xv, vec3 nv, vec3 wo,
     //     return empty_reservoir();
     // }
 
+    // Regular point light.
+    uint visible_lights = 0;
+    {
+        uint num_lights = get_num_lights();
+
+        if ( r.z.light_index != -1 &&
+             r.z.light_index < num_lights ) {
+
+            Light light = lights[ r.z.light_index ];
+
+            vec3 to_light = light.world_position - r.z.xs;
+            float light_dist = length( to_light );
+            vec3 wi_light = to_light / max( light_dist, 1e-4 );
+            float attenuation = attenuation_square_falloff( to_light, 1.0 / light.radius );
+
+            float NoL = max( dot( r.z.ns, wi_light ), 0.0 );
+            if ( NoL > 1e-4 && attenuation > 1e-4 && check_visibility( r.z.xs, wi_light, light_dist ) ) {
+                visible_lights++;
+            }
+        }
+    }
+
+    // Raytraced directional light.
+    if ( !is_raytrace_shadow_point_light() ) {
+        vec3 wi_light = normalize( light_cb.raytraced_shadow_light_position );
+
+        float NoL = max( dot( r.z.ns, wi_light ), 0.0 );
+        if ( ( NoL > 1e-4 ) && check_visibility( r.z.xs, wi_light, 100.0 ) ) {
+            visible_lights++;
+        }
+    }
+
+    if ( visible_lights == 0 ) {
+        return empty_reservoir();
+    }
+
     vec3 Fs = evaluate_brdf( wo, wi_sample, albedo, xv, nv, metalness, roughness );
     vec3 bounce_wo = normalize( xv - r.z.xs );
 
-    vec3 bounce_lo = estimate_outgoing_radiance( r.z.xs, r.z.ns, bounce_wo, r.z.s_albedo, r.z.s_metalness, r.z.s_roughness );
+    vec3 bounce_lo = estimate_outgoing_radiance( r.z.light_index, r.z.xs, r.z.ns, bounce_wo, r.z.s_albedo, r.z.s_metalness, r.z.s_roughness );
 
     float p_hat = compute_phat( bounce_lo, Fs, cos_theta );
 
@@ -728,7 +771,9 @@ void main() {
         reservoirSample.s_metalness = bounce_orm.b;
         reservoirSample.s_albedo = bounce_albedo.rgb;
 
-        reservoirSample.lo = estimate_outgoing_radiance( reservoirSample.xs, reservoirSample.ns, bounce_wo,
+        LightSample light_sample = sample_light( rng_state, reservoirSample.xs, reservoirSample.ns );
+        reservoirSample.light_index = light_sample.index;
+        reservoirSample.lo = estimate_outgoing_radiance( light_sample.index, reservoirSample.xs, reservoirSample.ns, bounce_wo,
                                                          bounce_albedo.rgb, bounce_orm.b, bounce_orm.g );
 
         reservoirSample.Fs = evaluate_brdf( wo, reservoirSample.wi, albedo, reservoirSample.xv, reservoirSample.nv, orm.b, orm.g );

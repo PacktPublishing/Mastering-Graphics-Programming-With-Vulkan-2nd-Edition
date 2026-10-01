@@ -273,23 +273,6 @@ struct RendererCreation {
 
 }; // struct RendererCreation
 
-// 
-struct ImageViewDebugger {
-
-    void            init( Allocator* resident_allocator, GpuDevice* gpu );
-    void            shutdown();
-
-    void            debug_ui();
-
-    GpuDevice*      gpu;
-
-    u32             image_view_to_debug = 0;
-    Array<u32>      image_view_indices;
-    Array<cstring>  image_names;
-
-    StringBuffer    texture_names_pool;
-};
-
 //
 // Main class responsible for handling all high level resources
 //

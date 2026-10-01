@@ -5,6 +5,7 @@
 #include "platform.glslh"
 #include "frame.h"
 #include "mesh.h"
+#include "lighting.h"
 #include "sampling.h"
 #include "debug_rendering.h"
 #include "../shared_structs.h"
@@ -157,7 +158,7 @@ void resolve_history( bool used_fallback, vec3 color_sum, vec2 moments_sum, floa
     }
 }
 
-void check_temporal_consistency( ivec2 frag_coord, vec2 prev_frag_coord, out bool is_consistent_reflections, 
+void check_temporal_consistency( ivec2 frag_coord, vec2 prev_frag_coord, out bool is_consistent_reflections,
                                  out vec3 history_color_reflections, out vec2 history_moments_reflections, out uint history_count_reflections,
                                  out bool is_consistent_restirgi, out vec3 history_color_restirgi, out vec2 history_moments_restirgi,
                                  out uint history_count_restirgi ) {
@@ -320,7 +321,7 @@ void main() {
     uint history_count_reflections = 1;
     uint history_count_restirgi = 1;
 
-    check_temporal_consistency( frag_coord, prev_frag_coord, is_consistent_reflections, history_color_reflections, 
+    check_temporal_consistency( frag_coord, prev_frag_coord, is_consistent_reflections, history_color_reflections,
                                 history_moments_reflections, history_count_reflections, is_consistent_restirgi,
                                 history_color_restirgi, history_moments_restirgi, history_count_restirgi );
 
@@ -436,7 +437,7 @@ bool svgf_propagate_variance() {
 void filter_signal_sample( SVGFOutputs outputs, ivec2 q, float h_q, float w_n, float w_z,
                            float rcp_sigma_l_variance, float luminance_p, inout vec3 filtered_color,
                            inout float color_weight, inout float updated_variance ) {
-    
+
     vec3 c_q = texelFetch( global_textures[ ( outputs.integrated_color_texture_index ) ], q, 0 ).rgb;
     float l_q = luminance( c_q );
 

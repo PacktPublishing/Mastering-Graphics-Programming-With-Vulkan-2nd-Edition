@@ -23,10 +23,16 @@ void main() {
 
 #if defined(FRAGMENT_MAIN_TRIANGLE)
 
+#include "../shared_structs.h"
+
 layout (location = 0) in vec2 vTexCoord;
 layout (location = 1) flat in uint texture_id;
 
 layout (location = 0) out vec4 out_color;
+
+layout ( std140, set = MATERIAL_SET, binding = 11 ) uniform PostConstants {
+    GpuPostProcessConstants post;
+};
 
 void main() {
     vec4 color = texture(global_textures[nonuniformEXT(texture_id)], vTexCoord.xy);
@@ -141,7 +147,6 @@ void main() {
 }
 
 #endif // FRAGMENT_MAIN
-
 
 #if defined(COMPUTE_BILATERAL_WEIGHTS)
 

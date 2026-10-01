@@ -1340,9 +1340,9 @@ int main( int argc, char** argv ) {
     MeshesRenderingFeature meshes;
     frame_renderer.meshes = &meshes;
 
-    // Debug image views
-    ImageViewDebugger image_view_debugger;
-    image_view_debugger.init( allocator, &gpu );
+    // Debug image viewer
+    ImageViewerRenderingFeature image_viewer_feature;
+    frame_renderer.image_viewer = &image_viewer_feature;
 
     // Load frame graph
     {
@@ -1483,7 +1483,7 @@ int main( int argc, char** argv ) {
     bool update_mesh_data = true;
 
     DemoUi demo_ui;
-    demo_ui.set_tools( &gpu_profiler, &image_view_debugger, &frame_graph, MemoryService::instance() );
+    demo_ui.set_tools( &gpu_profiler, &frame_renderer, &frame_graph, MemoryService::instance() );
 
     while ( !window.requested_exit ) {
         ZoneScopedN("RenderLoop");
@@ -1540,7 +1540,7 @@ int main( int argc, char** argv ) {
                     game_camera.draw_debug_ui();
 
                     //Span<Light> active_lights{ &render_scene.lights[ 0 ], render_scene.active_lights };
-                    //frame_renderer.render_config.lighting.draw_imgui( active_lights );
+                    //frame_renderer.render_config.lighting.draw_lights_imgui( active_lights );
 
                     scene_graph.debug_ui();
                     demo_ui.end_tab();
@@ -1771,7 +1771,6 @@ int main( int argc, char** argv ) {
 
     vkDeviceWaitIdle( gpu.vulkan_device );
 
-    image_view_debugger.shutdown();
     imgui->shutdown();
     gpu_profiler.shutdown();
     scene_graph.shutdown();

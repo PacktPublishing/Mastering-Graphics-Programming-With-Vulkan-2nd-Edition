@@ -288,7 +288,8 @@ void SVGFGuideDownsamplePass::render( FrameGraphRenderContext& context ) {
     gpu_commands->push_constants( pipeline.active( language ), 0, sizeof( SVGFPushConstants ), &push_constants );
 
     gpu_commands->bind_descriptor_set( { renderer->gpu->bindless_descriptor_set, descriptor_set },
-        { render_blackboard.scene_cb_offset, constants_offset } );
+        { render_blackboard.scene_cb_offset, render_blackboard.lighting.lighting_constants_cb_offset,
+          constants_offset } );
 
     gpu_commands->dispatch( raptor::ceilu32( render_blackboard.render_width * texture_scale / 8.0f ),
                             raptor::ceilu32( render_blackboard.render_height * texture_scale / 8.0f ), 1 );
@@ -596,7 +597,7 @@ void SVGFAccumulationPass::render( FrameGraphRenderContext& context ) {
 
     gpu_commands->bind_descriptor_set(
         { renderer->gpu->bindless_descriptor_set, descriptor_set },
-        { render_blackboard.scene_cb_offset, constants_offset } );
+        { render_blackboard.scene_cb_offset, render_blackboard.lighting.lighting_constants_cb_offset, constants_offset } );
 
     gpu_commands->add_image_barrier( resources.integrated_reflection_color_texture, range_aspect( VK_IMAGE_ASPECT_COLOR_BIT, 0, VK_REMAINING_MIP_LEVELS, 0, VK_REMAINING_ARRAY_LAYERS ),
                         { VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
@@ -975,7 +976,7 @@ void SVGFVariancePass::render( FrameGraphRenderContext& context ) {
 
     gpu_commands->bind_descriptor_set(
         { renderer->gpu->bindless_descriptor_set, descriptor_set },
-        { render_blackboard.scene_cb_offset, constants_offset } );
+        { render_blackboard.scene_cb_offset, render_blackboard.lighting.lighting_constants_cb_offset, constants_offset } );
 
     gpu_commands->dispatch( raptor::ceilu32( render_blackboard.render_width * texture_scale / 8.0f ), raptor::ceilu32( render_blackboard.render_height * texture_scale / 8.0f ), 1 );
 }
@@ -1213,7 +1214,7 @@ void SVGFWaveletPass::render( FrameGraphRenderContext& context ) {
 
         gpu_commands->bind_descriptor_set(
             { renderer->gpu->bindless_descriptor_set, descriptor_set[ i ] },
-            { render_blackboard.scene_cb_offset, constant_offsets[ i ] } );
+            { render_blackboard.scene_cb_offset, render_blackboard.lighting.lighting_constants_cb_offset, constant_offsets[ i ] } );
 
         if ( ( i % 2 ) == 0 ) {
             gpu_commands->add_image_barrier( resources.integrated_reflection_color_texture, range_aspect( VK_IMAGE_ASPECT_COLOR_BIT, 0, VK_REMAINING_MIP_LEVELS, 0, VK_REMAINING_ARRAY_LAYERS ),

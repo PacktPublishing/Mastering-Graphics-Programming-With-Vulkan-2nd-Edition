@@ -74,6 +74,10 @@ void FrameRenderer::compile_passes_psos() {
     if ( post ) {
         post->update_psos( renderer, frame_graph, PipelineUpdatePhase::Create );
     }
+
+    if ( image_viewer ) {
+        image_viewer->update_psos( renderer, frame_graph, PipelineUpdatePhase::Create );
+    }
 }
 
 void FrameRenderer::calculate_resolution_info( u32 swapchain_width, u32 swapchain_height ) {
@@ -129,6 +133,10 @@ void FrameRenderer::on_resize( GpuDevice& gpu, u32 new_width, u32 new_height ) {
         point_shadows->on_resize( renderer, &render_blackboard, new_width, new_height );
     }
 
+    if ( image_viewer ) {
+        image_viewer->on_resize( renderer, &render_blackboard, new_width, new_height );
+    }
+
     update_dependent_resources();
 }
 
@@ -175,6 +183,11 @@ void FrameRenderer::shutdown() {
 
     if ( debug_draw ) {
         debug_draw->destroy_gpu_resources( renderer, &render_blackboard );
+    }
+
+    if ( image_viewer ) {
+        image_viewer->update_psos( renderer, frame_graph, PipelineUpdatePhase::Destroy );
+        image_viewer->destroy_gpu_resources( renderer, &render_blackboard );
     }
 
     if ( ray_tracing ) {
@@ -636,6 +649,10 @@ void FrameRenderer::create_resources( ArenaAllocator* scratch_allocator ) {
         point_shadows->create_gpu_resources( renderer, &render_blackboard, frame_graph );
     }
 
+    if ( image_viewer ) {
+        image_viewer->create_gpu_resources( renderer, &render_blackboard );
+    }
+
     FrameGraphResourceContext resource_context{ renderer, frame_graph, &render_blackboard, &render_config, scene };
 
     for ( u32 i = 0; i < render_passes.size; ++i ) {
@@ -671,6 +688,10 @@ void FrameRenderer::reload_psos() {
     if ( post ) {
         post->update_psos( renderer, frame_graph, PipelineUpdatePhase::Reload );
     }
+
+    if ( image_viewer ) {
+        image_viewer->update_psos( renderer, frame_graph, PipelineUpdatePhase::Reload );
+    }
 }
 
 // DrawTask ///////////////////////////////////////////////////////////////
@@ -705,6 +726,11 @@ void DrawTask::ExecuteRange( enki::TaskSetPartition range_, uint32_t threadnum_ 
 
     frame_graph->render( current_frame_index, thread_id, renderer, &frame_renderer->main_view, &frame_renderer->render_blackboard, &frame_renderer->render_config );
 
+    // Debug image viewer: after the whole frame graph, before the swapchain pass where ImGui shows it.
+    if ( frame_renderer->image_viewer ) {
+        frame_renderer->image_viewer->render( gfx_cb, frame_renderer->render_config.shader_language() );
+    }
+
     gfx_cb->push_marker( "PostProcess" );
 
     // Choose the final texture to present, if TAA is enabled use the TAA output, otherwise use the main output.
@@ -715,20 +741,39 @@ void DrawTask::ExecuteRange( enki::TaskSetPartition range_, uint32_t threadnum_ 
     RenderBlackboard& render_blackboard = frame_renderer->render_blackboard;
     const ShaderLanguage language = render_config.shader_language();
 
+    // Decide which image view to use for the final output
     ImageViewHandle final_image_view = texture->resource_info.texture.image_view;
+    
+    bool show_image_viewer_fullscreen = false;
     if ( render_config.taa.enabled && render_blackboard.taa_output_image_view.is_valid() ) {
         final_image_view = render_blackboard.taa_output_image_view;
     }
+
+    if ( frame_renderer->image_viewer && render_config.image_viewer.fullscreen ) {
+        final_image_view = frame_renderer->image_viewer->output_view;
+        show_image_viewer_fullscreen = true;
+    }
+
     ImageHandle final_image = gpu->get_image_view( final_image_view )->parent_image;
+
+    ImageHandle swapchain_handle = gpu->get_current_swapchain_image();
+    Image* swapchain_image = gpu->get_image( swapchain_handle );
 
     gfx_cb->add_image_barrier( final_image, range_color_full(),
                                { VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT,
                                  VK_ACCESS_2_SHADER_READ_BIT,
                                  VK_IMAGE_LAYOUT_READ_ONLY_OPTIMAL } );
-    gfx_cb->add_image_barrier( gpu->get_current_swapchain_image(), range_color_full(),
-                               { VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
-                                 VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT,
-                                 VK_IMAGE_LAYOUT_ATTACHMENT_OPTIMAL } );
+    gfx_cb->add_image_barrier( swapchain_handle, range_color_full(),
+                               ImageSyncState{
+                                    .stage = VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
+                                    .access = VK_ACCESS_2_NONE,
+                                    .layout = swapchain_image->sync_state.layout,
+                               },
+                               ImageSyncState{
+                                   .stage = VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
+                                   .access = VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT,
+                                   .layout = VK_IMAGE_LAYOUT_ATTACHMENT_OPTIMAL,
+                               } );
     gfx_cb->add_image_barrier( gpu->get_current_swapchain_depth_image(), range_depth_full(),
                                { VK_PIPELINE_STAGE_2_EARLY_FRAGMENT_TESTS_BIT,
                                  VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT,
@@ -748,8 +793,9 @@ void DrawTask::ExecuteRange( enki::TaskSetPartition range_, uint32_t threadnum_ 
     gfx_cb->set_depth_bias_enabled( false );
 
     // Apply fullscreen material
-
-    gfx_cb->bind_pipeline( frame_renderer->post->main_post_pipeline.active( language ) );
+    PipelineHandle fullscreen_pipeline = show_image_viewer_fullscreen ? frame_renderer->post->passthrough_pipeline.active( language) :
+                                                                        frame_renderer->post->main_post_pipeline.active( language );
+    gfx_cb->bind_pipeline( fullscreen_pipeline );
     gfx_cb->bind_descriptor_set(
         { gpu->bindless_descriptor_set, frame_renderer->post->fullscreen_ds },
         { frame_renderer->post->post_cb_offset } );
@@ -761,7 +807,7 @@ void DrawTask::ExecuteRange( enki::TaskSetPartition range_, uint32_t threadnum_ 
 
     gfx_cb->pop_marker(); // PostProcess marker
 
-    gfx_cb->add_image_barrier( gpu->get_current_swapchain_image(), range_color_full(),
+    gfx_cb->add_image_barrier( swapchain_handle, range_color_full(),
                                { VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT,
                                  VK_ACCESS_2_NONE,
                                  VK_IMAGE_LAYOUT_PRESENT_SRC_KHR } );
@@ -2617,6 +2663,27 @@ void LightingRenderingFeature::upload_gpu_data( UploadGpuDataContext& context ) 
 
 void LightingRenderingFeature::update_scene( RenderScene& scene, LightingRenderConfig& config ) {
 
+    scene.animate_lights = config.animate_lights;
+
+    if ( scene.animate_lights ) {
+        for ( u32 i = 0; i < scene.active_lights; ++i ) {
+            Light& light = scene.lights[ i ];
+
+            const f32 time = scene.light_animation_time;
+            const f32 phase = f32( i ) * 2.39996f;
+            const f32 t = time + phase;
+
+            // Use an ellipsis and remove the phase to avoid the initial jump when animating.
+            const glm::vec3 offset{
+                0.5f * ( cosf( t ) - cosf( phase ) ),
+                0.25f * ( sinf( 2.0f * t ) - sinf( 2.0f * phase ) ),
+                1.0f * ( sinf( t ) - sinf( phase ) )
+            };
+
+            light.world_position = scene.light_starting_positions[ i ] + offset;
+        }
+    }
+
     if ( config.load_shadow_test_lights ) {
         setup_sponza_shadow_test( scene );
 
@@ -2630,7 +2697,6 @@ void LightingRenderingFeature::update_scene( RenderScene& scene, LightingRenderC
         config.load_shadow_test_lights_adv = false;
         return;
     }
-
 }
 
 // TODO - integrate
@@ -2961,6 +3027,8 @@ void setup_sponza_shadow_test( RenderScene& scene ) {
         light.radius = lights[ i ].radius;
         light.color = lights[ i ].color;
         light.intensity = lights[ i ].intensity;
+
+        scene.light_starting_positions[ i ] = light.world_position;
     }
 }
 
@@ -3039,6 +3107,8 @@ void setup_sponza_shadow_test_adv( RenderScene& scene ) {
         light.radius = lights[ i ].radius;
         light.color = lights[ i ].color;
         light.intensity = lights[ i ].intensity;
+
+        scene.light_starting_positions[ i ] = light.world_position;
     }
 }
 
@@ -3106,6 +3176,7 @@ void PostProcessRenderingFeature::create_gpu_resources( Renderer* renderer, Rend
     fullscreen_ds = renderer->gpu->create_descriptor_set( {
         .dynamic_buffers = {{11, sizeof( GpuPostProcessConstants )}},
         .layout = descriptor_set_layout, .name = "post_process_ds" });
+
 }
 
 void PostProcessRenderingFeature::destroy_gpu_resources( Renderer* renderer, RenderBlackboard* render_blackboard ) {
@@ -3114,7 +3185,6 @@ void PostProcessRenderingFeature::destroy_gpu_resources( Renderer* renderer, Ren
 }
 
 void PostProcessRenderingFeature::on_resize( Renderer* renderer, RenderBlackboard* render_blackboard, u32 new_width, u32 new_height ) {
-
 }
 
 void PostProcessRenderingFeature::upload_gpu_data( UploadGpuDataContext& context ) {
@@ -3165,6 +3235,182 @@ void PostProcessRenderingFeature::upload_gpu_data( UploadGpuDataContext& context
                                              context.last_clicked_position_left_button.y / gpu.swapchain_height };
         }*/
     }
+}
+
+// ImageViewerRenderingFeature ///////////////////////////////////////////
+
+static ShaderCompilationCreation scc_image_viewer = {
+    .stages = {
+        {
+            .source = { .glsl = "glsl/image_viewer.glsl" },
+            .type = VK_SHADER_STAGE_COMPUTE_BIT,
+        },
+    },
+    .name = "image_viewer",
+};
+
+void ImageViewerRenderingFeature::update_psos( Renderer* renderer, FrameGraph* frame_graph, PipelineUpdatePhase phase ) {
+
+    if ( phase == PipelineUpdatePhase::Destroy ) {
+        renderer->destroy_compute_pipeline_state( pipeline );
+        return;
+    }
+
+    ComputePipelineTransaction transaction( renderer );
+
+    ComputePipelineState& new_pipeline = transaction.add( pipeline );
+
+    // Not a frame graph node: no render pass name.
+    renderer->create_compute_pipeline_state( scc_image_viewer, { .name = "image_viewer" },
+                                             "image_viewer", frame_graph, new_pipeline );
+
+    transaction.commit_or_rollback();
+}
+
+void ImageViewerRenderingFeature::create_gpu_resources( Renderer* renderer, RenderBlackboard* render_blackboard ) {
+
+    GpuDevice& gpu = *renderer->gpu;
+    output_width = render_blackboard->render_width;
+    output_height = render_blackboard->render_height;
+
+    output_image = gpu.create_image( {
+        .image_type = VK_IMAGE_TYPE_2D,
+        .format = VK_FORMAT_R8G8B8A8_UNORM,
+        .width = output_width,
+        .height = output_height,
+        .depth = 1,
+        .usage = VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_STORAGE_BIT,
+        .name = "image_viewer_output" } );
+
+    output_view = gpu.create_image_view( {
+        .parent_image = output_image,
+        .view_type = VK_IMAGE_VIEW_TYPE_2D,
+        .sub_resource = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1 },
+        .name = "image_viewer_output_view" } );
+
+    gpu.add_image_view_to_bindless( output_view );
+}
+
+void ImageViewerRenderingFeature::destroy_gpu_resources( Renderer* renderer, RenderBlackboard* render_blackboard ) {
+
+    GpuDevice& gpu = *renderer->gpu;
+    if ( output_view.is_valid() ) {
+        gpu.remove_image_view_from_bindless( output_view );
+        gpu.destroy_image_view( output_view );
+        output_view = {};
+    }
+
+    if ( output_image.is_valid() ) {
+        gpu.destroy_image( output_image );
+        output_image = {};
+    }
+
+    output_width = 0;
+    output_height = 0;
+}
+
+void ImageViewerRenderingFeature::on_resize( Renderer* renderer, RenderBlackboard* render_blackboard, u32 new_width, u32 new_height ) {
+
+    GpuDevice& gpu = *renderer->gpu;
+
+    gpu.resize_image( output_image, new_width, new_height );
+    gpu.recreate_image_view( output_view );
+    gpu.add_image_view_to_bindless( output_view );
+}
+
+bool ImageViewerRenderingFeature::is_debuggable( GpuDevice& gpu, ImageViewHandle view_handle ) const {
+
+    if ( view_handle == output_view ) {
+        return false;
+    }
+
+    const ImageView* view = gpu.get_image_view( view_handle );
+    // TODO: add support for 3D and cubemap views
+    if ( view == nullptr || view->view_type != VK_IMAGE_VIEW_TYPE_2D ) {
+        return false;
+    }
+
+    // Stencil-only views would need a usampler on the stencil aspect.
+    if ( ( view->subresource_range.aspectMask & ( VK_IMAGE_ASPECT_COLOR_BIT | VK_IMAGE_ASPECT_DEPTH_BIT ) ) == 0 ) {
+        return false;
+    }
+
+    const Image* image = gpu.get_image( view->parent_image );
+    if ( image == nullptr || image->name == nullptr || image->vk_image_type != VK_IMAGE_TYPE_2D ) {
+        return false;
+    }
+
+    return ( image->vk_usage & VK_IMAGE_USAGE_SAMPLED_BIT ) != 0;
+}
+
+void ImageViewerRenderingFeature::render( CommandBuffer* cb, ShaderLanguage language ) {
+
+    if ( !requested ) {
+        return;
+    }
+    requested = false;
+
+    GpuDevice& gpu = *cb->gpu_device;
+
+    const PipelineHandle pipeline_handle = pipeline.active( language );
+    ImageView* input_view = gpu.get_image_view( input );
+    if ( input_view == nullptr || output_image.is_invalid() || pipeline_handle.is_invalid() ) {
+        return;
+    }
+
+    Image* input_image = gpu.get_image( input_view->parent_image );
+
+    // Owned by another queue (async compute): reading it here would need an ownership transfer.
+    const u32 owner = input_image->sync_state.owner_queue_family;
+    if ( owner != VK_QUEUE_FAMILY_IGNORED && owner != gpu.vulkan_main_queue_family ) {
+        return;
+    }
+
+    cb->push_marker( "ImageViewer" );
+
+    // Tracking is per image, not per mip: transition the whole image, as the frame graph does for compute inputs.
+    const VkImageAspectFlags aspect = TextureFormat::has_depth( input_image->vk_format ) ? VK_IMAGE_ASPECT_DEPTH_BIT : VK_IMAGE_ASPECT_COLOR_BIT;
+    const VkImageSubresourceRange input_range = range_aspect( aspect, 0, VK_REMAINING_MIP_LEVELS, 0, VK_REMAINING_ARRAY_LAYERS );
+
+    // Some images are moved to their layout once and never again (e.g. storage images written every frame):
+    // the input goes back to the state it had, so the viewer is invisible to the rest of the frame.
+    const ImageSyncState previous_state = input_image->sync_state;
+
+    cb->add_image_barrier( input_image->handle, input_range,
+                           { VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
+                             VK_ACCESS_2_SHADER_READ_BIT,
+                             VK_IMAGE_LAYOUT_READ_ONLY_OPTIMAL } );
+    cb->add_image_barrier( output_image, range_color_full(),
+                           { VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
+                             VK_ACCESS_2_SHADER_WRITE_BIT,
+                             VK_IMAGE_LAYOUT_GENERAL } );
+    cb->flush_barriers();
+
+    cb->bind_pipeline( pipeline_handle );
+    cb->bind_descriptor_set( { gpu.bindless_descriptor_set }, {} );
+    cb->push_constants( pipeline_handle, 0, sizeof( GpuImageViewerConstants ), &constants );
+    cb->dispatch( ceilu32( constants.display_size.x / 8.0f ), ceilu32( constants.display_size.y / 8.0f ), 1 );
+
+    if ( previous_state.layout != VK_IMAGE_LAYOUT_UNDEFINED &&
+         previous_state.layout != VK_IMAGE_LAYOUT_READ_ONLY_OPTIMAL ) {
+
+        ImageSyncState restore = previous_state;
+        restore.owner_queue_family = VK_QUEUE_FAMILY_IGNORED;
+        // TOP_OF_PIPE as destination stage waits for nothing: the next barrier would not chain to this read.
+        if ( restore.stage == VK_PIPELINE_STAGE_2_TOP_OF_PIPE_BIT ) {
+            restore.stage = VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT;
+        }
+        cb->add_image_barrier( input_image->handle, input_range, restore );
+    }
+
+    // ImGui samples it in the swapchain pass.
+    cb->add_image_barrier( output_image, range_color_full(),
+                           { VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT,
+                             VK_ACCESS_2_SHADER_READ_BIT,
+                             VK_IMAGE_LAYOUT_READ_ONLY_OPTIMAL } );
+    cb->flush_barriers();
+
+    cb->pop_marker();
 }
 
 // PointlightShadowsRenderingFeature /////////////////////////////////////

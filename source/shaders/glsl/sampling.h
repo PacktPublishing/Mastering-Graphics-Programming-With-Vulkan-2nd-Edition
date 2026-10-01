@@ -242,6 +242,69 @@ BrdfSample sample_diffuse( vec2 rnd, vec3 n ) {
     return brdfSample;
 }
 
+struct LightSample {
+    int index;
+    float importance;
+};
+
+LightSample sample_light( inout uint rng_state, vec3 p_world, vec3 normal ) {
+    float lights_importance[ NUM_LIGHTS ];
+
+    float total_importance = 0.0;
+
+    uint num_lights = get_num_lights();
+
+    for ( uint l = 0; l < num_lights; ++l ) {
+        // Compute light importance by using something similar to "Importance Sampling of Many Lights on the GPU"
+        Light light = lights[ l ];
+        vec3 p_to_light = light.world_position - p_world.xyz;
+
+        float point_light_angle = dot( normalize( p_to_light ), normal );
+
+        float distance_sq = max( dot( p_to_light, p_to_light ), 1e-6 );
+        float r_sq = light.radius * light.radius;
+
+        bool light_active = ( point_light_angle > 1e-4 ) && ( distance_sq <= r_sq );
+
+        float orientation = point_light_angle;
+
+        // Follow the light attenuation formula
+        float factor = distance_sq * ( 1.0 / r_sq );
+        float smooth_factor = max( 1.0 - factor * factor, 0.0 );
+        float importance = ( light.intensity * orientation * smooth_factor * smooth_factor ) / distance_sq;
+        //float importance = ( light.intensity * orientation ) / distance_sq;
+
+        float final_value = light_active ? importance : 0.0;
+        lights_importance[ l ] = final_value;
+
+        total_importance += final_value;
+    }
+
+    LightSample light_sample;
+    light_sample.index = -1;
+    light_sample.importance = 0.0;
+    if ( total_importance > 0.0001f ) {
+        for ( uint l = 0; l < num_lights; ++l ) {
+            lights_importance[ l ] /= total_importance;
+        }
+
+        float rnd_value = rand( rng_state );
+
+        float accum_probability = 0.0;
+        for ( int light_index = 0; light_index < num_lights; ++light_index ) {
+            accum_probability += lights_importance[ light_index ];
+
+            if ( accum_probability > rnd_value ) {
+                light_sample.index = int( light_index );
+                light_sample.importance = lights_importance[ light_index ];
+                break;
+            }
+        }
+    }
+
+    return light_sample;
+}
+
 // Simplest possible procedural sky color
 vec3 sample_procedural_sky( vec3 ray_direction, vec3 sun_direction ) {
 

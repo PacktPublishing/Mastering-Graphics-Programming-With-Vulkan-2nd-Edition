@@ -559,8 +559,10 @@ namespace raptor {
     struct RenderScene final {
 
         void                    init( SceneGraph* scene_graph, Allocator* resident_allocator, Renderer* renderer_ );
+        
         RenderModel*            add_and_load_model( char* filename, cstring path, ArenaAllocator* temp_allocator );
         void                    add_animation( char* filename, cstring path, ArenaAllocator* temp_allocator );
+        
         void                    prepare_draws( Renderer* renderer, ArenaAllocator* scratch_allocator, SceneGraph* scene_graph );
         void                    shutdown( Renderer* renderer );
 
@@ -618,6 +620,9 @@ namespace raptor {
         Array<Light>            lights;
         u32                     active_lights   = 1;
         bool                    shadow_constants_cpu_update = true;
+        Array<glm::vec3>        light_starting_positions;
+        f32                     light_animation_time = 0.f;
+        bool                    animate_lights  = false;
 
         StringBuffer            names_buffer;   // Buffer containing all names of nodes, resources, etc.
 

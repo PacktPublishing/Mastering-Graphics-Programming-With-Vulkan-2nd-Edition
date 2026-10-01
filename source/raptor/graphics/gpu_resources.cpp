@@ -1037,3 +1037,47 @@ bool ShaderCompilationCreation::has( ShaderLanguage language ) const {
 }
 
 } // namespace raptor
+
+bool raptor::TextureFormat::is_uint_format( VkFormat format ) {
+    switch ( format ) {
+        case VK_FORMAT_R8_UINT:
+        case VK_FORMAT_R8G8_UINT:
+        case VK_FORMAT_R8G8B8A8_UINT:
+        case VK_FORMAT_B8G8R8A8_UINT:
+        case VK_FORMAT_A8B8G8R8_UINT_PACK32:
+        case VK_FORMAT_A2R10G10B10_UINT_PACK32:
+        case VK_FORMAT_A2B10G10R10_UINT_PACK32:
+        case VK_FORMAT_R16_UINT:
+        case VK_FORMAT_R16G16_UINT:
+        case VK_FORMAT_R16G16B16A16_UINT:
+        case VK_FORMAT_R32_UINT:
+        case VK_FORMAT_R32G32_UINT:
+        case VK_FORMAT_R32G32B32_UINT:
+        case VK_FORMAT_R32G32B32A32_UINT:
+            return true;
+        default:
+            return false;
+    }
+}
+
+bool raptor::TextureFormat::is_sint_format( VkFormat format ) {
+    switch ( format ) {
+        case VK_FORMAT_R8_SINT:
+        case VK_FORMAT_R8G8_SINT:
+        case VK_FORMAT_R8G8B8A8_SINT:
+        case VK_FORMAT_B8G8R8A8_SINT:
+        case VK_FORMAT_A8B8G8R8_SINT_PACK32:
+        case VK_FORMAT_A2R10G10B10_SINT_PACK32:
+        case VK_FORMAT_A2B10G10R10_SINT_PACK32:
+        case VK_FORMAT_R16_SINT:
+        case VK_FORMAT_R16G16_SINT:
+        case VK_FORMAT_R16G16B16A16_SINT:
+        case VK_FORMAT_R32_SINT:
+        case VK_FORMAT_R32G32_SINT:
+        case VK_FORMAT_R32G32B32_SINT:
+        case VK_FORMAT_R32G32B32A32_SINT:
+            return true;
+        default:
+            return false;
+    }
+}

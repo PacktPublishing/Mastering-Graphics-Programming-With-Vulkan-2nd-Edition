@@ -3,8 +3,8 @@
 namespace raptor {
 
 struct FrameGraph;
+struct FrameRenderer;
 struct GpuVisualProfiler;
-struct ImageViewDebugger;
 struct MemoryService;
 
 enum class DemoUiTab {
@@ -20,7 +20,7 @@ enum class DemoUiTab {
 
 struct DemoUi {
 
-    void                set_tools( GpuVisualProfiler* gpu_profiler = nullptr, ImageViewDebugger* image_viewer = nullptr,
+    void                set_tools( GpuVisualProfiler* gpu_profiler = nullptr, FrameRenderer* frame_renderer = nullptr,
                                    FrameGraph* frame_graph = nullptr, MemoryService* memory = nullptr );
 
     bool                begin( const char* chapter_title, const char* status_text = nullptr );
@@ -63,7 +63,7 @@ struct DemoUi {
     bool                tab_begun       = false;
 
     GpuVisualProfiler*  gpu_profiler    = nullptr;
-    ImageViewDebugger*  image_viewer    = nullptr;
+    FrameRenderer*      frame_renderer  = nullptr;   // Image viewer: config and feature live here.
     FrameGraph*         frame_graph     = nullptr;
     MemoryService*      memory          = nullptr;
 };

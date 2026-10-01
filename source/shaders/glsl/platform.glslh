@@ -42,6 +42,8 @@ layout ( set = GLOBAL_SET, binding = BINDLESS_BINDING ) uniform sampler2DArray g
 
 layout ( set = GLOBAL_SET, binding = BINDLESS_BINDING ) uniform usampler2D global_utextures[];
 
+layout ( set = GLOBAL_SET, binding = BINDLESS_BINDING ) uniform isampler2D global_itextures[];
+
 layout ( set = GLOBAL_SET, binding = BINDLESS_BINDING ) uniform usampler2DArray global_utexture_arrays[];
 
 layout ( set = GLOBAL_SET, binding = BINDLESS_BINDING ) uniform sampler3D global_textures_3d[];

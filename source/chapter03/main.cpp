@@ -1395,7 +1395,7 @@ int main( int argc, char** argv ) {
                     game_camera.draw_debug_ui();
 
                     Span<Light> active_lights{ &render_scene.lights[ 0 ], render_scene.active_lights };
-                    frame_renderer.render_config.lighting.draw_imgui( active_lights );
+                    frame_renderer.render_config.lighting.draw_lights_imgui( active_lights );
 
                     scene_graph.debug_ui();
                     demo_ui.end_tab();
@@ -1435,6 +1435,7 @@ int main( int argc, char** argv ) {
                         game_camera.camera.set_aspect_ratio( ( f32 )new_width / ( f32 )new_height );
                     }
 
+                    frame_renderer.render_config.lighting.draw_imgui();
                     frame_renderer.render_config.post.draw_imgui();
 
                     demo_ui.end_tab();

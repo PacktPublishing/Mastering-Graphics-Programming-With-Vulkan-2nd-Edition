@@ -1323,6 +1323,12 @@ FrameGraphNode* FrameGraph::access_node( FrameGraphNodeHandle handle ) {
 }
 
 void FrameGraph::cache_render_pass_output( cstring node_name, GpuDevice* gpu, RenderPassOutput& render_pass_output, bool compute_node ) {
+    // Compute pipelines have no attachments: they do not need a node.
+    if ( compute_node ) {
+        render_pass_output = gpu->get_swapchain_output();
+        return;
+    }
+
     FrameGraphNode* node = node_name ? get_node( node_name ) : nullptr;
     if ( node ) {
 

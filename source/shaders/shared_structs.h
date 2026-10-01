@@ -190,7 +190,31 @@ struct GpuPostProcessConstants {
 
     uint        bloom_texture_index;
     float       bloom_amount;
+    float       pad000;
+    float       pad001;
+    
 }; // struct GpuPostProcessConstants
+ 
+
+struct GpuImageViewerConstants {
+
+    uint        input_index;            // Bindless sampled view to read.
+    uint        output_index;           // Bindless storage view, RGBA8.
+    uint        options;                // k_image_viewer_* flags.
+    uint        channel_mode;           // k_image_viewer_channel_*.
+
+    float       range_min;
+    float       range_rcp_size;         // 1 / ( range_max - range_min ).
+    float       exposure_scale;         // exp2( exposure_ev ).
+    uint        mip;                    // Relative to the view base mip.
+
+    float2      display_size;           // Pixels written in the output.
+    float2      input_size;             // Size of the selected mip, in texels.
+
+    float2      view_center;            // Input texel shown at the centre of the display.
+    float       texels_per_pixel;       // 1 / ( fit scale * zoom ).
+    uint        pad000_ivc;
+}; // struct GpuImageViewerConstants
 
 struct GpuVolumetricFogConstants {
 
@@ -362,5 +386,20 @@ SHARED_CONST uint k_culling_shadow_meshes_sphere        = 1u << 8;
 // GpuFrameConstants::volumetric_fog_application_options
 SHARED_CONST uint k_vfog_opacity_anti_aliasing          = 1u << 0;
 SHARED_CONST uint k_vfog_tricubic_filtering             = 1u << 1;
+
+// GpuImageViewerConstants::options
+SHARED_CONST uint k_image_viewer_input_uint             = 1u << 0;
+SHARED_CONST uint k_image_viewer_encode_srgb            = 1u << 1;
+SHARED_CONST uint k_image_viewer_show_nan_inf           = 1u << 2;
+SHARED_CONST uint k_image_viewer_show_out_of_range      = 1u << 3;
+SHARED_CONST uint k_image_viewer_input_sint             = 1u << 4;
+
+// GpuImageViewerConstants::channel_mode
+SHARED_CONST uint k_image_viewer_channel_rgb            = 0;
+SHARED_CONST uint k_image_viewer_channel_r              = 1;
+SHARED_CONST uint k_image_viewer_channel_g              = 2;
+SHARED_CONST uint k_image_viewer_channel_b              = 3;
+SHARED_CONST uint k_image_viewer_channel_a              = 4;
+SHARED_CONST uint k_image_viewer_channel_luminance      = 5;
 
 #endif // SHARED_STRUCTS_H

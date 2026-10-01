@@ -86,7 +86,7 @@ void RaytracedReflectionsPass::render( FrameGraphRenderContext& context ) {
         gpu_commands->bind_pipeline( brdf_lut_generation_pipeline.active( language ) );
         gpu_commands->bind_descriptor_set(
             { renderer->gpu->bindless_descriptor_set, brdf_lut_generation_descriptor_set },
-            { render_blackboard.scene_cb_offset } );
+            { render_blackboard.scene_cb_offset, render_blackboard.lighting.lighting_constants_cb_offset } );
 
         u32 push_constants[] = { brdf_lut_image_view.index(), 512 };
         gpu_commands->push_constants( brdf_lut_generation_pipeline.active( language ), 0, 8, &push_constants );
@@ -221,9 +221,9 @@ void RaytracedReflectionsPass::upload_gpu_data( FrameGraphResourceContext& conte
         gpu_constants->miss_index = 0;
         gpu_constants->out_image_index = reflections_image_view.index();
 
-        gpu_constants->gbuffer_texures[ 0 ] = roughness_image_view.index();
-        gpu_constants->gbuffer_texures[ 1 ] = normals_image_view.index();
-        // gpu_constants->gbuffer_texures[ 2 ] = indirect_image_view.index();
+        gpu_constants->gbuffer_textures[ 0 ] = roughness_image_view.index();
+        gpu_constants->gbuffer_textures[ 1 ] = normals_image_view.index();
+        // gpu_constants->gbuffer_textures[ 2 ] = indirect_image_view.index();
     }
 }
 

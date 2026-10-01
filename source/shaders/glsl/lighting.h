@@ -291,7 +291,7 @@ vec3 calculate_point_light_contribution(vec4 albedo, float roughness, vec3 norma
                 //                                 vec4(light_to_position, float(shadow_light_index)), light.shadow_mip_level ).r;
                 //shadow = reference_depth - bias < stored_depth ? 1.0 : 0.0;
 
-                shadow = textureLod( global_textures_cubemaps_array_shadow[ nonuniformEXT( light_cb.cubemap_shadows_index ) ], 
+                shadow = textureLod( global_textures_cubemaps_array_shadow[ nonuniformEXT( light_cb.cubemap_shadows_index ) ],
                                      vec4( light_to_position, float( shadow_light_index ) ), reference_depth - bias, light.shadow_mip_level );
 
             } else {
@@ -353,7 +353,7 @@ vec3 calculate_point_light_contribution(vec4 albedo, float roughness, vec3 norma
 
             vec2 disk_offset = vogel_disk_offset(i, samples, 0.1f);
             vec3 sampling_position = shadow_light_to_position + disk_offset.xyx * 0.0005f;
-            const float closest_depth = textureLod(global_textures_cubemaps_array[nonuniformEXT(light_cb.cubemap_shadows_index)], 
+            const float closest_depth = textureLod(global_textures_cubemaps_array[nonuniformEXT(light_cb.cubemap_shadows_index)],
                                                    vec4(sampling_position, shadow_light_index), light.shadow_mip_level).r;
             shadow += current_depth - bias < closest_depth ? 1 : 0;
         }
@@ -369,7 +369,7 @@ vec3 calculate_point_light_contribution(vec4 albedo, float roughness, vec3 norma
     }
 #endif // NEW_PCF
 
-    
+
     float attenuation = falloff * shadow;
     if ( attenuation > 0.0001f ) {
 
@@ -631,7 +631,7 @@ vec4 calculate_lighting(vec4 base_colour, vec3 orm, vec3 normal, vec3 emissive, 
 #if defined (ENABLE_INDIRECT_SPECULAR)
     vec3 reflection_color = textureLod( global_textures[light_cb.reflections_texture_index], screen_uv, 0 ).rgb;
 
-    vec2 envBRDF = textureLod(global_textures[nonuniformEXT(light_cb.brdf_lut_texture_index)], vec2(NoV, roughness), 0).rg;
+    vec2 envBRDF = textureLod(global_textures[nonuniformEXT(light_cb.brdf_lut_texture_index)], vec2(NoV, perceptual_roughness), 0).rg;
     vec3 indirect_specular = reflection_color * (F0 * envBRDF.x + envBRDF.y) * light_cb.reflections_intensity;
     final_color.rgb += (indirect_specular) * ao;
 #endif // ENABLE_INDIRECT_SPECULAR
@@ -668,3 +668,7 @@ vec4 calculate_lighting(vec4 base_colour, vec3 orm, vec3 normal, vec3 emissive, 
 }
 
 #endif // RAPTOR_GLSL_LIGHTING_H
+
+uint get_num_lights() {
+    return min( frame.active_lights, uint( NUM_LIGHTS ) );
+}

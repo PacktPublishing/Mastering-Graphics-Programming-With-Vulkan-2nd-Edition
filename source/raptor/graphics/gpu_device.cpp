@@ -1134,10 +1134,6 @@ void GpuDevice::init( const GpuDeviceCreation& creation ) {
         }
     }
 
-    VkDescriptorSetLayoutBinding dsdp[ 4 ];
-    VkDescriptorSetLayoutCreateInfo layout_info;
-    layout_info.pBindings = dsdp;
-
     // Final use of temp allocator, free all temporary memory created here.
     temp_allocator->free_marker( initial_temp_allocator_marker );
 
@@ -4209,13 +4205,6 @@ void GpuDevice::create_swapchain() {
     swapchain_images.init( allocator, vulkan_swapchain_image_count, vulkan_swapchain_image_count );
     vkGetSwapchainImagesKHR( vulkan_device, vulkan_swapchain, &vulkan_swapchain_image_count, swapchain_images.data );
 
-    // Manually transition the image
-    VkCommandBufferBeginInfo beginInfo = { VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO };
-    beginInfo.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
-
-    CommandBuffer* command_buffer = allocate_command_buffer( 0, current_frame, CommandQueueType::Graphics );
-    vkBeginCommandBuffer( command_buffer->vk_command_buffer, &beginInfo );
-
     for ( u32 iv = 0; iv < vulkan_swapchain_image_count; iv++ ) {
 
         //resource_tracker.track_create_resource( ResourceUpdateType::Texture, vk_framebuffer->color_attachments[ 0 ].index, "swapchain" );
@@ -4278,39 +4267,12 @@ void GpuDevice::create_swapchain() {
 
         set_resource_name( VK_OBJECT_TYPE_IMAGE_VIEW, (u64)vk_depth_view->vk_image_view, vk_depth_view->name );
 
-
         // Cache images and image views
         vulkan_swapchain_images[ iv ] = handle;
         vulkan_swapchain_image_views[ iv ] = image_view;
         vulkan_swapchain_depth_images[ iv ] = depth_handle;
         vulkan_swapchain_depth_image_views[ iv ] = depth_view;
-
-        command_buffer->add_image_barrier(
-            handle,
-            raptor::range_aspect( VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1 ),
-            ImageSyncState{
-                .stage = VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT,
-                .access = VK_ACCESS_2_NONE,
-                .layout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR,
-            }
-        );
-        command_buffer->flush_barriers();
-        //util_add_image_barrier( this, command_buffer->vk_command_buffer, color->vk_image, RESOURCE_STATE_UNDEFINED, RESOURCE_STATE_PRESENT, 0, 1, false );
     }
-
-    vkEndCommandBuffer( command_buffer->vk_command_buffer );
-
-    // Submit command buffer
-    VkCommandBufferSubmitInfoKHR command_buffer_info{ VK_STRUCTURE_TYPE_COMMAND_BUFFER_SUBMIT_INFO_KHR };
-    command_buffer_info.commandBuffer = command_buffer->vk_command_buffer;
-
-    VkSubmitInfo2KHR submit_info{ VK_STRUCTURE_TYPE_SUBMIT_INFO_2_KHR };
-    submit_info.commandBufferInfoCount = 1;
-    submit_info.pCommandBufferInfos = &command_buffer_info;
-
-    check( vkQueueSubmit2( vulkan_main_queue, 1, &submit_info, VK_NULL_HANDLE ) );
-
-    vkQueueWaitIdle( vulkan_main_queue );
 
     swapchain_images.shutdown();
 }

@@ -213,14 +213,14 @@ struct DebugDrawRenderingFeature {
 //
 struct PostProcessRenderingFeature {
 
-    void        update_psos( Renderer* renderer, FrameGraph* frame_graph, PipelineUpdatePhase phase );
+    void                    update_psos( Renderer* renderer, FrameGraph* frame_graph, PipelineUpdatePhase phase );
 
-    void        create_gpu_resources( Renderer* renderer, RenderBlackboard* render_blackboard, FrameGraph* frame_graph );
-    void        destroy_gpu_resources( Renderer* renderer, RenderBlackboard* render_blackboard );
+    void                    create_gpu_resources( Renderer* renderer, RenderBlackboard* render_blackboard, FrameGraph* frame_graph );
+    void                    destroy_gpu_resources( Renderer* renderer, RenderBlackboard* render_blackboard );
 
-    void        on_resize( Renderer* renderer, RenderBlackboard* render_blackboard, u32 new_width, u32 new_height );
+    void                    on_resize( Renderer* renderer, RenderBlackboard* render_blackboard, u32 new_width, u32 new_height );
 
-    void        upload_gpu_data( UploadGpuDataContext& context );
+    void                    upload_gpu_data( UploadGpuDataContext& context );
 
     DescriptorSetHandle     fullscreen_ds;
 
@@ -230,6 +230,35 @@ struct PostProcessRenderingFeature {
     u32                     post_cb_offset;
 
 }; // struct PostProcessRenderingFeature
+
+// Debug tool: converts any 2D image view into a displayable RGBA8 image.
+// Recorded after the frame graph, outside of it: it can read any image.
+struct ImageViewerRenderingFeature {
+
+    void                    update_psos( Renderer* renderer, FrameGraph* frame_graph, PipelineUpdatePhase phase );
+
+    void                    create_gpu_resources( Renderer* renderer, RenderBlackboard* render_blackboard );
+    void                    destroy_gpu_resources( Renderer* renderer, RenderBlackboard* render_blackboard );
+
+    void                    on_resize( Renderer* renderer, RenderBlackboard* render_blackboard, u32 new_width, u32 new_height );
+
+    void                    render( CommandBuffer* cb, ShaderLanguage language );
+
+    bool                    is_debuggable( GpuDevice& gpu, ImageViewHandle view_handle ) const;
+
+    ComputePipelineState    pipeline;
+
+    ImageHandle             output_image;
+    ImageViewHandle         output_view;
+    u32                     output_width    = 0;
+    u32                     output_height   = 0;
+
+    
+    GpuImageViewerConstants constants{};
+    ImageViewHandle         input;
+    bool                    requested       = false;
+
+}; // struct ImageViewerRenderingFeature
 
 //
 struct RayTracingScene {
@@ -308,6 +337,7 @@ struct FrameRenderer {
     MeshletsRenderingFeature*       meshlets    = nullptr;
     PostProcessRenderingFeature*    post        = nullptr;
     DebugDrawRenderingFeature*      debug_draw  = nullptr;
+    ImageViewerRenderingFeature*    image_viewer = nullptr;
     PointlightShadowsRenderingFeature* point_shadows = nullptr;
     RayTracingRenderFeature*        ray_tracing = nullptr;
 

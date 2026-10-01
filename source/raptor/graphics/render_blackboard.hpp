@@ -13,6 +13,8 @@
 namespace raptor {
 
 struct DebugDrawRenderingFeature;
+struct GpuDevice;
+struct ImageViewerRenderingFeature;
 struct Light;
 struct PointlightShadowsRuntimeData;
 struct RenderScene;
@@ -33,11 +35,15 @@ struct LightingRenderConfig {
 
     bool                    load_shadow_test_lights = false;
     bool                    load_shadow_test_lights_adv = false;
+    bool                    animate_lights          = false;
 
     u32                     selected_light_index = 0;
     bool                    show_light_edit_debug_draws = false;
 
-    void                    draw_imgui( Span<Light> lights );
+    // Scene tab: edits the lights themselves (scene data) and the test-light loaders.
+    void                    draw_lights_imgui( Span<Light> lights );
+    // Renderer tab: clustered lighting settings and debug views.
+    void                    draw_imgui();
 
 }; // struct LightingRenderConfig
 
@@ -119,6 +125,31 @@ struct DebugDrawRenderConfig {
     void                    draw_imgui( RenderScene* scene, SceneGraph& scene_graph, DebugDrawRenderingFeature& debug_draw_feature );
 
 }; // struct DebugDrawRenderConfig
+
+//
+struct ImageViewerRenderConfig {
+
+    // View to inspect. Frame graph resizes keep the handle; a view destroyed by its pass becomes invalid.
+    ImageViewHandle         input;
+
+    u32                     channel_mode    = 0;        // k_image_viewer_channel_*
+    u32                     mip             = 0;        // Relative to the view base mip.
+    f32                     range_min       = 0.0f;
+    f32                     range_max       = 1.0f;
+    f32                     exposure_ev     = 0.0f;
+
+    f32                     zoom            = 1.0f;     // 1 = the image fits the panel.
+    glm::vec2               pan             = { 0.0f, 0.0f }; // Offset from the image centre, in input texels.
+
+    bool                    encode_srgb     = true;
+    bool                    show_nan_inf    = true;
+    bool                    show_out_of_range = false;
+    bool                    fullscreen      = false;
+
+    // Draws controls and image, and tells the feature what to convert this frame.
+    void                    draw_imgui( GpuDevice& gpu, ImageViewerRenderingFeature& feature );
+
+}; // struct ImageViewerRenderConfig
 
 //
 struct VolumetricFogRenderConfig {
@@ -248,6 +279,7 @@ struct RenderConfig {
     ShadowRenderConfig      shadows;
     PostProcessRenderConfig post;
     DebugDrawRenderConfig   debug_draw;
+    ImageViewerRenderConfig image_viewer;
     VolumetricFogRenderConfig volumetric_fog;
     TAARenderConfig         taa;
     RaytracedShadowsConfig  raytraced_shadows;
