@@ -103,6 +103,8 @@ target_include_directories(RaptorFoundation PUBLIC
 add_library(RaptorApp STATIC
     source/raptor/application/application.cpp
     source/raptor/application/application.hpp
+    source/raptor/application/demo_ui.cpp
+    source/raptor/application/demo_ui.hpp
     source/raptor/application/game_camera.cpp
     source/raptor/application/game_camera.hpp
     source/raptor/application/game_application.cpp
@@ -119,6 +121,14 @@ set_property(TARGET RaptorApp PROPERTY CXX_STANDARD 20)
 
 target_compile_definitions(RaptorApp PRIVATE
     ${RAPTOR_DEFINES}
+)
+
+target_include_directories(RaptorApp PRIVATE
+    ${Vulkan_INCLUDE_DIRS}
+)
+
+target_compile_definitions(RaptorApp PRIVATE
+    VK_NO_PROTOTYPES
 )
 
 target_include_directories(RaptorApp PUBLIC
