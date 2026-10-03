@@ -1,0 +1,30 @@
+{
+    "default": {
+        "window": { 
+            "width": 1280,
+            "height": 800
+        },
+        "camera": { 
+            "near": 0.1,
+            "far": 30.0,
+            "fov_y": 60.0,
+            "rotation_speed": 20.0,
+            "movement_speed": 6.0,
+            "movement_delta": 0.05,
+            "position": [ -3.0, 1.0, 0.0 ],
+            "direction": [ 1.0, 0.0, 0.0 ]
+        },
+        "gpu": {
+            "debug": "Default",
+            "present_mode": "VSync",
+            "buffer_pool": 1024
+        },
+        "upscale": {
+            "enabled": false,
+            "render_scale": 0.75
+        },
+        "memory": {
+            "max_dynamic_mb": 2048
+        }
+    }
+}
