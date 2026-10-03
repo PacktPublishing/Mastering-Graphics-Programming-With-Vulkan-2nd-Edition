@@ -59,7 +59,8 @@ namespace raptor {
 
         float p_hat; // target function
         float cos_theta;  // dot(nv, wi)
-        u32   pad[2];
+        int   light_index;
+        u32   pad;
     };
 
     struct alignas(16) Reservoir {
@@ -82,7 +83,8 @@ namespace raptor {
         f32         W;
         f32         w_sum;
         u32         M;
-        u32         debug;
+        i16         light_index;
+        u16         debug;
     };
     static_assert( sizeof( ReservoirPacked ) == 48, "GLSL std430 mismatch" );
 

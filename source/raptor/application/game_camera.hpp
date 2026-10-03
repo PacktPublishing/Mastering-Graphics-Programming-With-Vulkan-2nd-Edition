@@ -19,6 +19,8 @@ struct GameCamera {
     void                            update( raptor::InputService* input, u32 window_width, u32 window_height, f32 delta_time );
     void                            apply_jittering( f32 x, f32 y );
 
+    void                            set( const glm::vec3& position, const glm::vec3& direction );
+
     // Returns true when the camera pose or projection changes.
     bool                            draw_debug_ui();
 

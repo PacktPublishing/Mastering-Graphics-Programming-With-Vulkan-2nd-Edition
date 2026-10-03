@@ -1,4 +1,5 @@
 #include "application/window.hpp"
+#include "application/app_settings.hpp"
 #include "application/input.hpp"
 #include "application/game_camera.hpp"
 
@@ -425,6 +426,9 @@ int main( int argc, char** argv ) {
 
     using namespace raptor;
 
+    AppSettings settings;
+    settings.load( RAPTOR_DATA_FOLDER, RAPTOR_CHAPTER_NAME );
+
     time_service_init();
 
     // Init services
@@ -440,7 +444,7 @@ int main( int argc, char** argv ) {
     scratch_allocator.init( rmega( 8 ) );
 
     // window
-    WindowConfiguration wconf{ 1280, 800, "Chapter 1: Introduction", allocator };
+    WindowConfiguration wconf{ settings.window_width, settings.window_height, "Chapter 1: Introduction", allocator };
     raptor::Window window;
     window.init( &wconf );
 
@@ -452,8 +456,9 @@ int main( int argc, char** argv ) {
 
     // graphics
     GpuDeviceCreation dc;
-    dc.resource_pool_creation.buffers = 1024;
-    dc.debug_options.set_default();
+    dc.resource_pool_creation.buffers = settings.gpu_buffer_pool;
+    dc.debug_options.set( settings.gpu_debug );
+    dc.present_mode = settings.gpu_present_mode;
     dc.set_window( window.width, window.height, window.platform_handle ).set_allocator( allocator );
     GpuDevice gpu;
     gpu.init( dc );
@@ -476,8 +481,9 @@ int main( int argc, char** argv ) {
     imgui->init( &imgui_config );
 
     GameCamera game_camera;
-    game_camera.camera.init_perpective( 0.1f, 100.f, 60.f, wconf.width * 1.f / wconf.height );
-    game_camera.init( true, 20.f, 6.f, 0.1f );
+    game_camera.camera.init_perpective( settings.camera_near, settings.camera_far, settings.camera_fov_y, window.width * 1.f / window.height );
+    game_camera.init( true, settings.camera_rotation_speed, settings.camera_movement_speed, settings.camera_movement_delta );
+    game_camera.set( settings.camera_position, settings.camera_direction );
 
     Directory cwd{ };
     directory_current( &cwd );

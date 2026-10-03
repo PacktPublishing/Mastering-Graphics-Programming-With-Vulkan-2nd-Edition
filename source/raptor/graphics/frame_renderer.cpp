@@ -3313,7 +3313,10 @@ void ImageViewerRenderingFeature::on_resize( Renderer* renderer, RenderBlackboar
 
     GpuDevice& gpu = *renderer->gpu;
 
-    gpu.resize_image( output_image, new_width, new_height );
+    output_width = render_blackboard->render_width;
+    output_height = render_blackboard->render_height;
+
+    gpu.resize_image( output_image, output_width, output_height );
     gpu.recreate_image_view( output_view );
     gpu.add_image_view_to_bindless( output_view );
 }

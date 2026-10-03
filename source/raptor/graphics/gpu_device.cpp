@@ -186,6 +186,16 @@ void VulkanDebugOptions::set_gpu_assisted() {
     break_on_validation_warning = false;
 }
 
+void VulkanDebugOptions::set( VulkanDebugMode::Enum mode ) {
+    switch ( mode ) {
+        case VulkanDebugMode::None:         set_none();         break;
+        case VulkanDebugMode::Validation:   set_validation();   break;
+        case VulkanDebugMode::GpuAssisted:  set_gpu_assisted(); break;
+        case VulkanDebugMode::Default:
+        default:                            set_default();      break;
+    }
+}
+
 static const char* s_base_instance_extensions[] = {
     VK_KHR_SURFACE_EXTENSION_NAME,
     // Platform specific extension
@@ -269,6 +279,7 @@ void GpuDevice::init( const GpuDeviceCreation& creation ) {
     rprint( "Gpu Device init\n" );
     // 1. Perform common code
     allocator = creation.allocator;
+    present_mode = creation.present_mode;
     debug_options = creation.debug_options;
 
     ArenaAllocator* temp_allocator = MemoryService::instance()->get_thread_allocator();
@@ -5972,6 +5983,10 @@ void GpuDevice::set_present_mode( PresentMode::Enum mode ) {
     vulkan_swapchain_image_count = 3;// vulkan_present_mode == VK_PRESENT_MODE_IMMEDIATE_KHR ? 2 : 3;
 
     present_mode = mode_found ? mode : PresentMode::VSync;
+
+    if ( !mode_found ) {
+        rprint( "Present mode %s not supported, using VSync\n", PresentMode::ToString( mode ) );
+    }
 }
 
 void GpuDevice::link_image_sampler( ImageHandle image, SamplerHandle sampler ) {

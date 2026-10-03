@@ -402,6 +402,21 @@ namespace ResourceUpdateType {
     }
 } // namespace ResourceUpdateType
 
+namespace VulkanDebugMode {
+
+    enum Enum {
+        None, Default, Validation, GpuAssisted, Count
+    }; // enum Enum
+
+    static const char* s_value_names[] = {
+        "None", "Default", "Validation", "GpuAssisted", "Count"
+    };
+
+    static const char* ToString( Enum e ) {
+        return ( ( u32 )e < Enum::Count ? s_value_names[ ( int )e ] : "unsupported" );
+    }
+} // namespace VulkanDebugMode
+
 namespace PresentMode {
 
     enum Enum {

@@ -9,6 +9,13 @@
 
 #include "graphics/gpu_resources.hpp"
 
+namespace ax {
+namespace NodeEditor
+{
+    struct EditorContext;
+} // namespace NodeEditor
+} // namespace ax
+
 namespace raptor {
 
 struct Allocator;
@@ -38,7 +45,7 @@ enum FrameGraphResourceType {
 
     FrameGraphResourceType_Buffer          = 0,
     FrameGraphResourceType_Texture         = 1,
-    FrameGraphResourceType_Attachment      = 2,
+    FrameGraphResourceType_Attachment      = 2, // TODO(marco): create UAV entry for compute passes
     FrameGraphResourceType_Reference       = 3,
     FrameGraphResourceType_ShadingRate     = 4,
     FrameGraphResourceType_Present         = 5
@@ -354,7 +361,7 @@ struct FrameGraph {
     void                            compile();
     void                            add_ui();
 
-    void                            render( u32 frame_index, u32 thread_index, Renderer* renderer, 
+    void                            render( u32 frame_index, u32 thread_index, Renderer* renderer,
                                             RenderView* render_view, RenderBlackboard* render_blackboard, RenderConfig* render_config );
     void                            on_resize( Renderer* renderer, RenderBlackboard* render_blackboard, RenderConfig* render_config, u32 new_width, u32 new_height );
     void                            reload_shaders( RenderScene& scene, RenderBlackboard* render_blackboard, RenderConfig* render_config );
@@ -381,7 +388,7 @@ struct FrameGraph {
     Array<FrameGraphNodeHandle>     nodes;
     Array<FrameGraphNodeHandle>     all_nodes;
     Array<FrameGraphExecutionBatch> batches;
-    Array<FrameGraphNodeHandle>     persistent_update_nodes;   // Cache of persistent nodes to flip current/previous handles 
+    Array<FrameGraphNodeHandle>     persistent_update_nodes;   // Cache of persistent nodes to flip current/previous handles
                                                                // and update outputs
 
     FrameGraphBuilder*              builder;
@@ -391,6 +398,8 @@ struct FrameGraph {
     bool                            per_frame_persistent_update_called = true; // Flag to catch persistent update bugs
 
     cstring                         name = nullptr;
+
+    ax::NodeEditor::EditorContext*  ed_context = nullptr;
 }; // struct FrameGraph
 
 } // namespace raptor

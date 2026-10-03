@@ -88,6 +88,8 @@ struct VulkanDebugOptions {
     void        set_validation();           // Core validation + syncrhonization + best practices.
     void        set_gpu_assisted();         // GPU-AV without core checks, synch and best practices.
 
+    void        set( VulkanDebugMode::Enum mode );
+
 }; // struct VulkanDebugOptions
 
 //
@@ -102,14 +104,16 @@ struct GpuDeviceCreation {
     void*                           window          = nullptr; // Pointer to API-specific window: SDL_Window, GLFWWindow
     u16                             width           = 1;
     u16                             height          = 1;
+    
+    PresentMode::Enum               present_mode = PresentMode::VSync;
 
     u16                             gpu_time_queries_per_frame  = 48;
     u16                             num_threads                 = 1;
 
-    u32                             enable_gpu_time_queries     : 1 = 0;
+    u32                             enable_gpu_time_queries     : 1 = 1;
     u32                             enable_pipeline_statistics  : 1 = 1;
     u32                             debug                       : 1 = 0;
-    u32                             enable_bindless             : 1 = 0;
+    u32                             enable_bindless             : 1 = 1;
     u32                             enable_vrs                  : 1 = 0;
     u32                             enable_ray_tracing          : 1 = 0;
     u32                             enable_pipeline_binary      : 1 = 0;

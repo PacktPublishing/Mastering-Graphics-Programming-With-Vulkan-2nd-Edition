@@ -48,24 +48,17 @@ public struct NeuralMaterialCoopVec<let N : int> : IDifferentiable {
         return to_array(this);
     }
 
+    [Differentiable]
     public override static Differential dadd(Differential left, Differential right) {
         Differential result;
         result.data = left.data + right.data;
         return result;
     }
 
-    public override static Differential dmul<U : __BuiltinRealType>(U scalar, Differential value) {
+    [Differentiable]
+    public static Differential dmul<U : __BuiltinRealType>(U scalar, Differential value) {
         Differential result;
         result.data = value.data * __realCast<float>(scalar);
-        return result;
-    }
-
-    public override static Differential dzero() {
-        Differential result;
-        [ForceUnroll]
-        for (int i = 0; i < N; ++i) {
-            result.data[i] = 0.0f;
-        }
         return result;
     }
 };
@@ -201,7 +194,6 @@ struct NeuralWeightBiasLayer {
     }
 
 #if defined(RAPTOR_USE_COOPVEC)
-    [Differentiable]
     NeuralMaterialCoopVec<OutputCount> eval_coop<let InputCount : int, let OutputCount : int>(
         NeuralMaterialCoopVec<InputCount> input_values) {
         StructuredBuffer<half> weights = global_buffers_f16[weights_index];
@@ -306,7 +298,6 @@ struct NeuralWeightLayer {
     }
 
 #if defined(RAPTOR_USE_COOPVEC)
-    [Differentiable]
     NeuralMaterialCoopVec<OutputCount> eval_coop<let InputCount : int, let OutputCount : int>(
         NeuralMaterialCoopVec<InputCount> input_values) {
         StructuredBuffer<half> weights = global_buffers_f16[weights_index];

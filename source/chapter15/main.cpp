@@ -1,6 +1,7 @@
 #include "application/game_camera.hpp"
 #include "application/input.hpp"
 #include "application/window.hpp"
+#include "application/app_settings.hpp"
 
 #include "graphics/command_buffer.hpp"
 #include "graphics/gpu_device.hpp"
@@ -192,9 +193,10 @@ struct NeuralMaterialTrainer {
     BufferHandle            loss_cpu;
     f32                     current_loss[ LOSS_CHANNEL_COUNT ]{};
     f32                     loss_history[ LOSS_CHANNEL_COUNT ][ LOSS_HISTORY_CAPACITY ]{};
+    u32                     loss_history_epoch[ LOSS_HISTORY_CAPACITY ]{};
     u32                     loss_history_size = 0;
     u32                     loss_history_start = 0;
-    u64                     loss_history_sample_count = 0;
+    f32                     best_loss[ LOSS_CHANNEL_COUNT ]{ FLT_MAX, FLT_MAX, FLT_MAX };
 
     TextureAsset            material_normal;
     TextureAsset            material_roughness;
@@ -258,172 +260,459 @@ struct NeuralMaterialTrainer {
 
 }; // struct NeuralMaterialTrainer
 
+// Loss history and plot ///////////////////////////////////////////////////
+
+static const u32 LOSS_SERIES_COUNT = LOSS_CHANNEL_COUNT + 1;   // R, G, B and their mean.
+static const u32 LOSS_SERIES_MEAN = LOSS_CHANNEL_COUNT;
+
 static f32 get_loss_history_value( const NeuralMaterialTrainer& trainer, u32 channel_index, u32 history_index ) {
     return trainer.loss_history[ channel_index ][ ( trainer.loss_history_start + history_index ) % LOSS_HISTORY_CAPACITY ];
+}
+
+static u32 get_loss_history_epoch( const NeuralMaterialTrainer& trainer, u32 history_index ) {
+    return trainer.loss_history_epoch[ ( trainer.loss_history_start + history_index ) % LOSS_HISTORY_CAPACITY ];
+}
+
+// Series LOSS_SERIES_MEAN is the mean of the channels.
+static f32 get_loss_series_value( const NeuralMaterialTrainer& trainer, u32 series_index, u32 history_index ) {
+    if ( series_index < LOSS_CHANNEL_COUNT ) {
+        return get_loss_history_value( trainer, series_index, history_index );
+    }
+    f32 sum = 0.0f;
+    for ( u32 channel_index = 0; channel_index < LOSS_CHANNEL_COUNT; ++channel_index ) {
+        sum += get_loss_history_value( trainer, channel_index, history_index );
+    }
+    return sum / ( f32 )LOSS_CHANNEL_COUNT;
 }
 
 static f32 lerp_f32( f32 a, f32 b, f32 t ) {
     return a + ( b - a ) * t;
 }
 
-static void push_loss_history_sample( NeuralMaterialTrainer& trainer, const f32 loss_values[ LOSS_CHANNEL_COUNT ] ) {
-    ++trainer.loss_history_sample_count;
+static void push_loss_history_sample( NeuralMaterialTrainer& trainer, const f32 loss_values[ LOSS_CHANNEL_COUNT ], u32 epoch ) {
+    // The readback buffer is zero-filled when created: a sample with every channel at 0 was never measured.
+    bool all_zero = true;
+    for ( u32 channel_index = 0; channel_index < LOSS_CHANNEL_COUNT; ++channel_index ) {
+        all_zero = all_zero && loss_values[ channel_index ] == 0.0f;
+    }
+    if ( all_zero ) {
+        return;
+    }
+
+    const u32 slot = trainer.loss_history_size < LOSS_HISTORY_CAPACITY ? trainer.loss_history_size : trainer.loss_history_start;
+    for ( u32 channel_index = 0; channel_index < LOSS_CHANNEL_COUNT; ++channel_index ) {
+        trainer.loss_history[ channel_index ][ slot ] = loss_values[ channel_index ];
+        trainer.best_loss[ channel_index ] = min( trainer.best_loss[ channel_index ], loss_values[ channel_index ] );
+    }
+    trainer.loss_history_epoch[ slot ] = epoch;
 
     if ( trainer.loss_history_size < LOSS_HISTORY_CAPACITY ) {
-        for ( u32 channel_index = 0; channel_index < LOSS_CHANNEL_COUNT; ++channel_index ) {
-            trainer.loss_history[ channel_index ][ trainer.loss_history_size ] = loss_values[ channel_index ];
-        }
         ++trainer.loss_history_size;
     } else {
-        for ( u32 channel_index = 0; channel_index < LOSS_CHANNEL_COUNT; ++channel_index ) {
-            trainer.loss_history[ channel_index ][ trainer.loss_history_start ] = loss_values[ channel_index ];
-        }
         trainer.loss_history_start = ( trainer.loss_history_start + 1 ) % LOSS_HISTORY_CAPACITY;
     }
 }
 
-static void draw_training_loss_plot( const NeuralMaterialTrainer& trainer ) {
-    if ( trainer.loss_history_size == 0 ) {
+static void reset_loss_history( NeuralMaterialTrainer& trainer ) {
+    trainer.loss_history_size = 0;
+    trainer.loss_history_start = 0;
+    for ( u32 channel_index = 0; channel_index < LOSS_CHANNEL_COUNT; ++channel_index ) {
+        trainer.best_loss[ channel_index ] = FLT_MAX;
+    }
+}
+
+static ImU32 loss_series_color( u32 series_index, f32 alpha = 1.0f ) {
+    static const ImVec4 colors[ LOSS_SERIES_COUNT ] = {
+        { 0.95f, 0.35f, 0.35f, 1.0f },
+        { 0.35f, 0.85f, 0.45f, 1.0f },
+        { 0.35f, 0.60f, 0.95f, 1.0f },
+        { 0.90f, 0.90f, 0.90f, 1.0f },
+    };
+    ImVec4 color = colors[ series_index ];
+    color.w = alpha;
+    return ImGui::GetColorU32( color );
+}
+
+static const char* loss_series_label( u32 series_index ) {
+    static const char* labels[ LOSS_SERIES_COUNT ] = { "R", "G", "B", "Mean" };
+    return labels[ series_index ];
+}
+
+// View state of the plot: lives in the main loop, not in the trainer.
+struct LossPlotSettings {
+    bool                    log_scale = true;
+    f32                     smoothing = 0.8f;     // EMA weight, 0 = raw samples only.
+    bool                    show_series[ LOSS_SERIES_COUNT ] = { true, true, true, false };
+};
+
+// Smallest of 1, 2 or 5 times a power of ten that is >= value.
+static f64 nice_step( f64 value ) {
+    const f64 power = pow( 10.0, floor( log10( value ) ) );
+    const f64 fraction = value / power;
+    const f64 nice = fraction <= 1.0 ? 1.0 : fraction <= 2.0 ? 2.0 : fraction <= 5.0 ? 5.0 : 10.0;
+    return nice * power;
+}
+
+// Same format for every label of a linear axis, chosen from the step: 0.05 -> "%.2f", 2e-5 -> "%.1e".
+static void format_linear_label( char* buffer, sizet size, f64 value, f64 step ) {
+    const i32 decimals = max( 0, ( i32 )-floor( log10( step ) + 1e-9 ) );
+    if ( decimals > 4 ) {
+        snprintf( buffer, size, "%.1e", value );
+    } else {
+        snprintf( buffer, size, "%.*f", decimals, value );
+    }
+}
+
+// Epochs go to the hundreds of thousands: 250000 -> "250k".
+static void format_epoch_label( char* buffer, sizet size, f64 value, f64 step ) {
+    if ( step >= 1000.0 ) {
+        snprintf( buffer, size, "%gk", value / 1000.0 );
+    } else {
+        snprintf( buffer, size, "%.0f", value );
+    }
+}
+
+struct LossAxisTick {
+    f32                     ratio;          // 0 = bottom, 1 = top.
+    bool                    major;          // Major ticks have a label and a stronger grid line.
+    char                    label[ 16 ];
+};
+
+static const u32 LOSS_AXIS_MAX_TICKS = 128;
+
+// Fills ticks for [min_value, max_value] and returns how many. Log: range + 5% padding. Linear: 0 to a round value.
+static u32 compute_loss_axis( bool log_scale, f32 min_value, f32 max_value, f64& axis_min, f64& axis_max,
+                              LossAxisTick* ticks ) {
+    u32 count = 0;
+
+    if ( log_scale ) {
+        // The data range plus 5% on each side, in decades. Ticks at m * 10^k: 1e-N always has a label,
+        // 2 and 5 too when the range is short, the other ones are only grid lines.
+        f64 low = log10( ( f64 )min_value );
+        f64 high = log10( ( f64 )max_value );
+        const f64 padding = max( ( high - low ) * 0.05, 0.05 );
+        low -= padding;
+        high += padding;
+        axis_min = low;
+        axis_max = high;
+
+        const f64 span = high - low;
+        const i32 label_every = span > 8.0 ? ( i32 )ceil( span / 8.0 ) : 1;
+        for ( i32 exponent = ( i32 )floor( low ); exponent <= ( i32 )ceil( high ); ++exponent ) {
+            for ( u32 m = 1; m <= 9 && count < LOSS_AXIS_MAX_TICKS; ++m ) {
+                const f64 position = exponent + log10( ( f64 )m );
+                if ( position < low || position > high ) {
+                    continue;
+                }
+                LossAxisTick& tick = ticks[ count++ ];
+                tick.ratio = ( f32 )( ( position - low ) / span );
+                tick.major = m == 1 ? exponent % label_every == 0 : span <= 1.0 || ( span <= 2.5 && ( m == 2 || m == 5 ) );
+                snprintf( tick.label, sizeof( tick.label ), "%ue%d", m, exponent );
+            }
+        }
+
+        // Very short range with no round value inside: label the two ends.
+        bool has_label = false;
+        for ( u32 i = 0; i < count; ++i ) {
+            has_label = has_label || ticks[ i ].major;
+        }
+        if ( !has_label && count + 2 <= LOSS_AXIS_MAX_TICKS ) {
+            ticks[ count ] = { 0.0f, true,{} };
+            snprintf( ticks[ count++ ].label, sizeof( ticks[ 0 ].label ), "%.2e", pow( 10.0, low ) );
+            ticks[ count ] = { 1.0f, true,{} };
+            snprintf( ticks[ count++ ].label, sizeof( ticks[ 0 ].label ), "%.2e", pow( 10.0, high ) );
+        }
+        return count;
+    }
+
+    // Linear: from 0 (a loss is never negative) to the first round value above the maximum.
+    const f64 top = max_value > 0.0f ? ( f64 )max_value : 1.0;
+    const f64 step = nice_step( top / 5.0 );
+    axis_min = 0.0;
+    axis_max = ceil( top / step - 1e-9 ) * step;
+
+    for ( f64 value = 0.0; value <= axis_max + step * 0.5 && count < LOSS_AXIS_MAX_TICKS; value += step ) {
+        LossAxisTick& tick = ticks[ count++ ];
+        tick.ratio = ( f32 )( value / axis_max );
+        tick.major = true;
+        format_linear_label( tick.label, sizeof( tick.label ), value, step );
+    }
+    return count;
+}
+
+// Value -> 0..1 on the axis. Non-positive values on a log axis go to the bottom.
+static f32 loss_axis_ratio( bool log_scale, f32 value, f64 axis_min, f64 axis_max ) {
+    if ( log_scale ) {
+        const f64 exponent = value > 0.0f ? log10( ( f64 )value ) : axis_min;
+        return ( f32 )( ( exponent - axis_min ) / ( axis_max - axis_min ) );
+    }
+    return ( f32 )( ( value - axis_min ) / ( axis_max - axis_min ) );
+}
+
+static void draw_loss_plot_controls( LossPlotSettings& settings ) {
+    ImGui::Checkbox( "Log scale", &settings.log_scale );
+    ImGui::SameLine();
+    ImGui::SetNextItemWidth( 140.0f );
+    ImGui::SliderFloat( "Smoothing", &settings.smoothing, 0.0f, 0.99f, "%.2f" );
+
+    // The legend is also the toggle for each series.
+    for ( u32 series_index = 0; series_index < LOSS_SERIES_COUNT; ++series_index ) {
+        ImGui::SameLine();
+        ImGui::PushStyleColor( ImGuiCol_Text, loss_series_color( series_index ) );
+        ImGui::PushStyleColor( ImGuiCol_CheckMark, loss_series_color( series_index ) );
+        ImGui::Checkbox( loss_series_label( series_index ), &settings.show_series[ series_index ] );
+        ImGui::PopStyleColor( 2 );
+    }
+}
+
+static void draw_training_loss_plot( const NeuralMaterialTrainer& trainer, LossPlotSettings& settings ) {
+    draw_loss_plot_controls( settings );
+
+    const u32 sample_count = trainer.loss_history_size;
+    if ( sample_count == 0 ) {
         ImGui::TextDisabled( "No loss samples yet." );
         return;
     }
 
-    ImVec2 available_size = ImGui::GetContentRegionAvail();
-    ImVec2 canvas_size = { max( available_size.x, 1.0f ), max( available_size.y, 220.0f ) };
+    // Raw and smoothed values of every visible series. Smoothing is TensorBoard's debiased EMA,
+    // so the first samples are not pulled towards zero.
+    static f32 raw[ LOSS_SERIES_COUNT ][ LOSS_HISTORY_CAPACITY ];
+    static f32 smoothed[ LOSS_SERIES_COUNT ][ LOSS_HISTORY_CAPACITY ];
 
+    f32 min_value = FLT_MAX;
+    f32 max_value = 0.0f;
+    bool any_visible = false;
+    for ( u32 series_index = 0; series_index < LOSS_SERIES_COUNT; ++series_index ) {
+        if ( !settings.show_series[ series_index ] ) {
+            continue;
+        }
+        any_visible = true;
+
+        f64 ema = 0.0;
+        f64 weight_power = 1.0;
+        for ( u32 i = 0; i < sample_count; ++i ) {
+            const f32 value = get_loss_series_value( trainer, series_index, i );
+            raw[ series_index ][ i ] = value;
+
+            ema = ema * settings.smoothing + ( 1.0 - settings.smoothing ) * value;
+            weight_power *= settings.smoothing;
+            smoothed[ series_index ][ i ] = settings.smoothing > 0.0f ? ( f32 )( ema / ( 1.0 - weight_power ) ) : value;
+
+            // The range covers the raw samples, so nothing is clipped. Log needs positive values.
+            if ( value > 0.0f || !settings.log_scale ) {
+                min_value = min( min_value, value );
+            }
+            max_value = max( max_value, value );
+        }
+    }
+
+    if ( !any_visible ) {
+        ImGui::TextDisabled( "No series selected." );
+        return;
+    }
+    if ( settings.log_scale && ( min_value == FLT_MAX || max_value <= 0.0f ) ) {
+        ImGui::TextDisabled( "No positive loss to show on a log scale." );
+        return;
+    }
+
+    f64 axis_min = 0.0;
+    f64 axis_max = 1.0;
+    LossAxisTick y_ticks[ LOSS_AXIS_MAX_TICKS ];
+    const u32 y_tick_count = compute_loss_axis( settings.log_scale, min_value, max_value, axis_min, axis_max, y_ticks );
+
+    // Epochs on X: round values with the same 1-2-5 rule.
+    const f64 first_epoch = ( f64 )get_loss_history_epoch( trainer, 0 );
+    const f64 last_epoch = ( f64 )get_loss_history_epoch( trainer, sample_count - 1 );
+    const f64 epoch_span = max( last_epoch - first_epoch, 1.0 );
+    const f64 epoch_step = max( nice_step( epoch_span / 5.0 ), 1.0 );
+
+    // Layout: the left margin fits the widest label.
+    f32 label_width = 0.0f;
+    for ( u32 i = 0; i < y_tick_count; ++i ) {
+        if ( y_ticks[ i ].major ) {
+            label_width = max( label_width, ImGui::CalcTextSize( y_ticks[ i ].label ).x );
+        }
+    }
+    const f32 text_height = ImGui::GetTextLineHeight();
+
+    const ImVec2 available = ImGui::GetContentRegionAvail();
+    const ImVec2 canvas_size = { max( available.x, 100.0f ), max( available.y, 120.0f ) };
     const ImVec2 canvas_min = ImGui::GetCursorScreenPos();
     const ImVec2 canvas_max = { canvas_min.x + canvas_size.x, canvas_min.y + canvas_size.y };
     ImGui::InvisibleButton( "##training_loss_plot", canvas_size );
+    const bool hovered = ImGui::IsItemHovered();
+
+    const ImVec2 plot_min = { canvas_min.x + label_width + 14.0f, canvas_min.y + 8.0f };
+    const ImVec2 plot_max = { canvas_max.x - 22.0f, canvas_max.y - text_height * 2.0f - 12.0f };
+    if ( plot_max.x - plot_min.x < 20.0f || plot_max.y - plot_min.y < 20.0f ) {
+        return;
+    }
 
     ImDrawList* draw_list = ImGui::GetWindowDrawList();
-    const ImU32 frame_bg = ImGui::GetColorU32( ImGuiCol_FrameBg );
-    const ImU32 border = ImGui::GetColorU32( ImGuiCol_Border );
-    const ImU32 grid = ImGui::GetColorU32( ImVec4( 1.0f, 1.0f, 1.0f, 0.10f ) );
-    const ImU32 axis = ImGui::GetColorU32( ImVec4( 1.0f, 1.0f, 1.0f, 0.35f ) );
-    const ImU32 text = ImGui::GetColorU32( ImGuiCol_Text );
-    const ImU32 line_colors[ LOSS_CHANNEL_COUNT ] = {
-        ImGui::GetColorU32( ImVec4( 0.95f, 0.35f, 0.35f, 1.0f ) ),
-        ImGui::GetColorU32( ImVec4( 0.35f, 0.85f, 0.45f, 1.0f ) ),
-        ImGui::GetColorU32( ImVec4( 0.35f, 0.60f, 0.95f, 1.0f ) )
-    };
-    const ImU32 line_soft_colors[ LOSS_CHANNEL_COUNT ] = {
-        ImGui::GetColorU32( ImVec4( 0.95f, 0.35f, 0.35f, 0.22f ) ),
-        ImGui::GetColorU32( ImVec4( 0.35f, 0.85f, 0.45f, 0.22f ) ),
-        ImGui::GetColorU32( ImVec4( 0.35f, 0.60f, 0.95f, 0.22f ) )
-    };
-    const char* channel_labels[ LOSS_CHANNEL_COUNT ] = { "R", "G", "B" };
+    const ImU32 text_color = ImGui::GetColorU32( ImGuiCol_Text );
+    const ImU32 major_grid = ImGui::GetColorU32( ImVec4( 1.0f, 1.0f, 1.0f, 0.16f ) );
+    const ImU32 minor_grid = ImGui::GetColorU32( ImVec4( 1.0f, 1.0f, 1.0f, 0.05f ) );
 
-    draw_list->AddRectFilled( canvas_min, canvas_max, frame_bg, 4.0f );
-    draw_list->AddRect( canvas_min, canvas_max, border, 4.0f );
+    draw_list->AddRectFilled( canvas_min, canvas_max, ImGui::GetColorU32( ImGuiCol_FrameBg ), 4.0f );
+    draw_list->AddRectFilled( plot_min, plot_max, ImGui::GetColorU32( ImVec4( 0.06f, 0.06f, 0.06f, 0.70f ) ) );
 
-    const f32 left_margin = 58.0f;
-    const f32 right_margin = 14.0f;
-    const f32 top_margin = 18.0f;
-    const f32 bottom_margin = 42.0f;
-    const ImVec2 plot_min = { canvas_min.x + left_margin, canvas_min.y + top_margin };
-    const ImVec2 plot_max = { canvas_max.x - right_margin, canvas_max.y - bottom_margin };
+    // Y grid and labels.
+    for ( u32 i = 0; i < y_tick_count; ++i ) {
+        const LossAxisTick& tick = y_ticks[ i ];
+        const f32 y = lerp_f32( plot_max.y, plot_min.y, tick.ratio );
+        draw_list->AddLine( { plot_min.x, y }, { plot_max.x, y }, tick.major ? major_grid : minor_grid );
+        if ( tick.major ) {
+            const ImVec2 size = ImGui::CalcTextSize( tick.label );
+            draw_list->AddText( { plot_min.x - size.x - 6.0f, y - size.y * 0.5f }, text_color, tick.label );
+        }
+    }
 
-    if ( plot_max.x <= plot_min.x || plot_max.y <= plot_min.y ) {
+    // X grid and labels.
+    char label[ 32 ];
+    for ( f64 epoch = ceil( first_epoch / epoch_step ) * epoch_step; epoch <= last_epoch + 0.5; epoch += epoch_step ) {
+        const f32 x = lerp_f32( plot_min.x, plot_max.x, ( f32 )( ( epoch - first_epoch ) / epoch_span ) );
+        draw_list->AddLine( { x, plot_min.y }, { x, plot_max.y }, major_grid );
+        format_epoch_label( label, sizeof( label ), epoch, epoch_step );
+        const ImVec2 size = ImGui::CalcTextSize( label );
+        draw_list->AddText( { x - size.x * 0.5f, plot_max.y + 4.0f }, text_color, label );
+    }
+    const char* x_axis_title = "Epoch";
+    const ImVec2 x_title_size = ImGui::CalcTextSize( x_axis_title );
+    draw_list->AddText( { ( plot_min.x + plot_max.x - x_title_size.x ) * 0.5f, plot_max.y + text_height + 8.0f },
+                        ImGui::GetColorU32( ImGuiCol_TextDisabled ), x_axis_title );
+
+    // Curves: raw faint underneath, smoothed on top. Clipped to the plot area.
+    static ImVec2 points[ LOSS_HISTORY_CAPACITY ];
+    const bool smoothing = settings.smoothing > 0.0f;
+    auto point_at = [ & ]( const f32* values, u32 i ) {
+        const f32 x_ratio = ( f32 )( ( get_loss_history_epoch( trainer, i ) - first_epoch ) / epoch_span );
+        const f32 y_ratio = loss_axis_ratio( settings.log_scale, values[ i ], axis_min, axis_max );
+        return ImVec2{ lerp_f32( plot_min.x, plot_max.x, x_ratio ), lerp_f32( plot_max.y, plot_min.y, y_ratio ) };
+        };
+
+    draw_list->PushClipRect( plot_min, plot_max, true );
+    for ( u32 series_index = 0; series_index < LOSS_SERIES_COUNT; ++series_index ) {
+        if ( !settings.show_series[ series_index ] ) {
+            continue;
+        }
+        if ( sample_count == 1 ) {
+            draw_list->AddCircleFilled( point_at( raw[ series_index ], 0 ), 3.0f, loss_series_color( series_index ) );
+            continue;
+        }
+        if ( smoothing ) {
+            for ( u32 i = 0; i < sample_count; ++i ) {
+                points[ i ] = point_at( raw[ series_index ], i );
+            }
+            draw_list->AddPolyline( points, ( i32 )sample_count, loss_series_color( series_index, 0.25f ), ImDrawFlags_None, 1.0f );
+        }
+        for ( u32 i = 0; i < sample_count; ++i ) {
+            points[ i ] = point_at( smoothed[ series_index ], i );
+        }
+        draw_list->AddPolyline( points, ( i32 )sample_count, loss_series_color( series_index ), ImDrawFlags_None, 2.0f );
+    }
+    draw_list->PopClipRect();
+
+    draw_list->AddRect( plot_min, plot_max, ImGui::GetColorU32( ImVec4( 1.0f, 1.0f, 1.0f, 0.35f ) ) );
+
+    // Hover: nearest sample under the mouse, marker on the curves and a tooltip with the values.
+    const ImVec2 mouse = ImGui::GetIO().MousePos;
+    if ( !hovered || mouse.x < plot_min.x || mouse.x > plot_max.x ) {
         return;
     }
 
-    draw_list->AddRectFilled( plot_min, plot_max, ImGui::GetColorU32( ImVec4( 0.08f, 0.08f, 0.08f, 0.65f ) ), 2.0f );
-    draw_list->AddRect( plot_min, plot_max, axis, 2.0f );
-
-    f32 min_loss = get_loss_history_value( trainer, 0, 0 );
-    f32 max_loss = min_loss;
-    for ( u32 channel_index = 0; channel_index < LOSS_CHANNEL_COUNT; ++channel_index ) {
-        const u32 start_index = channel_index == 0 ? 1u : 0u;
-        for ( u32 i = start_index; i < trainer.loss_history_size; ++i ) {
-            const f32 value = get_loss_history_value( trainer, channel_index, i );
-            min_loss = value < min_loss ? value : min_loss;
-            max_loss = value > max_loss ? value : max_loss;
+    const f64 mouse_epoch = first_epoch + ( mouse.x - plot_min.x ) / ( plot_max.x - plot_min.x ) * epoch_span;
+    u32 nearest = 0;
+    for ( u32 i = 1; i < sample_count; ++i ) {
+        if ( fabs( get_loss_history_epoch( trainer, i ) - mouse_epoch ) < fabs( get_loss_history_epoch( trainer, nearest ) - mouse_epoch ) ) {
+            nearest = i;
         }
     }
 
-    f32 loss_range = max_loss - min_loss;
-    if ( loss_range <= 1e-6f ) {
-        loss_range = max( fabsf( max_loss ) * 0.1f, 1e-4f );
-        min_loss -= 0.5f * loss_range;
-        max_loss += 0.5f * loss_range;
-    } else {
-        const f32 padding = loss_range * 0.1f;
-        min_loss -= padding;
-        max_loss += padding;
-        loss_range = max_loss - min_loss;
-    }
+    const f32 marker_x = point_at( raw[ 0 ], nearest ).x;
+    draw_list->AddLine( { marker_x, plot_min.y }, { marker_x, plot_max.y }, ImGui::GetColorU32( ImVec4( 1.0f, 1.0f, 1.0f, 0.45f ) ) );
 
-    const u32 y_tick_count = 5;
-    char label_buffer[ 64 ];
-    for ( u32 tick = 0; tick < y_tick_count; ++tick ) {
-        const f32 ratio = y_tick_count > 1 ? f32( tick ) / f32( y_tick_count - 1 ) : 0.0f;
-        const f32 y = lerp_f32( plot_max.y, plot_min.y, ratio );
-        const f32 tick_value = lerp_f32( min_loss, max_loss, ratio );
-        draw_list->AddLine( { plot_min.x, y }, { plot_max.x, y }, grid );
-        snprintf( label_buffer, sizeof( label_buffer ), "%.4g", tick_value );
-        const ImVec2 text_size = ImGui::CalcTextSize( label_buffer );
-        draw_list->AddText( { plot_min.x - text_size.x - 8.0f, y - text_size.y * 0.5f }, text, label_buffer );
-    }
-
-    const u64 first_sample_index = trainer.loss_history_sample_count > trainer.loss_history_size
-        ? trainer.loss_history_sample_count - trainer.loss_history_size
-        : 0;
-    const u32 x_tick_count = trainer.loss_history_size > 1 ? 6u : 1u;
-    for ( u32 tick = 0; tick < x_tick_count; ++tick ) {
-        const f32 ratio = x_tick_count > 1 ? f32( tick ) / f32( x_tick_count - 1 ) : 0.0f;
-        const f32 x = lerp_f32( plot_min.x, plot_max.x, ratio );
-        draw_list->AddLine( { x, plot_min.y }, { x, plot_max.y }, grid );
-
-        const u32 sample_offset = trainer.loss_history_size > 1
-            ? u32( ratio * f32( trainer.loss_history_size - 1 ) + 0.5f )
-            : 0u;
-        const unsigned long long sample_label_value = first_sample_index + sample_offset + 1;
-        snprintf( label_buffer, sizeof( label_buffer ), "%llu", sample_label_value );
-        const ImVec2 text_size = ImGui::CalcTextSize( label_buffer );
-        draw_list->AddText( { x - text_size.x * 0.5f, plot_max.y + 6.0f }, text, label_buffer );
-    }
-
-    draw_list->AddText( { plot_min.x + 6.0f, canvas_min.y + 2.0f }, text, "Loss" );
-    for ( u32 channel_index = 0; channel_index < LOSS_CHANNEL_COUNT; ++channel_index ) {
-        const ImVec2 label_size = ImGui::CalcTextSize( channel_labels[ channel_index ] );
-        const f32 legend_x = plot_max.x - ( LOSS_CHANNEL_COUNT - channel_index ) * 22.0f;
-        draw_list->AddText( { legend_x, canvas_min.y + 2.0f }, line_colors[ channel_index ], channel_labels[ channel_index ] );
-        draw_list->AddLine( { legend_x - 14.0f, canvas_min.y + 10.0f }, { legend_x - 4.0f, canvas_min.y + 10.0f }, line_colors[ channel_index ], 2.0f );
-    }
-    const char* x_axis_label = "Epoch";
-    const ImVec2 x_axis_label_size = ImGui::CalcTextSize( x_axis_label );
-    draw_list->AddText( { plot_min.x + ( plot_max.x - plot_min.x - x_axis_label_size.x ) * 0.5f, canvas_max.y - x_axis_label_size.y - 6.0f }, text, x_axis_label );
-
-    if ( trainer.loss_history_size == 1 ) {
-        for ( u32 channel_index = 0; channel_index < LOSS_CHANNEL_COUNT; ++channel_index ) {
-            const f32 value = get_loss_history_value( trainer, channel_index, 0 );
-            const f32 normalized = ( value - min_loss ) / loss_range;
-            const f32 y = lerp_f32( plot_max.y, plot_min.y, normalized );
-            draw_list->AddCircleFilled( { plot_min.x, y }, 3.0f, line_colors[ channel_index ] );
+    ImGui::BeginTooltip();
+    ImGui::Text( "Epoch %u", get_loss_history_epoch( trainer, nearest ) );
+    if ( ImGui::BeginTable( "##loss_tooltip", smoothing ? 3 : 2, ImGuiTableFlags_SizingFixedFit ) ) {
+        ImGui::TableNextRow();
+        ImGui::TableNextColumn();
+        ImGui::TableNextColumn();
+        ImGui::TextDisabled( "raw" );
+        if ( smoothing ) {
+            ImGui::TableNextColumn();
+            ImGui::TextDisabled( "smoothed" );
         }
-        return;
-    }
+        for ( u32 series_index = 0; series_index < LOSS_SERIES_COUNT; ++series_index ) {
+            if ( !settings.show_series[ series_index ] ) {
+                continue;
+            }
+            draw_list->AddCircleFilled( point_at( smoothed[ series_index ], nearest ), 3.5f, loss_series_color( series_index ) );
 
-    ImVec2 points[ LOSS_HISTORY_CAPACITY ];
-    const ImDrawListFlags previous_flags = draw_list->Flags;
-    draw_list->Flags |= ImDrawListFlags_AntiAliasedLines;
-    for ( u32 channel_index = 0; channel_index < LOSS_CHANNEL_COUNT; ++channel_index ) {
-        for ( u32 i = 0; i < trainer.loss_history_size; ++i ) {
-            const f32 value = get_loss_history_value( trainer, channel_index, i );
-            const f32 x_ratio = f32( i ) / f32( trainer.loss_history_size - 1 );
-            const f32 y_ratio = ( value - min_loss ) / loss_range;
-            points[ i ] = {
-                lerp_f32( plot_min.x, plot_max.x, x_ratio ),
-                lerp_f32( plot_max.y, plot_min.y, y_ratio )
-            };
+            ImGui::TableNextRow();
+            ImGui::TableNextColumn();
+            ImGui::TextColored( ImGui::ColorConvertU32ToFloat4( loss_series_color( series_index ) ), "%s", loss_series_label( series_index ) );
+            ImGui::TableNextColumn();
+            ImGui::Text( "%.3e", raw[ series_index ][ nearest ] );
+            if ( smoothing ) {
+                ImGui::TableNextColumn();
+                ImGui::Text( "%.3e", smoothed[ series_index ][ nearest ] );
+            }
         }
-
-        draw_list->AddPolyline( points, i32( trainer.loss_history_size ), line_soft_colors[ channel_index ], ImDrawFlags_None, 3.0f );
-        draw_list->AddPolyline( points, i32( trainer.loss_history_size ), line_colors[ channel_index ], ImDrawFlags_None, 1.5f );
+        ImGui::EndTable();
     }
-    draw_list->Flags = previous_flags;
+    ImGui::EndTooltip();
 }
 
+// Epochs per second, averaged over half a second so the number does not flicker.
+struct TrainingRate {
+    u32                     last_epoch = 0;
+    f32                     elapsed = 0.0f;
+    f32                     epochs_per_second = 0.0f;
+};
+
+static void update_training_rate( TrainingRate& rate, u32 epoch, f32 delta_time ) {
+    rate.elapsed += delta_time;
+    if ( rate.elapsed >= 0.5f ) {
+        rate.epochs_per_second = epoch >= rate.last_epoch ? ( f32 )( epoch - rate.last_epoch ) / rate.elapsed : 0.0f;
+        rate.last_epoch = epoch;
+        rate.elapsed = 0.0f;
+    }
+}
+
+static void draw_training_panel( NeuralMaterialTrainer& trainer, bool& training_enabled, const TrainingRate& rate, f32 delta_time ) {
+    ImGui::Checkbox( "Training", &training_enabled );
+    ImGui::SameLine();
+    if ( ImGui::Button( "Reset loss history" ) ) {
+        reset_loss_history( trainer );
+    }
+
+    ImGui::Text( "Epoch %u", trainer.epoch );
+    ImGui::SameLine();
+    ImGui::TextDisabled( "(%.0f epochs/s)", rate.epochs_per_second );
+    ImGui::Text( "Frame time %.2f ms", delta_time * 1000.0f );
+
+    if ( ImGui::BeginTable( "##loss_values", 3, ImGuiTableFlags_SizingFixedFit | ImGuiTableFlags_RowBg | ImGuiTableFlags_BordersInnerV ) ) {
+        ImGui::TableSetupColumn( "Loss" );
+        ImGui::TableSetupColumn( "Current" );
+        ImGui::TableSetupColumn( "Best" );
+        ImGui::TableHeadersRow();
+
+        for ( u32 channel_index = 0; channel_index < LOSS_CHANNEL_COUNT; ++channel_index ) {
+            ImGui::TableNextRow();
+            ImGui::TableNextColumn();
+            ImGui::TextColored( ImGui::ColorConvertU32ToFloat4( loss_series_color( channel_index ) ), "%s", loss_series_label( channel_index ) );
+            ImGui::TableNextColumn();
+            ImGui::Text( "%.3e", trainer.current_loss[ channel_index ] );
+            ImGui::TableNextColumn();
+            if ( trainer.best_loss[ channel_index ] < FLT_MAX ) {
+                ImGui::Text( "%.3e", trainer.best_loss[ channel_index ] );
+            } else {
+                ImGui::TextDisabled( "-" );
+            }
+        }
+        ImGui::EndTable();
+    }
+}
 
 void NeuralMaterialTrainer::create_resources( Renderer* renderer, FrameGraph* frame_graph ) {
 
@@ -1174,7 +1463,7 @@ void NeuralMaterialTrainer::step( CommandBuffer* cb ) {
         current_loss[ channel_index ] /= ( f32 )BATCH_SIZE;
     }
 
-    push_loss_history_sample( *this, current_loss );
+    push_loss_history_sample( *this, current_loss, epoch );
 
     const u32 seed = wang_hash_warmup( epoch, 2 );
 
@@ -2897,23 +3186,27 @@ int main( int argc, char** argv ) {
 
     using namespace raptor;
 
+    AppSettings settings;
+    settings.load( RAPTOR_DATA_FOLDER, RAPTOR_CHAPTER_NAME );
+
     time_service_init();
 
     MemoryServiceConfiguration memory_configuration;
-    memory_configuration.maximum_dynamic_size = rgiga( 2ull );
+    memory_configuration.maximum_dynamic_size = rmega( ( sizet )settings.memory_max_dynamic_mb );
 
     MemoryService::instance()->init( &memory_configuration );
     Allocator* allocator = &MemoryService::instance()->system_allocator;
 
-    WindowConfiguration wconf{ 1280, 800, "Chapter 15: Neural Material Training", allocator };
+    WindowConfiguration wconf{ settings.window_width, settings.window_height, "Chapter 15: Neural Material Training", allocator };
     Window window;
     window.init( &wconf );
 
     GpuDeviceCreation dc;
-    dc.debug_options.set_validation();
     dc.enable_bindless = true;
+    dc.debug_options.set( settings.gpu_debug );
+    dc.present_mode = settings.gpu_present_mode;
     dc.set_window( window.width, window.height, window.platform_handle ).set_allocator( allocator );
-    dc.resource_pool_creation.buffers = 1024;
+    dc.resource_pool_creation.buffers = settings.gpu_buffer_pool;
     dc.resource_pool_creation.images = 256;
     dc.resource_pool_creation.image_views = 256;
     dc.resource_pool_creation.pipelines = 128;
@@ -2953,6 +3246,9 @@ int main( int argc, char** argv ) {
     trainer.create_resources( &renderer, &frame_graph );
 
     bool training_enabled = true;
+    idra::LossPlotSettings loss_plot_settings;
+    idra::TrainingRate training_rate;
+
     i64 begin_frame_tick = time_now();
 
     while ( !window.requested_exit ) {
@@ -2987,16 +3283,15 @@ int main( int argc, char** argv ) {
         const f32 delta_time = ( f32 )time_delta_seconds( begin_frame_tick, current_tick );
         begin_frame_tick = current_tick;
 
+        idra::update_training_rate( training_rate, trainer.epoch, delta_time );
+
         if ( ImGui::Begin( "Chapter 15: Neural Materials" ) ) {
-            ImGui::Checkbox( "Training", &training_enabled );
-            ImGui::Text( "Epoch: %u", trainer.epoch );
-            ImGui::Text( "Frame time: %.3f ms", delta_time * 1000.0f );
-            ImGui::Text( "Loss: %.6f %.6f %.6f", trainer.current_loss[ 0 ], trainer.current_loss[ 1 ], trainer.current_loss[ 2 ] );
+            idra::draw_training_panel( trainer, training_enabled, training_rate, delta_time );
         }
         ImGui::End();
 
         if ( ImGui::Begin( "Training Loss" ) ) {
-            idra::draw_training_loss_plot( trainer );
+            idra::draw_training_loss_plot( trainer, loss_plot_settings );
         }
         ImGui::End();
 

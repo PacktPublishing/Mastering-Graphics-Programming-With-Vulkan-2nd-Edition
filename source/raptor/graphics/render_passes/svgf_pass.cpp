@@ -299,6 +299,8 @@ void SVGFGuideDownsamplePass::on_resize( FrameGraphResourceContext& context, u32
     if ( !enabled ) {
         return;
     }
+
+    create_descriptors( context );
 }
 
 void SVGFGuideDownsamplePass::create_gpu_resources( FrameGraphResourceContext& context ) {
@@ -378,6 +380,8 @@ void SVGFGuideDownsamplePass::create_descriptors( FrameGraphResourceContext& con
 
     GpuDevice* gpu = renderer->gpu;
     RenderBlackboard& render_blackboard = *context.render_blackboard;
+
+    gpu->destroy_descriptor_set( descriptor_set );
 
     ShaderReflectionInfo* reflection_info = renderer->get_shader_reflection( pipeline.any() );
 
@@ -654,6 +658,8 @@ void SVGFAccumulationPass::on_resize(FrameGraphResourceContext& context, u32 new
     gpu.add_image_view_to_bindless( output.restirgi_history_image_view );
     gpu.add_image_view_to_bindless( output.restirgi_moments_history_image_view );
 
+    create_descriptors( context );
+
     reset_history = true;
 }
 
@@ -826,6 +832,8 @@ void SVGFAccumulationPass::create_descriptors( FrameGraphResourceContext& contex
     GpuDevice* gpu = renderer->gpu;
     RenderBlackboard& render_blackboard = *context.render_blackboard;
 
+    gpu->destroy_descriptor_set( descriptor_set );
+
     ShaderReflectionInfo* reflection_info = renderer->get_shader_reflection( pipeline.any() );
 
     DescriptorSetBinder descriptors;
@@ -985,6 +993,8 @@ void SVGFVariancePass::on_resize(FrameGraphResourceContext& context, u32 new_wid
     if ( !enabled ) {
         return;
     }
+
+    create_descriptors( context );
 }
 
 void SVGFVariancePass::create_gpu_resources( FrameGraphResourceContext& context ) {
@@ -1073,6 +1083,8 @@ void SVGFVariancePass::create_descriptors( FrameGraphResourceContext& context ) 
 
     GpuDevice* gpu = renderer->gpu;
     RenderBlackboard& render_blackboard = *context.render_blackboard;
+
+    gpu->destroy_descriptor_set( descriptor_set );
 
     ShaderReflectionInfo* reflection_info = renderer->get_shader_reflection( pipeline.any() );
 
@@ -1361,6 +1373,8 @@ void SVGFWaveletPass::on_resize(FrameGraphResourceContext& context, u32 new_widt
     gpu.add_image_view_to_bindless( restirgi_ping_pong_color_image_view );
     gpu.add_image_view_to_bindless( reflections_ping_pong_variance_image_view );
     gpu.add_image_view_to_bindless( restirgi_ping_pong_variance_image_view );
+
+    create_descriptors( context );
 }
 
 void SVGFWaveletPass::create_gpu_resources( FrameGraphResourceContext& context ) {

@@ -1554,15 +1554,26 @@ VkShaderModuleCreateInfo ShaderCompiler::compile_shader_slang( cstring code, u32
     s_slang_global_session->createSession( session_desc, &s_slang_session );
 
     //
-    slang::IModule* slangModule = nullptr;
-    Slang::ComPtr<slang::IBlob> diagnosticBlob;
-    slangModule = s_slang_session->loadModule( temp_filename, diagnosticBlob.writeRef() );
-    if ( diagnosticBlob != nullptr ) {
-        rprint( "%s\n", ( const char* )diagnosticBlob->getBufferPointer() );
+    slang::IModule* slang_module = nullptr;
+    Slang::ComPtr<slang::IBlob> diagnostics_blob;
+    slang_module = s_slang_session->loadModule( temp_filename, diagnostics_blob.writeRef() );
+    if ( diagnostics_blob != nullptr ) {
+        rprint( "%s\n", ( const char* )diagnostics_blob->getBufferPointer() );
     }
 
-    Slang::ComPtr<slang::IEntryPoint> entryPoint;
-    SlangResult result = slangModule->findEntryPointByName( "main", entryPoint.writeRef());
+    if ( slang_module == nullptr ) {
+        dump_shader_code( temp_string_buffer, code, stage, name );
+
+        file_delete( temp_filename );
+        file_delete( final_spirv_filename );
+
+        shader_create_info.pCode = nullptr;
+        shader_create_info.codeSize = 0;
+        return shader_create_info;
+    }
+
+    Slang::ComPtr<slang::IEntryPoint> entry_point;
+    SlangResult result = slang_module->findEntryPointByName( "main", entry_point.writeRef());
     if ( SLANG_FAILED( result ) ) {
         // Almost always means the #if guard inside the .slang file does not match
         // the define derived from the pipeline name: the body is preprocessed away
@@ -1573,27 +1584,26 @@ VkShaderModuleCreateInfo ShaderCompiler::compile_shader_slang( cstring code, u32
     } else {
 
         if ( layout != nullptr ) {
-            *layout = slangModule->getLayout();
+            *layout = slang_module->getLayout();
         }
 
-        Array<slang::IComponentType*> componentTypes;
-        componentTypes.init( temporary_allocator, 4 );
-        componentTypes.push( slangModule );
-        componentTypes.push( entryPoint );  // index 0
+        Array<slang::IComponentType*> component_types;
+        component_types.init( temporary_allocator, 4 );
+        component_types.push( slang_module );
+        component_types.push( entry_point );  // index 0
 
-        Slang::ComPtr<slang::IComponentType> composedProgram;
-        Slang::ComPtr<slang::IBlob> diagnosticsBlob;
-        SlangResult result = s_slang_session->createCompositeComponentType( componentTypes.data, componentTypes.size,
-                                                                            composedProgram.writeRef(), diagnosticsBlob.writeRef() );
-        if ( diagnosticBlob != nullptr ) {
-            rprint( "%s\n", ( const char* )diagnosticBlob->getBufferPointer() );
+        Slang::ComPtr<slang::IComponentType> composed_program;
+        SlangResult result = s_slang_session->createCompositeComponentType( component_types.data, component_types.size,
+                                                                            composed_program.writeRef(), diagnostics_blob.writeRef() );
+        if ( diagnostics_blob != nullptr ) {
+            rprint( "%s\n", ( const char* )diagnostics_blob->getBufferPointer() );
         }
 
         Slang::ComPtr<slang::IBlob> outCode;
-        result = composedProgram->getEntryPointCode( 0, 0, outCode.writeRef(), diagnosticsBlob.writeRef() );
+        result = composed_program->getEntryPointCode( 0, 0, outCode.writeRef(), diagnostics_blob.writeRef() );
 
-        if ( diagnosticBlob != nullptr ) {
-            rprint( "%s\n", ( const char* )diagnosticBlob->getBufferPointer() );
+        if ( diagnostics_blob != nullptr ) {
+            rprint( "%s\n", ( const char* )diagnostics_blob->getBufferPointer() );
         }
 
         // Print SpirV file

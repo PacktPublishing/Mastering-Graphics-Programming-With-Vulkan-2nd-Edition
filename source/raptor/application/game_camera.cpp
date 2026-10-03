@@ -138,6 +138,30 @@ void GameCamera::apply_jittering( f32 x, f32 y ) {
     camera.calculate_view_projection();
 }
 
+void GameCamera::set( const glm::vec3& position, const glm::vec3& direction ) {
+    camera.position = position;
+    target_movement = position;
+
+    // Inverse of Camera::update, angles in radians:
+    // forward = yaw around Y * pitch around X * ( 0, 0, -1 ) = ( -sin(yaw) cos(pitch), sin(pitch), -cos(yaw) cos(pitch) )
+
+    const f32 length = glm::length( direction );
+    if ( length > 0.f ) {
+
+        const glm::vec3 d = direction / length;
+        camera.pitch = asinf( glm::clamp( d.y, -1.f, 1.f ) );
+
+        if ( d.x * d.x + d.z * d.z > 1e-12f ) {
+            camera.yaw = atan2f( -d.x, -d.z );
+        }
+    }
+
+    target_pitch = camera.pitch;
+    target_yaw = camera.yaw;
+
+    camera.update();
+}
+
 bool GameCamera::draw_debug_ui() {
 
     if ( ImGui::CollapsingHeader( "Camera" ) ) {

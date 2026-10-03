@@ -18,6 +18,7 @@ function(raptor_add_chapter target_name)
     RAPTOR_WORKING_FOLDER="${CMAKE_CURRENT_SOURCE_DIR}/../raptor"
     RAPTOR_SHADER_FOLDER="${CMAKE_CURRENT_SOURCE_DIR}/../shaders/"
     RAPTOR_DATA_FOLDER="${CMAKE_SOURCE_DIR}/binaries/data"
+    RAPTOR_CHAPTER_NAME="${target_name}"
   )
 endfunction()
 

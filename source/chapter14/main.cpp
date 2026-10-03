@@ -1,4 +1,5 @@
 #include "application/window.hpp"
+#include "application/app_settings.hpp"
 #include "application/input.hpp"
 #include "application/game_camera.hpp"
 #include "application/demo_ui.hpp"
@@ -97,9 +98,13 @@ int main( int argc, char** argv ) {
     }
 
     using namespace raptor;
+
+    AppSettings settings;
+    settings.load( RAPTOR_DATA_FOLDER, RAPTOR_CHAPTER_NAME );
+
     // Init services
     MemoryServiceConfiguration memory_configuration;
-    memory_configuration.maximum_dynamic_size = rgiga( 2ull );
+    memory_configuration.maximum_dynamic_size = rmega( ( sizet )settings.memory_max_dynamic_mb );
 
     MemoryService::instance()->init( &memory_configuration );
     Allocator* allocator = &MemoryService::instance()->system_allocator;
@@ -114,7 +119,7 @@ int main( int argc, char** argv ) {
     task_scheduler.Initialize( config );
 
     // window
-    WindowConfiguration wconf{ 1200, 800, "Chapter 14: ReSTIR GI", &MemoryService::instance()->system_allocator};
+    WindowConfiguration wconf{ settings.window_width, settings.window_height, "Chapter 14: ReSTIR GI", &MemoryService::instance()->system_allocator};
     raptor::Window window;
     window.init( &wconf );
 
@@ -126,12 +131,14 @@ int main( int argc, char** argv ) {
 
     // graphics
     GpuDeviceCreation dc;
-    dc.debug_options.set_validation();
-    dc.enable_bindless = true;
     dc.enable_ray_tracing = true;
+    dc.enable_gpu_time_queries = true;
+    dc.debug_options.set( settings.gpu_debug );
+    dc.present_mode = settings.gpu_present_mode;
+
     dc.set_window( window.width, window.height, window.platform_handle ).set_allocator( &MemoryService::instance()->system_allocator )
       .set_num_threads( task_scheduler.GetNumTaskThreads() );
-    dc.resource_pool_creation.buffers = 1024;
+    dc.resource_pool_creation.buffers = settings.gpu_buffer_pool;
     dc.descriptor_pool_creation.storage_buffer = 512;
 
     GpuDevice gpu;
@@ -155,8 +162,9 @@ int main( int argc, char** argv ) {
     imgui->init( &imgui_config );
 
     GameCamera game_camera;
-    game_camera.camera.init_perpective( 0.1f, 100.f, 60.f, wconf.width * 1.f / wconf.height );
-    game_camera.init( true, 20.f, 6.f, 0.1f );
+    game_camera.camera.init_perpective( settings.camera_near, settings.camera_far, settings.camera_fov_y, window.width * 1.f / window.height );
+    game_camera.init( true, settings.camera_rotation_speed, settings.camera_movement_speed, settings.camera_movement_delta );
+    game_camera.set( settings.camera_position, settings.camera_direction );
 
     time_service_init();
 
@@ -174,7 +182,7 @@ int main( int argc, char** argv ) {
 
     FrameRenderer frame_renderer;
     frame_renderer.init( allocator, &renderer, &frame_graph, &scene_graph, &render_scene );
-    frame_renderer.set_upscale_settings( { .render_scale = 0.666f, .enabled = false } );
+    frame_renderer.set_upscale_settings( { .render_scale = settings.upscale_render_scale, .enabled = settings.upscale_enabled } );
     frame_renderer.calculate_resolution_info( gpu.swapchain_width, gpu.swapchain_height );
 
     frame_graph_builder.set_resolution_info( &frame_renderer.resolution_info );

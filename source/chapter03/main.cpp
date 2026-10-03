@@ -1,4 +1,5 @@
 #include "application/window.hpp"
+#include "application/app_settings.hpp"
 #include "application/input.hpp"
 #include "application/game_camera.hpp"
 #include "application/demo_ui.hpp"
@@ -1106,9 +1107,13 @@ int main( int argc, char** argv ) {
     }
 
     using namespace raptor;
+
+    AppSettings settings;
+    settings.load( RAPTOR_DATA_FOLDER, RAPTOR_CHAPTER_NAME );
+
     // Init services
     MemoryServiceConfiguration memory_configuration;
-    memory_configuration.maximum_dynamic_size = rgiga( 2ull );
+    memory_configuration.maximum_dynamic_size = rmega( ( sizet )settings.memory_max_dynamic_mb );
 
     MemoryService::instance()->init( &memory_configuration );
     Allocator* allocator = &MemoryService::instance()->system_allocator;
@@ -1123,7 +1128,7 @@ int main( int argc, char** argv ) {
     task_scheduler.Initialize( config );
 
     // window
-    WindowConfiguration wconf{ 1280, 800, "Chapter 3: Frame Graph", &MemoryService::instance()->system_allocator};
+    WindowConfiguration wconf{ settings.window_width, settings.window_height, "Chapter 3: Frame Graph", &MemoryService::instance()->system_allocator};
     raptor::Window window;
     window.init( &wconf );
 
@@ -1137,9 +1142,11 @@ int main( int argc, char** argv ) {
     GpuDeviceCreation dc;
     dc.enable_bindless = true;
     dc.force_disable_mesh_shaders = true;
+    dc.debug_options.set( settings.gpu_debug );
+    dc.present_mode = settings.gpu_present_mode;
     dc.set_window( window.width, window.height, window.platform_handle ).set_allocator( &MemoryService::instance()->system_allocator )
       .set_num_threads( task_scheduler.GetNumTaskThreads() );
-    dc.resource_pool_creation.buffers = 1024;
+    dc.resource_pool_creation.buffers = settings.gpu_buffer_pool;
 
     GpuDevice gpu;
     gpu.init( dc );
@@ -1162,8 +1169,9 @@ int main( int argc, char** argv ) {
     imgui->init( &imgui_config );
 
     GameCamera game_camera;
-    game_camera.camera.init_perpective( 0.1f, 100.f, 60.f, wconf.width * 1.f / wconf.height );
-    game_camera.init( true, 20.f, 6.f, 0.1f );
+    game_camera.camera.init_perpective( settings.camera_near, settings.camera_far, settings.camera_fov_y, window.width * 1.f / window.height );
+    game_camera.init( true, settings.camera_rotation_speed, settings.camera_movement_speed, settings.camera_movement_delta );
+    game_camera.set( settings.camera_position, settings.camera_direction );
 
     time_service_init();
 

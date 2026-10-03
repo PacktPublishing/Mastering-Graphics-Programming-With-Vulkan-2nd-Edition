@@ -14,7 +14,10 @@
 
 #include "external/json.hpp"
 #include "external/imgui/imgui.h"
+#include "external/imgui-node-editor/imgui_node_editor.h"
 #include "external/tracy/tracy/Tracy.hpp"
+
+namespace ed = ax::NodeEditor;
 
 #include <string>
 
@@ -74,6 +77,10 @@ void FrameGraph::init( FrameGraphBuilder* builder_ ) {
     all_nodes.init( allocator, FrameGraphBuilder::k_max_nodes_count );
     persistent_update_nodes.init( allocator, 8 );
     batches.init( allocator, 8 );
+
+    ed::Config config;
+    config.SettingsFile = "framegraph.json";
+    ed_context = ed::CreateEditor(&config);
 }
 
 void FrameGraph::shutdown() {
@@ -1275,33 +1282,34 @@ CommandBuffer* FrameGraph::get_command_buffer_from_batch( CommandQueueType queue
 
 void FrameGraph::debug_ui() {
 
-    if ( ImGui::CollapsingHeader( "Nodes" ) ) {
-        for ( u32 n = 0; n < nodes.size; ++n ) {
-            FrameGraphNode* node = builder->access_node( nodes[ n ] );
+    ed::SetCurrentEditor(ed_context);
+    ed::Begin("Framegraph", ImVec2(0.0, 0.0f));
 
-            ImGui::Separator();
-            ImGui::Text( "Pass: %s", node->name );
-            static cstring node_types_names[] = { "Graphics", "Compute", "Ray Tracing" };
-            static cstring node_queue_names[] = { "Graphics", "Compute" };
-            ImGui::Text( "\tType: %s", node_types_names[ node->compute ? ( node->ray_tracing ? 2 : 1 ) : 0 ] );
-            ImGui::Text( "\tQueue: %s", node_queue_names[ node->scheduling.queue_type == CommandQueueType::Compute ? 1 : 0 ] );
+    int unique_id = 1;
+    for ( u32 n = 0; n < nodes.size; ++n ) {
+        FrameGraphNode* node = builder->access_node( nodes[ n ] );
+        ed::BeginNode( unique_id++);
+        ImGui::Text( node->name );
 
-            ImGui::Text( "\tInputs" );
-            for ( u32 i = 0; i < node->inputs.size; ++i ) {
-                FrameGraphResource* resource = access_resource( node->inputs[ i ] );
-                FrameGraphResource* output_resource = access_output_resource( node->inputs[ i ] );
-                ImGui::Text( "\t\t%s %u %u", resource->name, output_resource->resource_info.texture.image_view.index(), output_resource->resource_info.buffer.handle.index() );
-            }
-
-
-            ImGui::Text( "\tOutputs" );
-            for ( u32 o = 0; o < node->outputs.size; ++o ) {
-                FrameGraphResource* resource = builder->access_resource( node->outputs[ o ] );
-                FrameGraphResource* output_resource = access_output_resource( node->outputs[ o ] );
-                ImGui::Text( "\t\t%s %u %u", resource->name, output_resource->resource_info.texture.image_view.index(), output_resource->resource_info.buffer.handle.index() );
-            }
+        for ( u32 i = 0; i < node->inputs.size; ++i ) {
+            FrameGraphResource* resource = access_resource( node->inputs[ i ] );
+            ed::BeginPin( unique_id++, ed::PinKind::Input );
+            ImGui::Text( resource->name );
+            ed::EndPin();
         }
+
+        for ( u32 o = 0; o < node->outputs.size; ++o ) {
+            FrameGraphResource* resource = builder->access_resource( node->outputs[ o ] );
+            ed::BeginPin( unique_id++, ed::PinKind::Output );
+            ImGui::Text( resource->name );
+            ed::EndPin();
+        }
+
+        ed::EndNode();
     }
+    ed::End();
+    ed::SetCurrentEditor(nullptr);
+
 }
 
 void FrameGraph::add_node( FrameGraphNodeCreation& creation ) {

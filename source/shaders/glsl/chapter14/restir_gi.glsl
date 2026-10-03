@@ -56,8 +56,8 @@ struct ReservoirPacked {
     float W;                 // 32
     float w_sum;             // 36
     uint  M;                 // 40
-    int16_t  light_index;    // 42
-    uint16_t debug;          // 44
+    int16_t  light_index;    // 44
+    uint16_t debug;          // 46
 };
 
 // Adapted from the ReSTIR GI: Path Resampling for Real-Time Path Tracing paper
