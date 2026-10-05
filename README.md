@@ -273,9 +273,9 @@ With the following software and hardware list you can run all code files present
 <details> 
   <summary><h2>Get to know Authors</h2></summary>
 
-_Gabriel Sassone_ Gabriel Sassone is a rendering enthusiast currently working as a Principal Rendering Engineer at Multiplayer Group. Previously working for Avalanche Studios, where his first contact with Vulkan happened, where they developed the Vulkan layer for the proprietary Apex Engine and its Google Stadia Port. He previously worked at ReadyAtDawn, Codemasters, FrameStudios, and some non-gaming tech companies. His spare time is filled with music and rendering, gaming, and outdoor activities.
+_Gabriel Sassone_ Gabriel Sassone is a rendering and engine engineer. He first encountered Vulkan while developing the Vulkan layer for the proprietary Apex Engine and its Google Stadia port at Avalanche Studios. He previously worked at ReadyAtDawn, Codemasters, FrameStudios, The Multiplayer Group, and some other non-gaming tech companies. His spare time is filled with music and rendering, gaming, and outdoor activities.
 
-_Marco Castorina_ Marco Castorina first got familiar with Vulkan while working as a driver developer at Samsung. Later he developed a 2D and 3D renderer in Vulkan from scratch for a leading media-server company. He recently joined the games graphics performance team at AMD. In his spare time, he keeps up to date with the latest techniques in real-time graphics.
+_Marco Castorina_ Marco Castorina first got familiar with Vulkan while working as a driver developer at Samsung. Later, he developed a 2D and 3D renderer in Vulkan from scratch for a leading media-server company. He later joined a graphics driver performance team focusing on D3D12 and now works in GPU architecture modeling. In his spare time, he keeps up to date with the latest techniques in real-time graphics. He also likes cooking and making music.
 
 
 
