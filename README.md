@@ -5,10 +5,10 @@ Mastering Graphics Programming With Vulkan, Second Edition</h1>
 </p>
 
 <h2 align="center">
-Develop a modern rendering engine featuring GPU-driven rendering and ray tracing
+Develop a modern rendering engine featuring GPU-driven rendering, advanced lighting, and ray tracing
 </h2>
 <p align="center">
-Gabriel Sassone, Marco Castorina</p>
+Marco Castorina, Gabriel Sassone</p>
 
 <p align="center">
    <a href="" alt="Discord" title="Learn more on the Discord server"><img width="32px" src="https://cliply.co/wp-content/uploads/2021/08/372108630_DISCORD_LOGO_400.gif"/></a>
@@ -26,28 +26,39 @@ Gabriel Sassone, Marco Castorina</p>
 <img src="https://content.packt.com/B34102/cover_image_small.jpg" alt="Mastering Graphics Programming With Vulkan, Second Edition" height="256px" align="right">
 </a>
 
-Building a modern rendering engine can feel overwhelming, especially with the rapid evolution of graphics APIs and techniques. Some developers struggle to bridge the gap between basic Vulkan tutorials and the advanced systems used in professional engines. This book tackles this challenge by guiding you through the design and implementation of a modern rendering engine using Vulkan’s latest features.
-You’ll gain clarity and confidence working with the API thanks to a framework that strips away the boilerplate while preserving Vulkan’s concepts. As you progress, you’ll explore advanced Vulkan features like descriptor indexing, mesh shaders, and async compute for performance and flexibility. You’ll also use frame graphs to build a rendering architecture designed to scale and simplify resource management. Through clear explanations and hands-on examples, you’ll explore modern rendering techniques such as GPU-driven rendering, real-time ray tracing, and neural rendering approaches that are at the forefront of modern rendering techniques.
-Written by two experienced graphics programmers, this book combines theory with implementation-focused guidance to help you gain production-ready skills. By the end, you’ll not only understand the Vulkan API at a deeper level but also have the knowledge to design and build your own modern renderer.</details>
+Building a modern rendering engine can feel overwhelming when basic Vulkan tutorials only take you so
+far. This second edition bridges that gap, showing you how production-focused rendering systems manage
+resources, GPU work submission, geometry, and lighting, while incorporating techniques such as GPUdriven
+rendering, ray tracing, and ReSTIR GI.
+You’ll gain clarity and confidence working with the API thanks to a framework that strips away the boilerplate
+while preserving Vulkan’s concepts. As you progress, you’ll explore Vulkan features such as descriptor
+indexing, mesh shaders, and async compute for performance and flexibility. You’ll also use frame graphs
+to build a rendering architecture designed to scale and simplify resource management. From there, you’ll
+build GPU-driven rendering that leverages meshlets and GPU-based culling, then move into Vulkan ray
+tracing for shadows and reflections and implement ReSTIR GI. Finally, you’ll apply differentiable rendering
+with Slang to create neural materials.
+Written by two experienced graphics programmers, this book combines theory with implementationfocused
+guidance to help you gain practical skills. By the end, you’ll not only understand the Vulkan API at
+a deeper level but also have the knowledge to design and build your own modern renderer.</details>
 <details open> 
   <summary><h2>Key Learnings</summary>
 <ul>
 
-<li>Integrate modern bindless techniques to reduce the complexity of descriptor set management</li>
+<li>Manage GPU resources with bindless descriptors and shader reflection</li>
 
-<li>Design and implement a frame graph to simplify resource management and barrier placement</li>
+<li>Build a frame graph and coordinate asynchronous GPU workloads</li>
 
-<li>Implement a modern GPU driven rendering framework leveraging compute and mesh shaders</li>
+<li>Implement GPU-driven rendering with meshlets and mesh shaders</li>
 
-<li>Integrate async compute to improve rendering efficiency</li>
+<li>Render many lights and GPU-driven shadows efficiently</li>
 
-<li>Implement modern rendering techniques, including TAA and volumetric fog</li>
+<li>Implement volumetric fog, temporal anti-aliasing (TAA), and temporal upscaling</li>
 
-<li>Design and implement a streaming system for acceleration structures</li>
+<li>Build Vulkan acceleration structures and ray-tracing pipelines</li>
 
-<li>Integrate ray traced shadows and reflections</li>
+<li>Implement ray-traced shadows, reflections, and ReSTIR GI</li>
 
-<li>Implement a neural rendering algorithm</li>
+<li>Create neural materials with Slang and differentiable rendering</li>
 
 </ul>
 
@@ -58,15 +69,15 @@ Written by two experienced graphics programmers, this book combines theory with 
      <img src="https://cliply.co/wp-content/uploads/2020/02/372002150_DOCUMENTS_400px.gif" alt="Unity Cookbook, Fifth Edition" height="556px" align="right">
 <ol>
 
-  <li>Introducing the Raptor Engine</li>
+  <li>Introducing the Raptor Vulkan Accelerator</li>
 
-  <li>Improving Pipelines and Descriptors Management</li>
+  <li>Improving Resource Management</li>
 
-  <li>Implementing a Frame Graph</li>
+  <li>High-Level Rendering and Frame Graphs</li>
 
-  <li>Unlocking Async Compute</li>
+  <li>Async Compute, Transfer, and GPU Queues</li>
 
-  <li>GPU-Driven Rendering</li>
+  <li>GPU-driven Rendering: Meshlets, Mesh Shaders, and GPU-Occlusion Cullingg</li>
 
   <li>Animating Meshlets</li>
 
@@ -76,15 +87,15 @@ Written by two experienced graphics programmers, this book combines theory with 
 
   <li>Adding Volumetric Fog</li>
 
-  <li>Temporal Anti-Aliasing</li>
+  <li>Temporal Anti-Aliasing and Upscaling</li>
 
   <li>Getting Started with Ray Tracing</li>
 
   <li>Revisiting Shadows with Ray Tracing</li>
 
-  <li>Implementing ReSTIR GI</li>
-
   <li>Adding Reflections with Ray Tracing</li>
+
+  <li>Implementing ReSTIR Global Illumination</li>
 
   <li>Neural Rendering</li>
 
@@ -273,9 +284,9 @@ With the following software and hardware list you can run all code files present
 <details> 
   <summary><h2>Get to know Authors</h2></summary>
 
-_Gabriel Sassone_ is a rendering and engine engineer. He first encountered Vulkan while developing the Vulkan layer for the proprietary Apex Engine and its Google Stadia port at Avalanche Studios. He previously worked at ReadyAtDawn, Codemasters, FrameStudios, The Multiplayer Group, and some other non-gaming tech companies. His spare time is filled with music and rendering, gaming, and outdoor activities.
-
 _Marco Castorina_ first got familiar with Vulkan while working as a driver developer at Samsung. Later, he developed a 2D and 3D renderer in Vulkan from scratch for a leading media-server company. He later joined a graphics driver performance team focusing on D3D12 and now works in GPU architecture modeling. In his spare time, he keeps up to date with the latest techniques in real-time graphics. He also likes cooking and making music.
+
+_Gabriel Sassone_ is a rendering and engine engineer. He first encountered Vulkan while developing the Vulkan layer for the proprietary Apex Engine and its Google Stadia port at Avalanche Studios. He previously worked at ReadyAtDawn, Codemasters, FrameStudios, The Multiplayer Group, and some other non-gaming tech companies. His spare time is filled with music and rendering, gaming, and outdoor activities.
 
 
 
