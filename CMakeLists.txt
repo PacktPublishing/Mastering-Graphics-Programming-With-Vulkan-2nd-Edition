@@ -103,6 +103,8 @@ target_include_directories(RaptorFoundation PUBLIC
 add_library(RaptorApp STATIC
     source/raptor/application/application.cpp
     source/raptor/application/application.hpp
+    source/raptor/application/app_settings.cpp
+    source/raptor/application/app_settings.hpp
     source/raptor/application/demo_ui.cpp
     source/raptor/application/demo_ui.hpp
     source/raptor/application/game_camera.cpp
@@ -180,6 +182,20 @@ add_library(RaptorExternal STATIC
     source/external/imgui/TextEditor.cpp
     source/external/imgui/TextEditor.h
 
+    source/external/imgui-node-editor/crude_json.cpp
+    source/external/imgui-node-editor/crude_json.h
+    source/external/imgui-node-editor/imgui_bezier_math.h
+    source/external/imgui-node-editor/imgui_bezier_math.inl
+    source/external/imgui-node-editor/imgui_canvas.cpp
+    source/external/imgui-node-editor/imgui_canvas.h
+    source/external/imgui-node-editor/imgui_extra_math.h
+    source/external/imgui-node-editor/imgui_extra_math.inl
+    source/external/imgui-node-editor/imgui_node_editor_api.cpp
+    source/external/imgui-node-editor/imgui_node_editor_internal.h
+    source/external/imgui-node-editor/imgui_node_editor_internal.inl
+    source/external/imgui-node-editor/imgui_node_editor.cpp
+    source/external/imgui-node-editor/imgui_node_editor.h
+
     source/external/tracy/tracy/Tracy.hpp
     source/external/tracy/tracy/TracyVulkan.hpp
     source/external/tracy/TracyClient.cpp
@@ -235,6 +251,7 @@ if (WIN32)
         ${Vulkan_INCLUDE_DIRS}
         binaries/SDL3-3.2.16/include
         source/raptor
+        source
     )
 
     target_compile_definitions(RaptorExternal PRIVATE
