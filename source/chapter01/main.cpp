@@ -781,7 +781,7 @@ int main( int argc, char** argv ) {
             spirv::parse_binary( spirv_bytecode.data, spirv_bytecode.size, shader_code_buffer, *shader_stage_creation.names_buffer, &parse_result );
 
             shader_stage.pCode = spirv_bytecode.data;
-            shader_stage.codeSize = spirv_bytecode.size;
+            shader_stage.codeSize = spirv_bytecode.size * sizeof( u32 );
 
             shader_stage_creation.add_stage( shader_stage, shader_compilation_stage.type );
         }
