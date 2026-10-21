@@ -548,7 +548,11 @@ static void scene_free_gpu_resources( Scene& scene, raptor::Renderer& renderer )
     scene.mesh_draws.shutdown();
 }
 
-static void scene_unload( Scene& scene ) {
+static void scene_unload( raptor::GpuDevice& gpu, Scene& scene ) {
+
+    for ( u32 bi = 0; bi < scene.buffers.size; ++bi ) {
+        gpu.destroy_buffer( scene.buffers[ bi ] );
+    }
     // Free scene buffers
     scene.samplers.shutdown();
     scene.images.shutdown();
@@ -1229,13 +1233,14 @@ int main( int argc, char** argv ) {
     for ( PipelineHandle pipeline : scene_pipelines ) {
         gpu.destroy_pipeline( pipeline );
     }
+
     gpu.destroy_pipeline_layout( scene_pipeline_layout );
     renderer.destroy_shader_state( shader_state );
 
-    rm.shutdown();
-    renderer.shutdown();
+    scene_unload( gpu, scene );
 
-    scene_unload( scene );
+    rm.shutdown();
+    renderer.shutdown();    
 
     input.shutdown();
     window.unregister_os_messages_callback( input_os_messages_callback );

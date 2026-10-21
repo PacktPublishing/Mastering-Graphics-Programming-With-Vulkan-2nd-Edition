@@ -64,7 +64,7 @@ struct DrawData {
     uint  padding;
 };
 
-layout(std430, binding = 0) readonly buffer SceneBuffer {
+layout(std430, set = 1, binding = 0) readonly buffer SceneBuffer {
     mat4 m;
     mat4 vp;
     vec4 eye;
@@ -127,7 +127,7 @@ struct DrawData {
     uint  padding;
 };
 
-layout(std430, binding = 0) readonly buffer SceneBuffer {
+layout(std430, set = 1, binding = 0) readonly buffer SceneBuffer {
     mat4 m;
     mat4 vp;
     vec4 eye;
@@ -136,11 +136,11 @@ layout(std430, binding = 0) readonly buffer SceneBuffer {
     DrawData draws[];
 } scene;
 
-layout (binding = 2) uniform sampler2D diffuseTexture;
-layout (binding = 3) uniform sampler2D roughnessMetalnessTexture;
-layout (binding = 4) uniform sampler2D occlusionTexture;
-layout (binding = 5) uniform sampler2D emissiveTexture;
-layout (binding = 6) uniform sampler2D normalTexture;
+layout (set = 1, binding = 2) uniform sampler2D diffuseTexture;
+layout (set = 1, binding = 3) uniform sampler2D roughnessMetalnessTexture;
+layout (set = 1, binding = 4) uniform sampler2D occlusionTexture;
+layout (set = 1, binding = 5) uniform sampler2D emissiveTexture;
+layout (set = 1, binding = 6) uniform sampler2D normalTexture;
 
 layout (location = 0) in vec2 vTexcoord0;
 layout (location = 1) in vec3 vNormal;
@@ -778,10 +778,10 @@ int main( int argc, char** argv ) {
                 exit( -1 );
             }
 
-            spirv::parse_binary( spirv_bytecode.data, spirv_bytecode.size, shader_code_buffer, *shader_stage_creation.names_buffer, &parse_result );
+            shader_stage.codeSize = spirv_bytecode.size * sizeof( u32 );
+            spirv::parse_binary( spirv_bytecode.data, shader_stage.codeSize, shader_code_buffer, *shader_stage_creation.names_buffer, &parse_result );
 
             shader_stage.pCode = spirv_bytecode.data;
-            shader_stage.codeSize = spirv_bytecode.size;
 
             shader_stage_creation.add_stage( shader_stage, shader_compilation_stage.type );
         }
@@ -801,13 +801,14 @@ int main( int argc, char** argv ) {
                 { 5,VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 1 }, // emissiveTexture
                 { 6,VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 1 }, // normalTexture
             },
+            .set_index = 1,
             .name = "default_descriptor_set_layout"
         };
         // Setting it into pipeline
         dsl = gpu.create_descriptor_set_layout( descriptor_set_layout_creation );
 
         PipelineLayoutCreation pipeline_layout_creation = {
-            .layouts = { dsl },
+            .layouts = { gpu.bindless_descriptor_set_layout, dsl },
             .name = "default_pipeline_layout"
         };
         pl = gpu.create_pipeline_layout( pipeline_layout_creation );
@@ -838,7 +839,7 @@ int main( int argc, char** argv ) {
         Array<glm::mat4> node_matrix;
         node_matrix.init( allocator, ( u32 )gltf_data->nodes_count, ( u32 )gltf_data->nodes_count );
 
-        for ( u32 node_index = 0; node_index < ( u32 )gltf_data->nodes_count; ++node_index ) {
+        for ( u32 node_index = 0; node_index < ( u32 )root_gltf_scene->nodes_count; ++node_index ) {
             u32 root_node = ( u32 )cgltf_node_index( gltf_data, root_gltf_scene->nodes[ node_index ] );
             node_parents[ root_node ] = -1;
             node_stack.push( root_node );
@@ -1366,7 +1367,7 @@ int main( int argc, char** argv ) {
                 }
 
                 gfx_cb->bind_index_buffer( mesh_draw.index_buffer, mesh_draw.index_offset, mesh_draw.index_type );
-                gfx_cb->bind_descriptor_set( { mesh_draw.descriptor_set }, { } );
+                gfx_cb->bind_descriptor_set( { gpu.bindless_descriptor_set, mesh_draw.descriptor_set }, { } );
 
                 gfx_cb->draw_indexed( TopologyType::Triangle, mesh_draw.count, 1, 0, 0, mesh_draw.draw_index );
             }
@@ -1389,10 +1390,6 @@ int main( int argc, char** argv ) {
                     .layout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR
                 }
             );
-
-            /*util_add_image_barrier( &gpu, gfx_cb->vk_command_buffer, gpu.get_current_swapchain_image(),
-                                    RESOURCE_STATE_PRESENT,
-                                    0, 1, false );*/
 
             // Send commands to GPU
             gpu.gpu_profiler->end_command_buffer( gfx_cb );
@@ -1426,6 +1423,11 @@ int main( int argc, char** argv ) {
     for ( u32 mi = 0; mi < custom_mesh_buffers.size; ++mi ) {
         gpu.destroy_buffer( custom_mesh_buffers[ mi ] );
     }
+
+    for ( u32 bi = 0; bi < buffers.size; ++bi ) {
+        gpu.destroy_buffer( buffers[ bi ] );
+    }
+
     custom_mesh_buffers.shutdown();
 
     gpu.destroy_buffer( dummy_attribute_buffer );
