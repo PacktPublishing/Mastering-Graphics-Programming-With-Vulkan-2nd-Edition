@@ -1303,12 +1303,28 @@ int main( int argc, char** argv ) {
             gfx_cb->begin();
             gpu.gpu_profiler->begin_command_buffer( gfx_cb );
 
+            ImageHandle swapchain_image = gpu.get_current_swapchain_image();
             gfx_cb->add_image_barrier(
-                gpu.get_current_swapchain_image(),
-                raptor::range_aspect( VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1 ),
+                swapchain_image,
+                range_color_full(),
+                ImageSyncState{
+                    .stage = VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
+                    .access = VK_ACCESS_2_NONE,
+                    .layout = gpu.get_image( swapchain_image )->sync_state.layout
+                },
                 ImageSyncState{
                     .stage = VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
                     .access = VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT,
+                    .layout = VK_IMAGE_LAYOUT_ATTACHMENT_OPTIMAL
+                }
+            );
+
+            gfx_cb->add_image_barrier(
+                gpu.get_current_swapchain_depth_image(),
+                range_depth_full(),
+                ImageSyncState{
+                    .stage = VK_PIPELINE_STAGE_2_EARLY_FRAGMENT_TESTS_BIT | VK_PIPELINE_STAGE_2_LATE_FRAGMENT_TESTS_BIT,
+                    .access = VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_READ_BIT | VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT,
                     .layout = VK_IMAGE_LAYOUT_ATTACHMENT_OPTIMAL
                 }
             );
@@ -1368,11 +1384,11 @@ int main( int argc, char** argv ) {
             gpu_profiler.update( gpu );
 
             gfx_cb->add_image_barrier(
-                gpu.get_current_swapchain_image(),
-                raptor::range_aspect( VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1 ),
+                swapchain_image,
+                range_color_full(),
                 ImageSyncState{
                     .stage = VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT,
-                    .access = VK_ACCESS_2_MEMORY_READ_BIT,
+                    .access = VK_ACCESS_2_NONE, // Presentation is not a pipeline access.
                     .layout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR
                 }
             );

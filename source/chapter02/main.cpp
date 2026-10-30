@@ -179,6 +179,7 @@ static void draw_mesh( raptor::Renderer& renderer, raptor::CommandBuffer* gpu_co
 
     gpu_commands->bind_descriptor_set( { renderer.gpu->bindless_descriptor_set, scene_descriptor_set }, { } );
 
+    gpu_commands->set_depth_bias_enabled( false );
     gpu_commands->draw_indexed( raptor::TopologyType::Triangle, mesh_draw.primitive_count, 1, 0, 0, mesh_draw.draw_index );
 }
 
@@ -1126,18 +1127,33 @@ int main( int argc, char** argv ) {
             raptor::CommandBuffer* gfx_cb = gpu.allocate_command_buffer( 0, gpu.current_frame, CommandQueueType::Graphics );
             gfx_cb->begin();
             gpu.gpu_profiler->begin_command_buffer( gfx_cb );
-            /*util_add_image_barrier( &gpu, gfx_cb->vk_command_buffer, gpu.get_current_swapchain_image(),
-                                    RESOURCE_STATE_RENDER_TARGET,
-                                    0, 1, false );*/
+            
+            ImageHandle swapchain_image = gpu.get_current_swapchain_image();
             gfx_cb->add_image_barrier(
-                gpu.get_current_swapchain_image(),
-                raptor::range_aspect( VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1 ),
+                swapchain_image,
+                range_color_full(),
+                ImageSyncState{
+                    .stage = VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
+                    .access = VK_ACCESS_2_NONE,
+                    .layout = gpu.get_image( swapchain_image )->sync_state.layout
+                },
                 ImageSyncState{
                     .stage = VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
                     .access = VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT,
                     .layout = VK_IMAGE_LAYOUT_ATTACHMENT_OPTIMAL
                 }
             );
+
+            gfx_cb->add_image_barrier(
+                gpu.get_current_swapchain_depth_image(),
+                range_depth_full(),
+                ImageSyncState{
+                    .stage = VK_PIPELINE_STAGE_2_EARLY_FRAGMENT_TESTS_BIT | VK_PIPELINE_STAGE_2_LATE_FRAGMENT_TESTS_BIT,
+                    .access = VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_READ_BIT | VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT,
+                    .layout = VK_IMAGE_LAYOUT_ATTACHMENT_OPTIMAL
+                }
+            );
+            gfx_cb->flush_barriers();
 
             gfx_cb->push_marker( "Frame" );
 
@@ -1184,17 +1200,16 @@ int main( int argc, char** argv ) {
             gpu_profiler.update( gpu );
 
             gfx_cb->add_image_barrier(
-                gpu.get_current_swapchain_image(),
-                raptor::range_aspect( VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1 ),
+                swapchain_image,
+                range_color_full(),
                 ImageSyncState{
                     .stage = VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT,
-                    .access = VK_ACCESS_2_MEMORY_READ_BIT,
+                    .access = VK_ACCESS_2_NONE, // Presentation is not a pipeline access.
                     .layout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR
                 }
             );
-            /*util_add_image_barrier( &gpu, gfx_cb->vk_command_buffer, gpu.get_current_swapchain_image(),
-                                    RESOURCE_STATE_PRESENT,
-                                    0, 1, false );*/
+            gfx_cb->flush_barriers();
+
             gpu.update_bindless_resources();
 
             // Send commands to GPU
