@@ -562,14 +562,12 @@ namespace chapter3 {
             DescriptorSetLayoutHandle layout_handle = gpu.get_descriptor_set_layout( pipeline, k_material_descriptor_set_index );
             ShaderReflectionInfo* reflection_info = renderer->get_shader_reflection( pipeline );
 
-            DescriptorSetCreation ds_creation{ };
-            ds_creation.layout = layout_handle;
-            ds_creation.dynamic_buffers = {
-                { .binding = renderer->get_binding_index( reflection_info, "LocalConstants"), .size = sizeof( GpuSceneData ) },
-                { .binding = renderer->get_binding_index( reflection_info, "GbufferTextures"), .size = sizeof( glm::vec4 ) },
-            };
-
-            descriptor_set = gpu.create_descriptor_set( ds_creation );
+            descriptor_set = gpu.create_descriptor_set( {
+                .dynamic_buffers = {
+                { .binding = renderer->get_binding_index( reflection_info, "LocalConstants" ), .size = sizeof( GpuSceneData ) },
+                { .binding = renderer->get_binding_index( reflection_info, "GbufferTextures" ), .size = sizeof( glm::vec4 ) },
+            },
+            .layout = layout_handle });
         }
 
         void upload_gpu_data( FrameGraphResourceContext& context ) override {
@@ -975,13 +973,13 @@ namespace chapter3 {
             DescriptorSetLayoutHandle layout_handle = gpu.get_descriptor_set_layout( pipeline, k_material_descriptor_set_index );
             ShaderReflectionInfo* reflection_info = renderer->get_shader_reflection( pipeline );
 
-            DescriptorSetCreation ds_creation{ };
-            ds_creation.layout = layout_handle;
-            ds_creation.dynamic_buffers = {
-                { .binding = renderer->get_binding_index( reflection_info, "CameraParameters"), .size = sizeof( DoFData ) },
-            };
-
-            descriptor_set = gpu.create_descriptor_set( ds_creation );
+            descriptor_set = gpu.create_descriptor_set( {
+                .dynamic_buffers = {
+                    {
+                        .binding = renderer->get_binding_index( reflection_info, "CameraParameters" ),
+                        .size = sizeof( DoFData ) },
+                    },
+                 .layout = layout_handle });
 
             FrameGraph* frame_graph = context.frame_graph;
             FrameGraphNode* node = frame_graph->get_node( "depth_of_field_pass" );
@@ -1272,17 +1270,20 @@ int main( int argc, char** argv ) {
 
         ShaderReflectionInfo* reflection_info = gbuffer_reflection_info;
 
-        DescriptorSetCreation ds_creation{ };
-        ds_creation.layout = gbuffer_layout_handle;
-        ds_creation.ssbos = {
-            {.buffer = chapter3::scene_mesh_instances_ssbo,
-             .binding = renderer.get_binding_index( reflection_info, "MeshData" ) },
-        };
-        ds_creation.dynamic_buffers = {
-            {.binding = renderer.get_binding_index( reflection_info, "LocalConstants" ), .size = sizeof( chapter3::GpuSceneData ) },
-        };
-
-        chapter3::scene_ds = gpu.create_descriptor_set( ds_creation );
+        chapter3::scene_ds = gpu.create_descriptor_set( {
+            .ssbos = {
+                {
+                    .buffer = chapter3::scene_mesh_instances_ssbo,
+                    .binding = renderer.get_binding_index( reflection_info, "MeshData" )
+                },
+            },
+            .dynamic_buffers = {
+                {
+                    .binding = renderer.get_binding_index( reflection_info, "LocalConstants" ),
+                    .size = sizeof( chapter3::GpuSceneData )
+                },
+            },
+            .layout = gbuffer_layout_handle });
     }
 
     // Calculate main view render items

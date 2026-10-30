@@ -127,7 +127,7 @@ namespace chapter4 {
         void declare_frame_graph_node( FrameGraphResourceContext& context ) override {
             FrameGraphBuilder& builder = *context.frame_graph->builder;
 
-            FrameGraphNodeCreation_v2 depth_prepass_node_info {
+            context.frame_graph->add_node_v2( {
                 .outputs = {
                     builder.create_output_handle( {
                         .type = FrameGraphResourceType_Attachment,
@@ -146,8 +146,7 @@ namespace chapter4 {
                 .scheduling = { CommandQueueType::Graphics, 0 },
                 .enabled = true,
                 .name = "depth_prepass"
-            };
-            context.frame_graph->add_node_v2( depth_prepass_node_info );
+            } );
         }
 
         void update_psos( FrameGraphResourceContext& context, PipelineUpdatePhase phase ) override {
@@ -247,7 +246,7 @@ namespace chapter4 {
         void declare_frame_graph_node( FrameGraphResourceContext& context ) override {
             FrameGraphBuilder& builder = *context.frame_graph->builder;
 
-            FrameGraphNodeCreation_v2 gbuffer_node_info {
+            context.frame_graph->add_node_v2( {
                 .inputs = {
                     {
                         .type = FrameGraphResourceType_Attachment,
@@ -307,8 +306,7 @@ namespace chapter4 {
                 .scheduling = { CommandQueueType::Graphics, 0 },
                 .enabled = true,
                 .name = "gbuffer_pass",
-            };
-            context.frame_graph->add_node_v2( gbuffer_node_info );
+            } );
         }
 
         void update_psos( FrameGraphResourceContext& context, PipelineUpdatePhase phase ) override {
@@ -448,7 +446,7 @@ namespace chapter4 {
         void declare_frame_graph_node( FrameGraphResourceContext& context ) override {
             FrameGraphBuilder& builder = *context.frame_graph->builder;
 
-            FrameGraphNodeCreation_v2 lighting_node_info {
+            context.frame_graph->add_node_v2( {
                 .inputs = {
                     {
                         .type = FrameGraphResourceType_Texture,
@@ -485,8 +483,7 @@ namespace chapter4 {
                 .scheduling = { CommandQueueType::Graphics, 1 },
                 .enabled = true,
                 .name = "lighting_pass",
-            };
-            context.frame_graph->add_node_v2( lighting_node_info );
+            } );
         }
 
         void update_psos( FrameGraphResourceContext& context, PipelineUpdatePhase phase ) override {
@@ -600,14 +597,12 @@ namespace chapter4 {
             DescriptorSetLayoutHandle layout_handle = gpu.get_descriptor_set_layout( pipeline, k_material_descriptor_set_index );
             ShaderReflectionInfo* reflection_info = renderer->get_shader_reflection( pipeline );
 
-            DescriptorSetCreation ds_creation{ };
-            ds_creation.layout = layout_handle;
-            ds_creation.dynamic_buffers = {
-                { .binding = renderer->get_binding_index( reflection_info, "LocalConstants"), .size = sizeof( GpuSceneData ) },
-                { .binding = renderer->get_binding_index( reflection_info, "GbufferTextures"), .size = sizeof( glm::vec4 ) },
-            };
-
-            descriptor_set = gpu.create_descriptor_set( ds_creation );
+            descriptor_set = gpu.create_descriptor_set( {
+                .dynamic_buffers = {
+                    { .binding = renderer->get_binding_index( reflection_info, "LocalConstants" ), .size = sizeof( GpuSceneData ) },
+                    { .binding = renderer->get_binding_index( reflection_info, "GbufferTextures" ), .size = sizeof( glm::vec4 ) },
+                },
+                .layout = layout_handle });
         }
 
         void upload_gpu_data( FrameGraphResourceContext& context ) override {
@@ -652,7 +647,7 @@ namespace chapter4 {
         void declare_frame_graph_node( FrameGraphResourceContext& context ) override {
             FrameGraphBuilder& builder = *context.frame_graph->builder;
 
-            FrameGraphNodeCreation_v2 transparent_node_info {
+            context.frame_graph->add_node_v2( {
                 .inputs = {
                     {
                         .type = FrameGraphResourceType_Attachment,
@@ -671,8 +666,7 @@ namespace chapter4 {
                 .scheduling = { CommandQueueType::Graphics, 1 },
                 .enabled = true,
                 .name = "transparent_pass",
-            };
-            context.frame_graph->add_node_v2( transparent_node_info );
+            } );
         }
 
         void update_psos( FrameGraphResourceContext& context, PipelineUpdatePhase phase ) override {
@@ -818,7 +812,8 @@ namespace chapter4 {
     struct HDRColorCopyPass : public FrameGraphRenderPass {
         void declare_frame_graph_node( FrameGraphResourceContext& context ) override {
             FrameGraphBuilder& builder = *context.frame_graph->builder;
-            FrameGraphNodeCreation_v2 hdr_copy_node_info {
+
+            context.frame_graph->add_node_v2( {
                 .inputs = {
                     /*{
                         .type = FrameGraphResourceType_Texture,
@@ -844,8 +839,7 @@ namespace chapter4 {
                 .enabled = true,
                 .compute = true,
                 .name = k_name,
-            };
-            context.frame_graph->add_node_v2( hdr_copy_node_info );
+            } );
         }
 
         void post_render( FrameGraphRenderContext& context ) override {
@@ -909,7 +903,8 @@ namespace chapter4 {
 
         void declare_frame_graph_node( FrameGraphResourceContext& context ) override {
             FrameGraphBuilder& builder = *context.frame_graph->builder;
-            FrameGraphNodeCreation_v2 bloom_node_info {
+
+            context.frame_graph->add_node_v2( {
                 .inputs = {
                     {
                         .type = FrameGraphResourceType_Texture,
@@ -929,8 +924,7 @@ namespace chapter4 {
                 .enabled = true,
                 .compute = true,
                 .name = k_name,
-            };
-            context.frame_graph->add_node_v2( bloom_node_info );
+            } );
         }
 
         void add_ui() override {
@@ -1413,20 +1407,22 @@ int main( int argc, char** argv ) {
         DescriptorSetLayoutHandle gbuffer_layout_handle = gpu.get_descriptor_set_layout( gbuffer_pipeline, k_material_descriptor_set_index );
         ShaderReflectionInfo* gbuffer_reflection_info = renderer.get_shader_reflection( gbuffer_pipeline );
 
-
         ShaderReflectionInfo* reflection_info = gbuffer_reflection_info;
 
-        DescriptorSetCreation ds_creation{ };
-        ds_creation.layout = gbuffer_layout_handle;
-        ds_creation.ssbos = {
-            {.buffer = chapter4::scene_mesh_instances_ssbo,
-             .binding = renderer.get_binding_index( reflection_info, "MeshData" ) },
-        };
-        ds_creation.dynamic_buffers = {
-            {.binding = renderer.get_binding_index( reflection_info, "LocalConstants" ), .size = sizeof( chapter4::GpuSceneData ) },
-        };
-
-        chapter4::scene_ds = gpu.create_descriptor_set( ds_creation );
+        chapter4::scene_ds = gpu.create_descriptor_set( {
+            .ssbos = {
+                {
+                    .buffer = chapter4::scene_mesh_instances_ssbo,
+                    .binding = renderer.get_binding_index( reflection_info, "MeshData" )
+                },
+            },
+            .dynamic_buffers = {
+                {
+                    .binding = renderer.get_binding_index( reflection_info, "LocalConstants" ),
+                    .size = sizeof( chapter4::GpuSceneData )
+                },
+            },
+            .layout = gbuffer_layout_handle });
     }
 
     // Calculate main view render items

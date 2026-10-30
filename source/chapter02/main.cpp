@@ -714,7 +714,7 @@ static bool get_mesh_material( raptor::Renderer& renderer, Scene& scene, cgltf_m
 int main( int argc, char** argv ) {
 
     if ( argc < 2 ) {
-        printf( "Usage: chapter2 [path to glTF model]\n");
+        printf( "Usage: chapter2 [path to glTF model]\n" );
         InjectDefault3DModel();
     }
 
@@ -731,7 +731,7 @@ int main( int argc, char** argv ) {
     scratch_allocator.init( rmega( 8 ) );
 
     // window
-    WindowConfiguration wconf{ settings.window_width, settings.window_height, "Chapter 2: Bindless", &MemoryService::instance()->system_allocator};
+    WindowConfiguration wconf{ settings.window_width, settings.window_height, "Chapter 2: Bindless", &MemoryService::instance()->system_allocator };
     raptor::Window window;
     window.init( &wconf );
 
@@ -760,7 +760,7 @@ int main( int argc, char** argv ) {
     GpuVisualProfiler gpu_profiler;
     gpu_profiler.init( allocator, gpu.gpu_timestamp_frequency, 100, dc.gpu_time_queries_per_frame );
 
-    RendererResourcePoolCreation rrpc{ };
+    RendererResourcePoolCreation rrpc{};
     rrpc.buffers = dc.resource_pool_creation.buffers;
 
     Renderer renderer;
@@ -778,17 +778,17 @@ int main( int argc, char** argv ) {
 
     time_service_init();
 
-    Directory cwd{ };
-    directory_current(&cwd);
+    Directory cwd{};
+    directory_current( &cwd );
 
-    char gltf_base_path[512]{ };
-    memcpy( gltf_base_path, argv[ 1 ], strlen( argv[ 1] ) );
+    char gltf_base_path[ 512 ]{};
+    memcpy( gltf_base_path, argv[ 1 ], strlen( argv[ 1 ] ) );
     file_directory_from_path( gltf_base_path );
 
     directory_change( gltf_base_path );
 
-    char gltf_file[512]{ };
-    memcpy( gltf_file, argv[ 1 ], strlen( argv[ 1] ) );
+    char gltf_file[ 512 ]{};
+    memcpy( gltf_file, argv[ 1 ], strlen( argv[ 1 ] ) );
     file_name_from_path( gltf_file );
 
     Scene scene;
@@ -799,13 +799,13 @@ int main( int argc, char** argv ) {
     directory_change( cwd.path );
 
     // Pipelines
-    PipelineHandle scene_pipelines[ (u32)MeshDrawType::Count ];
+    PipelineHandle scene_pipelines[ ( u32 )MeshDrawType::Count ];
 
     ShaderStateHandle shader_state;
     PipelineLayoutHandle scene_pipeline_layout;
     {
         // Create pipeline state
-        PipelineCreation pipeline_creation{ };
+        PipelineCreation pipeline_creation{};
 
         ArenaScope scoped_allocator( &scratch_allocator );
 
@@ -813,11 +813,11 @@ int main( int argc, char** argv ) {
         path_buffer.init( 1024, scoped_allocator.allocator );
 
         const char* vert_file = "glsl/chapter2/main.vert";
-        char* vert_path = path_buffer.append_use_f("%s%s", RAPTOR_SHADER_FOLDER, vert_file );
+        char* vert_path = path_buffer.append_use_f( "%s%s", RAPTOR_SHADER_FOLDER, vert_file );
         FileReadResult vert_code = file_read_text( vert_path, scoped_allocator.allocator );
 
         const char* frag_file = "glsl/chapter2/main.frag";
-        char* frag_path = path_buffer.append_use_f("%s%s", RAPTOR_SHADER_FOLDER, frag_file );
+        char* frag_path = path_buffer.append_use_f( "%s%s", RAPTOR_SHADER_FOLDER, frag_file );
         FileReadResult frag_code = file_read_text( frag_path, scoped_allocator.allocator );
 
         // Vertex input
@@ -865,12 +865,12 @@ int main( int argc, char** argv ) {
         pipeline_creation.layout = scene_pipeline_layout;
         pipeline_creation.render_pass_output = gpu.get_swapchain_output();
         pipeline_creation.name = "scene_no_cull";
-        scene_pipelines[ (u32)MeshDrawType::NoCull_Opaque ] = renderer.create_pipeline( shader_reflection, pipeline_creation );
+        scene_pipelines[ ( u32 )MeshDrawType::NoCull_Opaque ] = renderer.create_pipeline( shader_reflection, pipeline_creation );
 
         // Create opaque cull pipeline
         pipeline_creation.rasterization.cull_mode = VK_CULL_MODE_BACK_BIT;
         pipeline_creation.name = "scene_cull";
-        scene_pipelines[ (u32)MeshDrawType::Cull_Opaque ] = renderer.create_pipeline( shader_reflection, pipeline_creation );
+        scene_pipelines[ ( u32 )MeshDrawType::Cull_Opaque ] = renderer.create_pipeline( shader_reflection, pipeline_creation );
 
         // Add blend state for transparent pipelines
         pipeline_creation.blend_state.blend_states = {
@@ -884,12 +884,12 @@ int main( int argc, char** argv ) {
         // Create transparent no cull pipeline
         pipeline_creation.rasterization.cull_mode = VK_CULL_MODE_NONE;
         pipeline_creation.name = "scene_no_cull_transparent";
-        scene_pipelines[ (u32)MeshDrawType::NoCull_Transparent ] = renderer.create_pipeline( shader_reflection, pipeline_creation );
+        scene_pipelines[ ( u32 )MeshDrawType::NoCull_Transparent ] = renderer.create_pipeline( shader_reflection, pipeline_creation );
 
         // Create transparent cull pipeline
         pipeline_creation.rasterization.cull_mode = VK_CULL_MODE_BACK_BIT;
         pipeline_creation.name = "scene_cull_transparent";
-        scene_pipelines[ (u32)MeshDrawType::Cull_Transparent ] = renderer.create_pipeline( shader_reflection, pipeline_creation );
+        scene_pipelines[ ( u32 )MeshDrawType::Cull_Transparent ] = renderer.create_pipeline( shader_reflection, pipeline_creation );
 
         cgltf_data* gltf_data = scene.gltf_scene;
         cgltf_scene* root_gltf_scene = gltf_data->scene;
@@ -914,16 +914,15 @@ int main( int argc, char** argv ) {
             node_stack.pop();
             cgltf_node& node = gltf_data->nodes[ node_index ];
 
-            glm::mat4 local_matrix{ };
+            glm::mat4 local_matrix{};
 
-            if ( node.has_matrix  ) {
+            if ( node.has_matrix ) {
                 // CGLM and glTF have the same matrix layout, just memcopy it
                 memcpy( &local_matrix, node.matrix, sizeof( glm::mat4 ) );
-            }
-            else {
+            } else {
                 glm::vec3 node_scale{ 1.0f, 1.0f, 1.0f };
                 if ( node.has_scale ) {
-                    node_scale = glm::vec3{ node.scale[0], node.scale[1], node.scale[2] };
+                    node_scale = glm::vec3{ node.scale[ 0 ], node.scale[ 1 ], node.scale[ 2 ] };
                 }
 
                 glm::vec3 node_translation{ 0.f, 0.f, 0.f };
@@ -961,14 +960,14 @@ int main( int argc, char** argv ) {
 
             glm::mat4 final_matrix = local_matrix;
             i32 node_parent = node_parents[ node_index ];
-            while( node_parent != -1 ) {
+            while ( node_parent != -1 ) {
                 final_matrix = node_matrix[ node_parent ] * final_matrix;
                 node_parent = node_parents[ node_parent ];
             }
 
             // Gltf primitives are conceptually submeshes.
             for ( u32 primitive_index = 0; primitive_index < mesh.primitives_count; ++primitive_index ) {
-                MeshDraw mesh_draw{ };
+                MeshDraw mesh_draw{};
 
                 mesh_draw.model = final_matrix;
 
@@ -1015,8 +1014,7 @@ int main( int argc, char** argv ) {
     }
 
     // Scene globals and all per-draw records share one persistently mapped SSBO.
-    const VkDeviceSize scene_buffer_size =
-        sizeof( SceneData ) + sizeof( DrawData ) * scene.mesh_draws.size;
+    const VkDeviceSize scene_buffer_size = sizeof( SceneData ) + sizeof( DrawData ) * scene.mesh_draws.size;
 
     scene.scene_buffer = gpu.create_buffer( {
         .size = scene_buffer_size,
@@ -1027,17 +1025,15 @@ int main( int argc, char** argv ) {
         .name = "scene_buffer" } );
 
     PipelineHandle scene_no_cull = scene_pipelines[ ( u32 )MeshDrawType::NoCull_Opaque ];
-    DescriptorSetLayoutHandle layout_handle =
-        gpu.get_descriptor_set_layout( scene_no_cull, k_material_descriptor_set_index );
+    DescriptorSetLayoutHandle layout_handle = gpu.get_descriptor_set_layout( scene_no_cull, k_material_descriptor_set_index );
     ShaderReflectionInfo* reflection_info = renderer.get_shader_reflection( scene_no_cull );
 
-    DescriptorSetCreation ds_creation{ };
-    ds_creation.layout = layout_handle;
-    ds_creation.ssbos = {
-        { .buffer = scene.scene_buffer,
-          .binding = renderer.get_binding_index( reflection_info, "scene" ) }
-    };
-    scene.scene_descriptor_set = gpu.create_descriptor_set( ds_creation );
+    scene.scene_descriptor_set = gpu.create_descriptor_set( { 
+        .ssbos = { {
+            .buffer = scene.scene_buffer,
+            .binding = renderer.get_binding_index( reflection_info, "scene" ) }
+        },
+        .layout = layout_handle } );
 
     i64 begin_frame_tick = time_now();
 
@@ -1145,9 +1141,9 @@ int main( int argc, char** argv ) {
 
             gfx_cb->push_marker( "Frame" );
 
-            Span<const ImageViewHandle> render_targets{ gpu.get_current_swapchain_image_view() };
-            Span<const VkAttachmentLoadOp> load_operations{ VK_ATTACHMENT_LOAD_OP_CLEAR };
-            Span<const VkClearValue> clear_values{
+            const ImageViewHandle render_targets[] = { gpu.get_current_swapchain_image_view() };
+            const VkAttachmentLoadOp load_operations[] = { VK_ATTACHMENT_LOAD_OP_CLEAR };
+            const VkClearValue clear_values[] = {
                 VkClearValue{ .color = { 0.3f, 0.3f, 0.3f, 1.0f } },
             };
             VkClearValue depth_stencil_clear{ .depthStencil = { 1.0f, 0 } };

@@ -25,6 +25,8 @@ struct Span {
     constexpr Type&         operator[]( const sizet index )             { return data[ index ]; }
     constexpr const Type&   operator[]( const sizet index ) const       { return data[ index ]; }
 
+    Span&                   operator=( std::initializer_list<Type> )    = delete;
+    Span&                   operator=( const Span& other )              = default;
 
     constexpr sizet         constexpr_size()                            { return size; }
 

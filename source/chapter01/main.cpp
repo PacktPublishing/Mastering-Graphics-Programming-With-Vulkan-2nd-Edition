@@ -792,7 +792,7 @@ int main( int argc, char** argv ) {
         pipeline_creation.rasterization.cull_mode = VK_CULL_MODE_BACK_BIT;
 
         // Descriptor set layout
-        DescriptorSetLayoutCreation descriptor_set_layout_creation{
+        dsl = gpu.create_descriptor_set_layout( {
             .bindings = {
                 { 0,VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 1 }, // SceneBuffer
                 { 2,VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 1 }, // diffuseTexture
@@ -802,16 +802,11 @@ int main( int argc, char** argv ) {
                 { 6,VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 1 }, // normalTexture
             },
             .set_index = 1,
-            .name = "default_descriptor_set_layout"
-        };
-        // Setting it into pipeline
-        dsl = gpu.create_descriptor_set_layout( descriptor_set_layout_creation );
+            .name = "default_descriptor_set_layout" });
 
-        PipelineLayoutCreation pipeline_layout_creation = {
+        pl = gpu.create_pipeline_layout( {
             .layouts = { gpu.bindless_descriptor_set_layout, dsl },
-            .name = "default_pipeline_layout"
-        };
-        pl = gpu.create_pipeline_layout( pipeline_layout_creation );
+            .name = "default_pipeline_layout" });
 
         pipeline_creation.layout = pl;
 
@@ -1027,15 +1022,7 @@ int main( int argc, char** argv ) {
                 RASSERTM( mesh_primitive.material != nullptr, "Mesh with no material is not supported!" );
                 cgltf_material& material = *mesh_primitive.material;
 
-                // Descriptor Set
-                DescriptorSetCreation ds_creation{};
-                ds_creation.layout = dsl;
-
                 TextureDescriptor set_textures[ 5 ]{ };
-
-                ds_creation.ssbos = {
-                    { .buffer = scene_buffer, .binding = 0 }
-                };
 
                 if ( material.has_pbr_metallic_roughness ) {
                     mesh_draw.draw_data.base_color_factor = {
@@ -1158,15 +1145,13 @@ int main( int argc, char** argv ) {
                     set_textures[ 4 ] = { .texture = dummy_texture_view, .binding = 6 };
                 }
 
-                ds_creation.textures = {
-                    set_textures[0],
-                    set_textures[1],
-                    set_textures[2],
-                    set_textures[3],
-                    set_textures[4],
-                };
-
-                mesh_draw.descriptor_set = gpu.create_descriptor_set( ds_creation );
+                // Descriptor Set
+                mesh_draw.descriptor_set = gpu.create_descriptor_set( {
+                    .textures = set_textures,
+                    .ssbos = {
+                     { .buffer = scene_buffer, .binding = 0 }
+                    },
+                    .layout = dsl });
 
                 mesh_draw.draw_index = mesh_draws.size;
                 mesh_draws.push( mesh_draw );
@@ -1327,12 +1312,13 @@ int main( int argc, char** argv ) {
                     .layout = VK_IMAGE_LAYOUT_ATTACHMENT_OPTIMAL
                 }
             );
+            gfx_cb->flush_barriers();
 
             gfx_cb->push_marker( "Frame" );
 
-            Span<const ImageViewHandle> render_targets{ gpu.get_current_swapchain_image_view() };
-            Span<const VkAttachmentLoadOp> load_operations{ VK_ATTACHMENT_LOAD_OP_CLEAR };
-            Span<const VkClearValue> clear_values{
+            const ImageViewHandle render_targets[] = { gpu.get_current_swapchain_image_view() };
+            const VkAttachmentLoadOp load_operations[] = { VK_ATTACHMENT_LOAD_OP_CLEAR };
+            const VkClearValue clear_values[] = {
                 VkClearValue{ .color = { 0.3f, 0.3f, 0.3f, 1.0f } },
             };
             VkClearValue depth_stencil_clear{ .depthStencil = { 1.0f, 0 } };
@@ -1390,6 +1376,7 @@ int main( int argc, char** argv ) {
                     .layout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR
                 }
             );
+            gfx_cb->flush_barriers();
 
             // Send commands to GPU
             gpu.gpu_profiler->end_command_buffer( gfx_cb );
