@@ -14,12 +14,6 @@ struct StaticArray {
     StaticArray() = default;
     StaticArray( std::initializer_list<T> list );
 
-    void operator=( const Span<const T>& other ) {
-        RASSERT( other.size <= capacity_ );
-        size = ( u32 )other.size;
-        memcpy( data, other.data, sizeof( T ) * size );
-    }
-
     void                        push( const T& element );
     T&                          push_use();                 // Grow the size and return T to be filled.
 

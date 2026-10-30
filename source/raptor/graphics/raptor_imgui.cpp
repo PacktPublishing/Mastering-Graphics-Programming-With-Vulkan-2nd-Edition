@@ -287,7 +287,7 @@ void ImGuiService::init( void* configuration ) {
     pipeline_creation.shader = shader;
     pipeline_creation.name = "Pipeline_ImGui";
 
-    pipeline_creation.blend_state.blend_states = Span<const BlendState>{
+    pipeline_creation.blend_state.blend_states = {
         {
             .source_color = VK_BLEND_FACTOR_SRC_ALPHA,
             .destination_color = VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA,

@@ -15,6 +15,7 @@ struct Span {
     // Note: Span should have const Type to compile.
     constexpr               Span( std::initializer_list<Type> list )    : data( list.begin() ), size( list.size() ) {}
     template<sizet N>       Span(Type(&c_array)[N])                     : data(c_array), size(ArraySize(c_array)) {}
+    constexpr               Span( const Span& other )                   = default;
 
     constexpr const Type*   begin() const                               { return &data[ 0 ]; }
     constexpr Type*         begin()                                     { return &data[ 0 ]; }
