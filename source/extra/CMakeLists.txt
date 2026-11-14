@@ -104,7 +104,7 @@ else()
         ../../binaries/assimp/linux/lib)
 
     target_include_directories(${PROJECT_NAME} PRIVATE
-        ${SDL3_INCLUDE_DIRS})
+        SDL3::SDL3)
 endif()
 
 if (WIN32)

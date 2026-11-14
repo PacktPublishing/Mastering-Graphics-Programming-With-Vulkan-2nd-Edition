@@ -153,7 +153,7 @@ if (WIN32)
     )
 else()
     target_include_directories(RaptorApp PRIVATE
-        ${SDL3_INCLUDE_DIRS})
+        SDL3::SDL3)
 endif()
 
 # RaptorExternal #########################################################
@@ -265,7 +265,7 @@ else()
     )
     target_include_directories(RaptorExternal PRIVATE
         ${Vulkan_INCLUDE_DIRS}
-        ${SDL3_INCLUDE_DIRS}
+        SDL3::SDL3
         source/raptor
         source)
 endif()
@@ -358,7 +358,7 @@ else()
         binaries/assimp/linux/lib)
 
     target_include_directories(RaptorGraphics PRIVATE
-        ${SDL3_INCLUDE_DIRS})
+        SDL3::SDL3)
 endif()
 
 if (WIN32)

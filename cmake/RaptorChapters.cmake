@@ -84,7 +84,7 @@ function(raptor_link_chapter_deps target_name)
 
   else()
     target_include_directories(${target_name} PRIVATE
-      ${SDL3_INCLUDE_DIRS}
+      SDL3::SDL3
     )
 
     target_link_directories(${target_name} PRIVATE
