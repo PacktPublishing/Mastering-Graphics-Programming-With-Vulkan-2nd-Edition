@@ -460,6 +460,8 @@ int main( int argc, char** argv ) {
     dc.debug_options.set( settings.gpu_debug );
     dc.present_mode = settings.gpu_present_mode;
     dc.set_window( window.width, window.height, window.platform_handle ).set_allocator( allocator );
+    dc.descriptor_pool_creation.combined_image_samplers = 1024;
+
     GpuDevice gpu;
     gpu.init( dc );
 
