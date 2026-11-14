@@ -17,7 +17,8 @@
         "gpu": {
             "debug": "Default",
             "present_mode": "VSync",
-            "buffer_pool": 1024
+            "buffer_pool": 1024,
+            "images_pool": 1024
         },
         "upscale": {
             "enabled": false,

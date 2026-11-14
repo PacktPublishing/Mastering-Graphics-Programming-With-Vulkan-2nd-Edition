@@ -30,6 +30,7 @@ struct AppSettings {
     // gpu
     bool            gpu_validation          = false;
     u32             gpu_buffer_pool         = 1024;
+    u32             gpu_images_pool         = 1024;
     bool            gpu_timestamps          = true;
 
     VulkanDebugMode::Enum gpu_debug         = VulkanDebugMode::Default;   // replaces gpu_validation

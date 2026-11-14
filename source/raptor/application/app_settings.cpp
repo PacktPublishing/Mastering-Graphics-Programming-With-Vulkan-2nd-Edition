@@ -139,10 +139,10 @@ static void apply_section( AppSettings& settings, const json& section_json, cstr
 
     section.read( "/gpu/validation", settings.gpu_validation );
     section.read( "/gpu/buffer_pool", settings.gpu_buffer_pool );
+    section.read( "/gpu/images_pool", settings.gpu_images_pool );
     section.read( "/gpu/timestamps", settings.gpu_timestamps );
     section.read_enum( "/gpu/debug", settings.gpu_debug, VulkanDebugMode::s_value_names, VulkanDebugMode::Count );
     section.read_enum( "/gpu/present_mode", settings.gpu_present_mode, PresentMode::s_value_names, PresentMode::Count );
-    section.read( "/gpu/buffer_pool", settings.gpu_buffer_pool );
 
     section.read( "/upscale/enabled", settings.upscale_enabled );
     section.read( "/upscale/render_scale", settings.upscale_render_scale );
