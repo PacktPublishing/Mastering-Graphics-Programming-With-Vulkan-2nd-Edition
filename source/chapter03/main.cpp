@@ -222,10 +222,9 @@ namespace chapter3 {
                 MeshInstance* mesh_instance = render_mesh.mesh_instance;
                 Mesh& mesh = render_scene->meshes[ mesh_instance->mesh_index ];
 
+                gpu_commands->set_depth_bias_enabled( false );
                 gpu_commands->bind_vertex_buffer( mesh.position_buffer, 0, mesh.position_offset );
-
                 gpu_commands->bind_index_buffer( mesh.index_buffer, mesh.index_offset_bytes, mesh.index_type );
-
                 gpu_commands->bind_descriptor_set( { renderer->gpu->bindless_descriptor_set, chapter3::scene_ds }, { chapter3::scene_cb_offset } );
 
                 gpu_commands->draw_indexed( raptor::TopologyType::Triangle, mesh.index_count, 1, 0, 0, mesh_instance->gpu_mesh_instance_index );
