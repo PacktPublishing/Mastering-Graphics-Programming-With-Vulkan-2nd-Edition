@@ -17,4 +17,9 @@ if (WIN32)
     VK_NO_PROTOTYPES
   )
   target_compile_options(RaptorBuildOptions INTERFACE /MP)
+else()
+  target_compile_definitions(RaptorBuildOptions INTERFACE
+    VK_USE_PLATFORM_XCB_KHR
+    VK_NO_PROTOTYPES
+  )
 endif()

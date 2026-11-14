@@ -68,6 +68,10 @@ if (WIN32)
     target_compile_options(${PROJECT_NAME} PRIVATE
         /MP
     )
+else()
+    target_compile_definitions(${PROJECT_NAME} PRIVATE
+        VK_USE_PLATFORM_XCB_KHR
+    )
 endif()
 
 target_compile_definitions(${PROJECT_NAME} PRIVATE

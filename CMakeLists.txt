@@ -154,6 +154,9 @@ if (WIN32)
 else()
     target_include_directories(RaptorApp PRIVATE
         SDL3::SDL3)
+    target_compile_definitions(RaptorApp PRIVATE
+        VK_USE_PLATFORM_XCB_KHR
+    )
 endif()
 
 # RaptorExternal #########################################################
@@ -268,6 +271,9 @@ else()
         SDL3::SDL3
         source/raptor
         source)
+    target_compile_definitions(RaptorExternal PRIVATE
+        VK_USE_PLATFORM_XCB_KHR
+    )
 endif()
 
 target_compile_definitions(RaptorExternal PRIVATE VK_NO_PROTOTYPES)

@@ -211,6 +211,7 @@ static const char* s_base_instance_extensions[] = {
     VK_KHR_WAYLAND_SURFACE_EXTENSION_NAME,
 #elif defined(VK_USE_PLATFORM_XCB_KHR)
     VK_KHR_XCB_SURFACE_EXTENSION_NAME,
+    "VK_KHR_xlib_surface", // SDL wants the xlib extension always enabled
 #elif defined(VK_USE_PLATFORM_XLIB_KHR)
     VK_KHR_XLIB_SURFACE_EXTENSION_NAME,
 #elif defined(VK_USE_PLATFORM_DISPLAY_KHR)
@@ -1002,7 +1003,8 @@ void GpuDevice::init( const GpuDeviceCreation& creation ) {
     // Create surface
     SDL_Window* window = (SDL_Window*)creation.window;
     if ( SDL_Vulkan_CreateSurface( window, vulkan_instance, vulkan_allocation_callbacks, &vulkan_window_surface ) == false ) {
-        rprint( "Failed to create Vulkan surface.\n" );
+        rprint( "Failed to create Vulkan surface. %s\n", SDL_GetError() );
+        exit( -1 );
     }
 
     sdl_window = window;
@@ -1387,11 +1389,15 @@ void GpuDevice::init( const GpuDeviceCreation& creation ) {
     // [TAG: BINDLESS]
     // Bindless resources creation
     if ( bindless_supported ) {
+        const VkDescriptorSetLayoutBinding bindless_bindings[] = {
+            { k_bindless_texture_binding, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, k_max_bindless_resources },
+            { k_bindless_image_binding, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, k_max_bindless_resources },
+            { k_bindless_sampler_binding, VK_DESCRIPTOR_TYPE_SAMPLER, k_max_bindless_resources },
+            { k_bindless_ssbo_binding, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, k_max_bindless_resources }
+        };
+
         bindless_descriptor_set_layout = create_descriptor_set_layout( {
-            .bindings = { { k_bindless_texture_binding, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, k_max_bindless_resources },
-                          { k_bindless_image_binding, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, k_max_bindless_resources },
-                          { k_bindless_sampler_binding, VK_DESCRIPTOR_TYPE_SAMPLER, k_max_bindless_resources },
-                          { k_bindless_ssbo_binding, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, k_max_bindless_resources } },
+            .bindings = bindless_bindings,
             .set_index = 0, .bindless = 1, .dynamic = 0, .name = "BindlessLayout" } );
 
         bindless_descriptor_set = create_descriptor_set( { .layout = bindless_descriptor_set_layout, .name = "bindless_set" } );
