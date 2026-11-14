@@ -22,7 +22,7 @@ Marco Castorina, Gabriel Sassone</p>
 </p>
 <details open> 
   <summary><h2>About the book</summary>
-<a href="https://www.packtpub.com/en-us/product/mastering-graphics-programming-with-vulkan-second-edition/9781806116379">
+<a href="https://www.packtpub.com/en-us/product/mastering-graphics-programming-with-vulkan-9781806116362">
 <img src="https://content.packt.com/B34102/cover_image_small.jpg" alt="Mastering Graphics Programming With Vulkan, Second Edition" height="256px" align="right">
 </a>
 
