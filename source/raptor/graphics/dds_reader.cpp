@@ -12,7 +12,7 @@
 
 typedef u32 UINT;
 typedef u8 BYTE;
-#if !defined(DWORD)
+#if !defined(_WIN32)
 typedef u32 DWORD;
 #endif
 
