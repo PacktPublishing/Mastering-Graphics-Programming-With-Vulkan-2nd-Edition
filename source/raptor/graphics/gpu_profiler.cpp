@@ -957,8 +957,8 @@ void GpuProfiler::push_timestamp( CommandBuffer* cb, cstring name ) {
 
     const u32 base_query_index = timestamp_base_offset( cb, queries_per_thread );
 
-    vkCmdWriteTimestamp( cb->vk_command_buffer, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, thread_frame_pool->vulkan_timestamp_query_pool,
-                         base_query_index + time_query->start_query_index );
+    vkCmdWriteTimestamp2( cb->vk_command_buffer, VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT, thread_frame_pool->vulkan_timestamp_query_pool,
+                          base_query_index + time_query->start_query_index );
 }
 
 void GpuProfiler::pop_timestamp( CommandBuffer* cb ) {
@@ -968,8 +968,8 @@ void GpuProfiler::pop_timestamp( CommandBuffer* cb ) {
 
     const u32 base_query_index = timestamp_base_offset( cb, queries_per_thread );
 
-    vkCmdWriteTimestamp( cb->vk_command_buffer, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, thread_frame_pool->vulkan_timestamp_query_pool,
-                         base_query_index + time_query->end_query_index );
+    vkCmdWriteTimestamp2( cb->vk_command_buffer, VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT, thread_frame_pool->vulkan_timestamp_query_pool,
+                          base_query_index + time_query->end_query_index );
 }
 
 GpuThreadFrameQueryPools* GpuProfiler::get_thread_frame_pools( u32 frame_index, u32 thread_index, CommandQueueType queue_type ) {
