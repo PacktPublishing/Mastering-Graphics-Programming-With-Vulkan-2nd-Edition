@@ -1035,10 +1035,8 @@ void CommandBuffer::upload_texture_data( ImageHandle texture_handle, void* textu
                        VK_ACCESS_2_TRANSFER_WRITE_BIT, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
                        gpu_device->vulkan_main_queue_family } );
     flush_barriers();
-    /*util_add_image_barrier_ext( gpu_device,vk_command_buffer, texture, RESOURCE_STATE_COPY_SOURCE,
-                                0, 1, 0, 1, false, gpu_device->vulkan_transfer_queue_family, gpu_device->vulkan_main_queue_family,
-                                QueueType::CopyTransfer, QueueType::Graphics );*/
 }
+
 void CommandBuffer::copy_image( ImageHandle src_h, ImageHandle dst_h, const ImageSyncState& final_dst ) {
 
     copy_image( src_h, ImageSubResource{  }, dst_h, ImageSubResource{ }, final_dst );
@@ -1114,14 +1112,18 @@ void CommandBuffer::copy_image( ImageHandle src_h, ImageSubResource src_sub,
                                 ImageHandle dst_h, ImageSubResource dst_sub,
                                 const ImageSyncState& final_dst ) {
 
-    copy_image_mip0( src_h, src_sub, dst_h, dst_sub );
-
     Image* dst = gpu_device->get_image( dst_h );
     RASSERT( dst && dst->vk_image != VK_NULL_HANDLE );
     const bool dst_is_depth = TextureFormat::is_depth_only( dst->vk_format );
 
-    const VkImageAspectFlags aspect =
-        dst_is_depth ? VK_IMAGE_ASPECT_DEPTH_BIT : VK_IMAGE_ASPECT_COLOR_BIT;
+    const VkImageAspectFlags aspect = dst_is_depth ? VK_IMAGE_ASPECT_DEPTH_BIT : VK_IMAGE_ASPECT_COLOR_BIT;
+
+    // Cache the dst sync state before generating mips.
+    // Sync state is per image, non per mip.
+    ImageSyncState starting_mip_sync = dst->sync_state;
+    starting_mip_sync.layout = VK_IMAGE_LAYOUT_UNDEFINED;
+
+    copy_image_mip0( src_h, src_sub, dst_h, dst_sub );
 
     // Optional mip generation
     if ( dst->mip_level_count > 1 ) {
@@ -1136,6 +1138,15 @@ void CommandBuffer::copy_image( ImageHandle src_h, ImageSubResource src_sub,
         to_transfer_src.stage = VK_PIPELINE_STAGE_2_TRANSFER_BIT;
         to_transfer_src.access = VK_ACCESS_2_TRANSFER_READ_BIT;
         to_transfer_src.layout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
+        to_transfer_src.owner_queue_family = starting_mip_sync.owner_queue_family;
+
+        ImageSyncState to_transfer_dst{};
+        to_transfer_dst.stage = VK_PIPELINE_STAGE_2_TRANSFER_BIT;
+        to_transfer_dst.access = VK_ACCESS_2_TRANSFER_WRITE_BIT;
+        to_transfer_dst.layout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
+        to_transfer_dst.owner_queue_family = starting_mip_sync.owner_queue_family;
+        
+        // Prepare mip 0 as TRANSFER_SRC. The tracked state is the one of mip 0 here.
 
         const VkImageSubresourceRange dst_range =
         raptor::range_aspect( aspect,
@@ -1154,13 +1165,7 @@ void CommandBuffer::copy_image( ImageHandle src_h, ImageSubResource src_sub,
                                       (u32)mip_index, 1,
                                       dst_sub.array_base_layer, 1 );
 
-            // Transition current mip to TRANSFER_DST
-            ImageSyncState to_transfer_dst{};
-            to_transfer_dst.stage = VK_PIPELINE_STAGE_2_TRANSFER_BIT;
-            to_transfer_dst.access = VK_ACCESS_2_TRANSFER_WRITE_BIT;
-            to_transfer_dst.layout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
-
-            add_image_barrier( dst_h, mip_range, to_transfer_dst );
+            add_image_barrier( dst_h, mip_range, starting_mip_sync, to_transfer_dst );
             flush_barriers();
 
             VkImageBlit blit{};
@@ -1188,21 +1193,13 @@ void CommandBuffer::copy_image( ImageHandle src_h, ImageSubResource src_sub,
                             dst->vk_image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
                             1, &blit, VK_FILTER_LINEAR );
 
-            // Prepare current mip as TRANSFER_SRC for next iteration
-            ImageSyncState to_transfer_src_next{};
-            to_transfer_src_next.stage = VK_PIPELINE_STAGE_2_TRANSFER_BIT;
-            to_transfer_src_next.access = VK_ACCESS_2_TRANSFER_READ_BIT;
-            to_transfer_src_next.layout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
-
-            add_image_barrier( dst_h, mip_range, to_transfer_src_next );
-
-            if ( mip_index + 1 < (int)dst->mip_level_count ) {
-                flush_barriers();
-            }
+            // Current mip becomes TRANSFER_SRC, for the next iteration and for the final transition.
+            add_image_barrier( dst_h, mip_range, to_transfer_dst, to_transfer_src );
+            flush_barriers();
         }
     }
 
-    // Final transition
+    // Final transition, every mip is TRANSFER_SRC.
     {
         const VkImageSubresourceRange full_range =
             raptor::range_aspect( aspect,
