@@ -12,6 +12,9 @@
 
 typedef u32 UINT;
 typedef u8 BYTE;
+#if !defined(DWORD)
+typedef u32 DWORD;
+#endif
 
 #define MAKEFOURCC(ch0, ch1, ch2, ch3)                              \
                 ((DWORD)(BYTE)(ch0) | ((DWORD)(BYTE)(ch1) << 8) |   \
