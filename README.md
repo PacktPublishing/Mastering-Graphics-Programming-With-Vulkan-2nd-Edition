@@ -1,7 +1,7 @@
 <a href="https://www.packtpub.com/en-us/unlock"><img src="https://drive.google.com/uc?export=view&id=1lQCTQQ8iV5pGuPA1n5wuds-3pwJi0OD_"></a>
 <h1 align="center">
 Mastering Graphics Programming With Vulkan, Second Edition</h1>
-<p align="center">This is the code repository for <a href ="https://www.packtpub.com/en-us/product/mastering-graphics-programming-with-vulkan-second-edition/9781806116379"> Mastering Graphics Programming With Vulkan, Second Edition</a>, published by Packt.
+<p align="center">This is the code repository for <a href ="https://www.packtpub.com/en-us/product/mastering-graphics-programming-with-vulkan-9781806116362"> Mastering Graphics Programming With Vulkan, Second Edition</a>, published by Packt.
 </p>
 
 <h2 align="center">
@@ -11,13 +11,13 @@ Develop a modern rendering engine featuring GPU-driven rendering, advanced light
 Marco Castorina, Gabriel Sassone</p>
 
 <p align="center">
-   <a href="" alt="Discord" title="Learn more on the Discord server"><img width="32px" src="https://cliply.co/wp-content/uploads/2021/08/372108630_DISCORD_LOGO_400.gif"/></a>
-  &#8287;&#8287;&#8287;&#8287;&#8287;
+  <!--<a href="" alt="Discord" title="Learn more on the Discord server"><img width="32px" src="https://cliply.co/wp-content/uploads/2021/08/372108630_DISCORD_LOGO_400.gif"/></a>
+  &#8287;&#8287;&#8287;&#8287;&#8287;-->
   <a href="https://packt.link/free-ebook/9781806116379"><img width="32px" alt="Free PDF" title="Free PDF" src="https://cdn-icons-png.flaticon.com/512/4726/4726010.png"/></a>
  &#8287;&#8287;&#8287;&#8287;&#8287;
   <a href="https://packt.link/gbp/9781806116379"><img width="32px" alt="Graphic Bundle" title="Graphic Bundle" src="https://cdn-icons-png.flaticon.com/512/2659/2659360.png"/></a>
   &#8287;&#8287;&#8287;&#8287;&#8287;
-   <a href=""><img width="32px" alt="Amazon" title="Get your copy" src="https://cdn-icons-png.flaticon.com/512/15466/15466027.png"/></a>
+   <a href="https://www.amazon.com/Mastering-Graphics-Programming-Vulkan-GPU-driven/dp/1806116375/"><img width="32px" alt="Amazon" title="Get your copy" src="https://cdn-icons-png.flaticon.com/512/15466/15466027.png"/></a>
   &#8287;&#8287;&#8287;&#8287;&#8287;
 </p>
 <details open> 
